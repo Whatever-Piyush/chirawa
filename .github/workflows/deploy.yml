@@ -1,0 +1,115 @@
+name: Deploy to Hetzner
+
+on:
+  push:
+    branches: [main]
+
+# Only one deploy at a time — prevents race conditions
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests before deploy
+        run: pnpm --filter @chirawa/api test
+        env:
+          NODE_ENV:        test
+          DATABASE_URL:    postgresql://postgres:postgres@localhost:5432/test
+          REDIS_URL:       redis://localhost:6379
+          JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY_TEST }}
+          JWT_PUBLIC_KEY:  ${{ secrets.JWT_PUBLIC_KEY_TEST }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context:   .
+          push:      true
+          tags: |
+            ghcr.io/${{ github.repository }}/api:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/api:latest
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+      - name: Deploy to Hetzner
+        uses: appleboy/ssh-action@v1
+        with:
+          host:    ${{ secrets.HETZNER_HOST }}
+          username: appuser
+          key:     ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            set -e
+            echo "🚀 Deploying ${{ github.sha }}..."
+
+            cd /opt/chirawa
+
+            # Pull latest code
+            git pull origin main
+
+            # Pull new Docker image
+            docker pull ghcr.io/${{ github.repository }}/api:${{ github.sha }}
+
+            # Install deps (if package.json changed)
+            pnpm install --frozen-lockfile --prod=false
+
+            # Run DB migrations (zero-downtime — Prisma migrate deploy)
+            pnpm --filter @chirawa/api db:migrate:prod
+
+            # Zero-downtime reload — PM2 starts new workers before killing old ones
+            pm2 reload ecosystem.config.js --env production
+
+            pm2 save
+
+            echo "✅ Deploy complete: ${{ github.sha }}"
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1
+        with:
+          host:    ${{ secrets.HETZNER_HOST }}
+          username: appuser
+          key:     ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            sleep 5
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://api.chirawa.in/health)
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Health check passed"
+            else
+              echo "❌ Health check FAILED — status $STATUS"
+              pm2 logs api --lines 20
+              exit 1
+            fi
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Deploy failed for commit ${{ github.sha }}"
+          # Add WhatsApp/Slack notification here
