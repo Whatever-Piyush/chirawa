@@ -6,20 +6,22 @@ import sensible from '@fastify/sensible';
 import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env';
 
-import prismaPlugin   from './shared/plugins/prisma.plugin';
-import redisPlugin    from './shared/plugins/redis.plugin';
-import realtimePlugin from './shared/plugins/realtime.plugin';
+import prismaPlugin        from './shared/plugins/prisma.plugin';
+import redisPlugin         from './shared/plugins/redis.plugin';
+import realtimePlugin      from './shared/plugins/realtime.plugin';
+import notificationsPlugin from './modules/notifications/notifications.plugin';
 
-import authRoutes     from './modules/auth/auth.routes';
-import usersRoutes    from './modules/users/users.routes';
-import catalogRoutes  from './modules/catalog/catalog.routes';
-import cartRoutes     from './modules/cart/cart.routes';
-import pricingRoutes  from './modules/pricing/pricing.routes';
-import ordersRoutes   from './modules/orders/orders.routes';
-import paymentsRoutes from './modules/payments/payments.routes';
-import deliveryRoutes from './modules/delivery/delivery.routes';
-import adminRoutes    from './modules/admin/admin.routes';
-import loyaltyRoutes  from './modules/loyalty/loyalty.routes';
+import authRoutes          from './modules/auth/auth.routes';
+import usersRoutes         from './modules/users/users.routes';
+import catalogRoutes       from './modules/catalog/catalog.routes';
+import cartRoutes          from './modules/cart/cart.routes';
+import pricingRoutes       from './modules/pricing/pricing.routes';
+import ordersRoutes        from './modules/orders/orders.routes';
+import paymentsRoutes      from './modules/payments/payments.routes';
+import deliveryRoutes      from './modules/delivery/delivery.routes';
+import adminRoutes         from './modules/admin/admin.routes';
+import loyaltyRoutes       from './modules/loyalty/loyalty.routes';
+import notificationsRoutes from './modules/notifications/notifications.routes';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -39,7 +41,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   // ── Infrastructure ────────────────────────────────────────────────────────
   await app.register(prismaPlugin);
   await app.register(redisPlugin);
-  await app.register(realtimePlugin); // Socket.io — after prisma + redis
+  await app.register(realtimePlugin);
+  await app.register(notificationsPlugin); // After prisma + redis
 
   // ── HTTP Plugins ──────────────────────────────────────────────────────────
   await app.register(sensible);
@@ -51,13 +54,14 @@ export async function buildApp(): Promise<FastifyInstance> {
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
   await app.register(rateLimit, {
-    global:  true,
-    max:     100,
+    global:     true,
+    max:        100,
     timeWindow: '1 minute',
     errorResponseBuilder: (_req, context) => ({
-      statusCode: 429, error: 'Too Many Requests',
+      statusCode: 429,
+      error:   'Too Many Requests',
       message: `Bahut zyada requests. ${context.after} baad try karein.`,
-      code: 'RATE_LIMIT_EXCEEDED',
+      code:    'RATE_LIMIT_EXCEEDED',
     }),
   });
 
@@ -71,18 +75,25 @@ export async function buildApp(): Promise<FastifyInstance> {
       });
     }
     if (error.validation) {
-      return reply.status(400).send({ statusCode: 400, error: 'Bad Request', message: 'Invalid request data', code: 'VALIDATION_ERROR', details: error.validation });
+      return reply.status(400).send({
+        statusCode: 400, error: 'Bad Request',
+        message: 'Invalid request data', code: 'VALIDATION_ERROR',
+        details: error.validation,
+      });
     }
     if (error.statusCode === 429) return reply.status(429).send(error);
     return reply.status(500).send({
       statusCode: 500, error: 'Internal Server Error',
-      message: env.NODE_ENV === 'production' ? 'Kuch galat ho gaya. Dobara try karein.' : error.message,
+      message: env.NODE_ENV === 'production'
+        ? 'Kuch galat ho gaya. Dobara try karein.'
+        : error.message,
       code: 'INTERNAL_ERROR',
     });
   });
 
   // ── Health Check ──────────────────────────────────────────────────────────
-  app.get('/health', { config: { rateLimit: { max: 300, timeWindow: '1 minute' } } },
+  app.get('/health',
+    { config: { rateLimit: { max: 300, timeWindow: '1 minute' } } },
     async (_req, reply) => reply.send({
       status: 'ok', service: 'chirawa-api',
       timestamp: new Date().toISOString(),
@@ -92,16 +103,17 @@ export async function buildApp(): Promise<FastifyInstance> {
   );
 
   // ── Module Routes ─────────────────────────────────────────────────────────
-  await app.register(authRoutes,     { prefix: '/api/v1/auth' });
-  await app.register(usersRoutes,    { prefix: '/api/v1/users' });
-  await app.register(catalogRoutes,  { prefix: '/api/v1/catalog' });
-  await app.register(cartRoutes,     { prefix: '/api/v1/cart' });
-  await app.register(pricingRoutes,  { prefix: '/api/v1/pricing' });
-  await app.register(ordersRoutes,   { prefix: '/api/v1/orders' });
-  await app.register(paymentsRoutes, { prefix: '/api/v1/payments' });
-  await app.register(deliveryRoutes, { prefix: '/api/v1/delivery' });
-  await app.register(adminRoutes,    { prefix: '/api/v1/admin' });
-  await app.register(loyaltyRoutes,  { prefix: '/api/v1/loyalty' });
+  await app.register(authRoutes,          { prefix: '/api/v1/auth' });
+  await app.register(usersRoutes,         { prefix: '/api/v1/users' });
+  await app.register(catalogRoutes,       { prefix: '/api/v1/catalog' });
+  await app.register(cartRoutes,          { prefix: '/api/v1/cart' });
+  await app.register(pricingRoutes,       { prefix: '/api/v1/pricing' });
+  await app.register(ordersRoutes,        { prefix: '/api/v1/orders' });
+  await app.register(paymentsRoutes,      { prefix: '/api/v1/payments' });
+  await app.register(deliveryRoutes,      { prefix: '/api/v1/delivery' });
+  await app.register(adminRoutes,         { prefix: '/api/v1/admin' });
+  await app.register(loyaltyRoutes,       { prefix: '/api/v1/loyalty' });
+  await app.register(notificationsRoutes, { prefix: '/api/v1/notifications' });
 
   return app;
 }
