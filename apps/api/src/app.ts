@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -5,11 +6,10 @@ import sensible from '@fastify/sensible';
 import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env';
 
-// Infrastructure plugins
-import prismaPlugin from './shared/plugins/prisma.plugin';
-import redisPlugin  from './shared/plugins/redis.plugin';
+import prismaPlugin   from './shared/plugins/prisma.plugin';
+import redisPlugin    from './shared/plugins/redis.plugin';
+import realtimePlugin from './shared/plugins/realtime.plugin';
 
-// Module routes
 import authRoutes     from './modules/auth/auth.routes';
 import usersRoutes    from './modules/users/users.routes';
 import catalogRoutes  from './modules/catalog/catalog.routes';
@@ -36,26 +36,26 @@ export async function buildApp(): Promise<FastifyInstance> {
     genReqId: () => crypto.randomUUID(),
   });
 
-  // ── Infrastructure (register before routes) ───────────────────────────────
+  // ── Infrastructure ────────────────────────────────────────────────────────
   await app.register(prismaPlugin);
   await app.register(redisPlugin);
+  await app.register(realtimePlugin); // Socket.io — after prisma + redis
 
-  // ── Security Plugins ──────────────────────────────────────────────────────
+  // ── HTTP Plugins ──────────────────────────────────────────────────────────
   await app.register(sensible);
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(cors, {
-    origin: env.FRONTEND_URLS.split(',').map((u) => u.trim()),
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    origin:         env.FRONTEND_URLS.split(',').map((u) => u.trim()),
+    credentials:    true,
+    methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
   await app.register(rateLimit, {
-    global: true,
-    max: 100,
+    global:  true,
+    max:     100,
     timeWindow: '1 minute',
     errorResponseBuilder: (_req, context) => ({
-      statusCode: 429,
-      error: 'Too Many Requests',
+      statusCode: 429, error: 'Too Many Requests',
       message: `Bahut zyada requests. ${context.after} baad try karein.`,
       code: 'RATE_LIMIT_EXCEEDED',
     }),
@@ -64,45 +64,27 @@ export async function buildApp(): Promise<FastifyInstance> {
   // ── Global Error Handler ──────────────────────────────────────────────────
   app.setErrorHandler((error, request, reply) => {
     request.log.error({ err: error }, 'Request error');
-
     if (error instanceof Error && 'statusCode' in error && 'code' in error) {
       return reply.status(error.statusCode as number).send({
-        statusCode: error.statusCode,
-        error: error.name,
-        message: error.message,
-        code: error.code,
+        statusCode: error.statusCode, error: error.name,
+        message: error.message, code: error.code,
       });
     }
-
     if (error.validation) {
-      return reply.status(400).send({
-        statusCode: 400,
-        error: 'Bad Request',
-        message: 'Invalid request data',
-        code: 'VALIDATION_ERROR',
-        details: error.validation,
-      });
+      return reply.status(400).send({ statusCode: 400, error: 'Bad Request', message: 'Invalid request data', code: 'VALIDATION_ERROR', details: error.validation });
     }
-
     if (error.statusCode === 429) return reply.status(429).send(error);
-
     return reply.status(500).send({
-      statusCode: 500,
-      error: 'Internal Server Error',
-      message: env.NODE_ENV === 'production'
-        ? 'Kuch galat ho gaya. Dobara try karein.'
-        : error.message,
+      statusCode: 500, error: 'Internal Server Error',
+      message: env.NODE_ENV === 'production' ? 'Kuch galat ho gaya. Dobara try karein.' : error.message,
       code: 'INTERNAL_ERROR',
     });
   });
 
   // ── Health Check ──────────────────────────────────────────────────────────
-  app.get(
-    '/health',
-    { config: { rateLimit: { max: 300, timeWindow: '1 minute' } } },
+  app.get('/health', { config: { rateLimit: { max: 300, timeWindow: '1 minute' } } },
     async (_req, reply) => reply.send({
-      status: 'ok',
-      service: 'chirawa-api',
+      status: 'ok', service: 'chirawa-api',
       timestamp: new Date().toISOString(),
       uptimeSeconds: Math.floor(process.uptime()),
       environment: env.NODE_ENV,
