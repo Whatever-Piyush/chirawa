@@ -22,7 +22,7 @@ services:
     image: redis:7-alpine
     container_name: chirawa_redis
     restart: unless-stopped
-    command: redis-server --requirepass chirawa_redis_dev_password --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass chirawa_redis_dev_password --maxmemory 256mb --maxmemory-policy noeviction
     ports:
       - "6379:6379"
     volumes:

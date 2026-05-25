@@ -297,3 +297,35 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
 
   return { placeOrder, getOrder, getMyOrders, updateOrderStatus, cancelOrder, codCollected };
 }
+
+// ── Enqueue referral unlock when order is delivered ───────────────────────────
+// This is called from the delivery routes (Step 13) — adding the helper here
+export async function enqueueReferralUnlock(
+  prisma: PrismaClient,
+  redis: Redis,
+  orderId: string,
+  customerId: string,
+): Promise<void> {
+  // Check if this customer was referred
+  const redemption = await prisma.referralRedemption.findUnique({
+    where: { referredUserId: customerId },
+  });
+
+  if (!redemption || redemption.refereeCreditStatus === 'credited') return;
+
+  // Enqueue referral unlock job
+  const { Queue } = await import('bullmq');
+  const { QueueNames, JobNames } = await import('../worker/queues');
+  const { env } = await import('../config/env');
+  const Redis2 = (await import('ioredis')).default;
+
+  const connection = new Redis2(env.REDIS_URL, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+  });
+
+  const queue = new Queue(QueueNames.REFERRAL, { connection });
+  await queue.add(JobNames.UNLOCK_REFERRAL, { orderId, referredUserId: customerId });
+  await queue.close();
+  await connection.quit();
+}

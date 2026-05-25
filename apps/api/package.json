@@ -16,7 +16,8 @@
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "worker": "tsx watch src/worker/index.ts"
   },
   "dependencies": {
     "@chirawa/types": "workspace:*",
