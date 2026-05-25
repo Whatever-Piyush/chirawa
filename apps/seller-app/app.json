@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Chirawa Seller",
+    "slug": "chirawa-seller",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1A1A1A"
+    },
+    "android": {
+      "package": "com.chirawa.seller",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundColor": "#1A1A1A"
+      }
+    },
+    "plugins": ["expo-secure-store", "expo-av"]
+  }
+}

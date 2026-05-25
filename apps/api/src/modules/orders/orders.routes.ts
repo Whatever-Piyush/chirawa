@@ -11,96 +11,83 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
 
   app.addHook('preHandler', authenticate);
 
-  // ── POST /api/v1/orders ────────────────────────────────────────────────────
-  app.post(
-    '/',
-    async (request: FastifyRequest<{ Body: PlaceOrderInput }>, reply) => {
-      const parsed = placeOrderSchema.safeParse(request.body);
-      if (!parsed.success) {
-        throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid input');
-      }
+  // POST /api/v1/orders
+  app.post('/', async (request: FastifyRequest<{ Body: PlaceOrderInput }>, reply) => {
+    const parsed = placeOrderSchema.safeParse(request.body);
+    if (!parsed.success) throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid input');
 
-      const order = await ordersService.placeOrder(
-        request.auth!.userId,
-        parsed.data,
-      );
+    const order = await ordersService.placeOrder(request.auth!.userId, parsed.data);
 
-      // For online payments, create Razorpay order immediately
-      if (parsed.data.paymentMethod !== 'cod') {
-        const payment = await paymentsService.createPaymentOrder(
-          order.orderId,
-          request.auth!.userId,
-        );
-        return reply.status(201).send({
-          ...order,
-          razorpayOrderId: payment.razorpayOrderId,
-          razorpayKeyId:   payment.razorpayKeyId,
-          amountPaise:     payment.amountPaise,
-        });
-      }
+    if (parsed.data.paymentMethod !== 'cod') {
+      const payment = await paymentsService.createPaymentOrder(order.orderId, request.auth!.userId);
+      return reply.status(201).send({ ...order, razorpayOrderId: payment.razorpayOrderId, razorpayKeyId: payment.razorpayKeyId, amountPaise: payment.amountPaise });
+    }
+    return reply.status(201).send(order);
+  });
 
-      return reply.status(201).send(order);
-    },
-  );
-
-  // ── GET /api/v1/orders ─────────────────────────────────────────────────────
+  // GET /api/v1/orders
   app.get('/', async (request, reply) => {
-    const orders = await ordersService.getMyOrders(
-      request.auth!.userId,
-      request.auth!.role,
-    );
+    const orders = await ordersService.getMyOrders(request.auth!.userId, request.auth!.role);
     return reply.send(orders);
   });
 
-  // ── GET /api/v1/orders/:id ─────────────────────────────────────────────────
-  app.get(
-    '/:id',
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const order = await ordersService.getOrder(
-        request.params.id,
-        request.auth!.userId,
-        request.auth!.role,
-      );
-      return reply.send(order);
-    },
-  );
+  // GET /api/v1/orders/:id
+  app.get('/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    const order = await ordersService.getOrder(request.params.id, request.auth!.userId, request.auth!.role);
+    return reply.send(order);
+  });
 
-  // ── DELETE /api/v1/orders/:id — cancel order ───────────────────────────────
-  app.delete(
-    '/:id',
-    async (
-      request: FastifyRequest<{
-        Params: { id: string };
-        Body: { reason?: string };
-      }>,
-      reply,
-    ) => {
-      const result = await ordersService.cancelOrder(
-        request.params.id,
-        request.auth!.userId,
-        (request.body as { reason?: string })?.reason,
-      );
+  // DELETE /api/v1/orders/:id
+  app.delete('/:id', async (request: FastifyRequest<{ Params: { id: string }; Body: { reason?: string } }>, reply) => {
+    const result = await ordersService.cancelOrder(request.params.id, request.auth!.userId, (request.body as { reason?: string })?.reason);
+    return reply.send(result);
+  });
+
+  // ── Seller actions ────────────────────────────────────────────────────────
+
+  // POST /api/v1/orders/:id/accept
+  app.post('/:id/accept',
+    { preHandler: [requireRole('seller')] },
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+      const result = await ordersService.sellerAcceptOrder(request.params.id, request.auth!.userId);
       return reply.send(result);
     },
   );
 
-  // ── POST /api/v1/orders/:id/cod-collected — rider confirms COD ─────────────
-  app.post(
-    '/:id/cod-collected',
+  // POST /api/v1/orders/:id/reject
+  app.post('/:id/reject',
+    { preHandler: [requireRole('seller')] },
+    async (request: FastifyRequest<{ Params: { id: string }; Body: { reason: string } }>, reply) => {
+      const { reason } = request.body as { reason: string };
+      const result = await ordersService.sellerRejectOrder(request.params.id, request.auth!.userId, reason ?? 'Seller ne reject kiya');
+      return reply.send(result);
+    },
+  );
+
+  // POST /api/v1/orders/:id/preparing
+  app.post('/:id/preparing',
+    { preHandler: [requireRole('seller')] },
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+      const result = await ordersService.sellerMarkPreparing(request.params.id, request.auth!.userId);
+      return reply.send(result);
+    },
+  );
+
+  // POST /api/v1/orders/:id/ready
+  app.post('/:id/ready',
+    { preHandler: [requireRole('seller')] },
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+      const result = await ordersService.sellerMarkReady(request.params.id, request.auth!.userId);
+      return reply.send(result);
+    },
+  );
+
+  // POST /api/v1/orders/:id/cod-collected
+  app.post('/:id/cod-collected',
     { preHandler: [requireRole('rider')] },
-    async (
-      request: FastifyRequest<{
-        Params: { id: string };
-        Body: { amountPaise: number };
-      }>,
-      reply,
-    ) => {
+    async (request: FastifyRequest<{ Params: { id: string }; Body: { amountPaise: number } }>, reply) => {
       const { amountPaise } = request.body as { amountPaise: number };
-      const result = await ordersService.codCollected(
-        request.params.id,
-        request.auth!.userId,
-        amountPaise,
-      );
+      const result = await ordersService.codCollected(request.params.id, request.auth!.userId, amountPaise);
       return reply.send(result);
     },
   );

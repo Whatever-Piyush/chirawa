@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "Chirawa Rider",
+    "slug": "chirawa-rider",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#27AE60"
+    },
+    "android": {
+      "package": "com.chirawa.rider",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundColor": "#27AE60"
+      }
+    },
+    "plugins": [
+      "expo-secure-store",
+      ["expo-location", {
+        "locationAlwaysAndWhenInUsePermission": "Rider location delivery ke liye zaruri hai"
+      }]
+    ]
+  }
+}

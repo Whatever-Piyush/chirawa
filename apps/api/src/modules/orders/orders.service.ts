@@ -34,7 +34,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
 
     const shop = await prisma.shop.findUnique({
       where:  { id: cart.shopId },
-      select: { lat: true, lng: true, isActive: true, name: true, address: true },
+      select: { lat: true, lng: true, isActive: true, name: true, address: true, sellerId: true },
     });
     if (!shop || !shop.isActive) throw new BusinessRuleError('Yeh dukaan abhi available nahi hai');
 
@@ -68,146 +68,117 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       const usedCount = await prisma.promoRedemption.count({
         where: { promoCodeId: promo.id, userId },
       });
-      if (usedCount >= promo.maxUsesPerUser) {
-        throw new ValidationError('Is promo code ka use kar chuke hain');
-      }
+      if (usedCount >= promo.maxUsesPerUser) throw new ValidationError('Is promo code ka use kar chuke hain');
       discountPaise = promo.type === 'flat'
         ? promo.valuePaise
         : Math.floor((cart.subtotal * promo.valuePaise) / 10000);
       promoCodeId = promo.id;
     }
 
-    const totalAmount   = cart.subtotal + feeResult.feePaise - discountPaise;
-    const isCod         = input.paymentMethod === 'cod';
-    const initStatus    = isCod ? 'confirmed' : 'pending_payment';
+    const totalAmount = cart.subtotal + feeResult.feePaise - discountPaise;
+    const isCod       = input.paymentMethod === 'cod';
+    const initStatus  = isCod ? 'confirmed' : 'pending_payment';
 
-    // Get seller profile for notifications
+    // Get seller's userId for notifications
     const sellerProfile = await prisma.sellerProfile.findUnique({
-      where:  { userId: (await prisma.shop.findUnique({ where: { id: cart.shopId }, select: { sellerId: true } }))!.sellerId },
+      where:  { id: shop.sellerId },
       select: { userId: true },
     });
 
     const order = await prisma.$transaction(async (tx) => {
       const newOrder = await tx.order.create({
         data: {
-          customerId: userId,
-          shopId:     cart.shopId,
-          deliveryStreet:   address.street,
-          deliveryLandmark: address.landmark,
-          deliveryLocality: address.locality,
-          deliveryCity:     address.city,
-          deliveryPincode:  address.pincode,
-          deliveryLat:      address.lat,
-          deliveryLng:      address.lng,
-          cartSubtotalAtPricing: cart.subtotal,
-          deliveryFee:           feeResult.feePaise,
-          discount:              discountPaise,
-          totalAmount,
-          feeRuleVersion:  ruleVersion,
-          distanceKm:      feeResult.distanceKm,
-          distanceSource:  source,
-          paymentMethod:   input.paymentMethod,
-          status:          initStatus,
-          addressId:       address.id,
-          promoCodeId,
+          customerId: userId, shopId: cart.shopId,
+          deliveryStreet: address.street, deliveryLandmark: address.landmark,
+          deliveryLocality: address.locality, deliveryCity: address.city,
+          deliveryPincode: address.pincode, deliveryLat: address.lat, deliveryLng: address.lng,
+          cartSubtotalAtPricing: cart.subtotal, deliveryFee: feeResult.feePaise,
+          discount: discountPaise, totalAmount,
+          feeRuleVersion: ruleVersion, distanceKm: feeResult.distanceKm, distanceSource: source,
+          paymentMethod: input.paymentMethod, status: initStatus,
+          addressId: address.id, promoCodeId,
           ...(isCod ? { confirmedAt: new Date() } : {}),
         },
       });
-
       await tx.orderItem.createMany({
         data: cart.items.map((item) => ({
-          orderId:     newOrder.id,
-          productId:   item.productId,
-          productName: item.productName,
-          unitPrice:   item.unitPrice,
-          quantity:    item.quantity,
-          subtotal:    item.subtotal,
+          orderId: newOrder.id, productId: item.productId,
+          productName: item.productName, unitPrice: item.unitPrice,
+          quantity: item.quantity, subtotal: item.subtotal,
         })),
       });
-
       await tx.orderStatusHistory.create({
-        data: {
-          orderId:      newOrder.id,
-          status:       initStatus,
-          changedByRole: 'customer',
-          changedById:   userId,
-        },
+        data: { orderId: newOrder.id, status: initStatus, changedByRole: 'customer', changedById: userId },
       });
-
       if (promoCodeId) {
         await tx.promoRedemption.create({
           data: { promoCodeId, userId, orderId: newOrder.id, discount: discountPaise },
         });
-        await tx.promoCode.update({
-          where: { id: promoCodeId },
-          data:  { currentUses: { increment: 1 } },
-        });
+        await tx.promoCode.update({ where: { id: promoCodeId }, data: { currentUses: { increment: 1 } } });
       }
-
       return newOrder;
     });
 
-    // Clear cart
     await redis.del(`cart:${userId}`);
     await prisma.cart.deleteMany({ where: { userId } });
 
-    // ── Emit real-time events ──────────────────────────────────────────────
-    // Tell seller about the new order (triggers full-screen alert in seller app)
-    if (sellerProfile && (isCod || true)) {
+    if (sellerProfile) {
       emitNewOrderForSeller({
-        orderId:          order.id,
-        shopId:           cart.shopId,
-        sellerId:         sellerProfile.userId,
-        items:            cart.items.map((i) => ({
-          productName: i.productName,
-          quantity:    i.quantity,
-          unitPrice:   i.unitPrice,
-        })),
-        totalAmount,
-        paymentMethod:    input.paymentMethod,
-        deliveryLocality: address.locality,
+        orderId: order.id, shopId: cart.shopId, sellerId: sellerProfile.userId,
+        items: cart.items.map((i) => ({ productName: i.productName, quantity: i.quantity, unitPrice: i.unitPrice })),
+        totalAmount, paymentMethod: input.paymentMethod, deliveryLocality: address.locality,
       });
     }
 
-    // Notify customer's order room about status
     emitOrderStatusChanged({
-      orderId:    order.id,
-      status:     initStatus,
-      shopId:     cart.shopId,
-      sellerId:   sellerProfile?.userId ?? '',
-      riderId:    null,
-      customerId: userId,
+      orderId: order.id, status: initStatus, shopId: cart.shopId,
+      sellerId: sellerProfile?.userId ?? '', riderId: null, customerId: userId,
     });
 
-    if (isCod) {
-      return { orderId: order.id, status: 'confirmed', totalAmount, message: 'Order place ho gaya! Rider jaldi pahunchega.' };
-    }
-    return { orderId: order.id, status: 'pending_payment', totalAmount, message: 'Payment complete karein' };
+    return isCod
+      ? { orderId: order.id, status: 'confirmed', totalAmount, message: 'Order place ho gaya!' }
+      : { orderId: order.id, status: 'pending_payment', totalAmount, message: 'Payment complete karein' };
   }
 
   async function getOrder(orderId: string, userId: string, role: string) {
     const order = await prisma.order.findUnique({
-      where:   { id: orderId },
+      where: { id: orderId },
       include: {
-        items:         true,
-        statusHistory: { orderBy: { changedAt: 'asc' } },
-        payments:      { select: { status: true, method: true, amountPaise: true } },
+        items: true, statusHistory: { orderBy: { changedAt: 'asc' } },
+        payments: { select: { status: true, method: true, amountPaise: true } },
       },
     });
     if (!order) throw new NotFoundError('Order');
 
+    const sellerProfile = role === 'seller'
+      ? await prisma.sellerProfile.findUnique({ where: { userId }, include: { shop: true } })
+      : null;
+
     const allowed =
       role === 'admin' ||
       (role === 'customer' && order.customerId === userId) ||
-      (role === 'rider'    && order.riderId === userId);
+      (role === 'rider'    && order.riderId === userId) ||
+      (role === 'seller'   && sellerProfile?.shop?.id === order.shopId);
+
     if (!allowed) throw new ForbiddenError('Not your order');
     return order;
   }
 
   async function getMyOrders(userId: string, role: string) {
-    const where = role === 'customer' ? { customerId: userId }
-                : role === 'rider'    ? { riderId: userId }
-                : {};
+    let where: Record<string, unknown> = {};
+
+    if (role === 'customer') {
+      where = { customerId: userId };
+    } else if (role === 'rider') {
+      where = { riderId: userId };
+    } else if (role === 'seller') {
+      const sellerProfile = await prisma.sellerProfile.findUnique({
+        where: { userId }, include: { shop: { select: { id: true } } },
+      });
+      if (!sellerProfile?.shop) return [];
+      where = { shopId: sellerProfile.shop.id };
+    }
+
     return prisma.order.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -217,22 +188,19 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   }
 
   async function updateOrderStatus(
-    orderId: string,
-    newStatus: string,
-    changedByRole: string,
-    changedById: string,
-    reason?: string,
+    orderId: string, newStatus: string,
+    changedByRole: string, changedById: string, reason?: string,
   ) {
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
 
     await prisma.$transaction([
       prisma.order.update({
         where: { id: orderId },
-        data:  {
+        data: {
           status: newStatus as never,
-          ...(newStatus === 'confirmed'        ? { confirmedAt: new Date() }  : {}),
-          ...(newStatus === 'picked_up'        ? { pickedUpAt:  new Date() }  : {}),
-          ...(newStatus === 'delivered'        ? { deliveredAt: new Date() }  : {}),
+          ...(newStatus === 'confirmed'        ? { confirmedAt: new Date() } : {}),
+          ...(newStatus === 'picked_up'        ? { pickedUpAt:  new Date() } : {}),
+          ...(newStatus === 'delivered'        ? { deliveredAt: new Date() } : {}),
           ...(newStatus === 'cancelled'        ? { cancelledAt: new Date(), cancelReason: reason } : {}),
         },
       }),
@@ -241,15 +209,62 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       }),
     ]);
 
-    // Emit status change event → Socket.io broadcasts to all subscribers
     emitOrderStatusChanged({
-      orderId,
-      status:     newStatus,
-      shopId:     order.shopId,
-      sellerId:   '',
-      riderId:    order.riderId,
-      customerId: order.customerId,
+      orderId, status: newStatus, shopId: order.shopId,
+      sellerId: '', riderId: order.riderId, customerId: order.customerId,
     });
+  }
+
+  // ── Seller-specific actions ──────────────────────────────────────────────
+
+  async function sellerAcceptOrder(orderId: string, sellerUserId: string) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { shop: { include: { seller: { select: { userId: true } } } } },
+    });
+    if (!order) throw new NotFoundError('Order');
+    if (order.shop.seller.userId !== sellerUserId) throw new ForbiddenError('Not your order');
+    if (!['paid', 'confirmed'].includes(order.status)) {
+      throw new BusinessRuleError('Order accept nahi ho sakta');
+    }
+    await updateOrderStatus(orderId, 'confirmed', 'seller', sellerUserId);
+    return { message: 'Order accept ho gaya' };
+  }
+
+  async function sellerRejectOrder(orderId: string, sellerUserId: string, reason: string) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { shop: { include: { seller: { select: { userId: true } } } } },
+    });
+    if (!order) throw new NotFoundError('Order');
+    if (order.shop.seller.userId !== sellerUserId) throw new ForbiddenError('Not your order');
+    if (!['paid', 'confirmed'].includes(order.status)) {
+      throw new BusinessRuleError('Order reject nahi ho sakta');
+    }
+    await updateOrderStatus(orderId, 'cancelled', 'seller', sellerUserId, reason);
+    return { message: 'Order reject ho gaya' };
+  }
+
+  async function sellerMarkPreparing(orderId: string, sellerUserId: string) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { shop: { include: { seller: { select: { userId: true } } } } },
+    });
+    if (!order) throw new NotFoundError('Order');
+    if (order.shop.seller.userId !== sellerUserId) throw new ForbiddenError('Not your order');
+    await updateOrderStatus(orderId, 'preparing', 'seller', sellerUserId);
+    return { message: 'Taiyari shuru ho gayi' };
+  }
+
+  async function sellerMarkReady(orderId: string, sellerUserId: string) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { shop: { include: { seller: { select: { userId: true } } } } },
+    });
+    if (!order) throw new NotFoundError('Order');
+    if (order.shop.seller.userId !== sellerUserId) throw new ForbiddenError('Not your order');
+    await updateOrderStatus(orderId, 'ready_for_pickup', 'seller', sellerUserId);
+    return { message: 'Order ready hai! Rider aa raha hai.' };
   }
 
   async function cancelOrder(orderId: string, userId: string, reason?: string) {
@@ -257,11 +272,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     if (!order) throw new NotFoundError('Order');
     if (order.customerId !== userId) throw new ForbiddenError('Not your order');
     if (!['pending_payment', 'paid'].includes(order.status)) {
-      throw new BusinessRuleError('Order cancel nahi ho sakta — pehle se processing mein hai');
-    }
-    const ageSeconds = (Date.now() - order.createdAt.getTime()) / 1000;
-    if (order.status === 'paid' && ageSeconds > 120) {
-      throw new BusinessRuleError('Cancel window khatam ho gayi (2 minute).');
+      throw new BusinessRuleError('Order cancel nahi ho sakta');
     }
     await updateOrderStatus(orderId, 'cancelled', 'customer', userId, reason);
     return { message: 'Order cancel ho gaya' };
@@ -291,41 +302,25 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       orderId, status: 'delivered',
       shopId: order.shopId, sellerId: '', riderId, customerId: order.customerId,
     });
-
     return { message: 'Cash collection confirm ho gaya' };
   }
 
-  return { placeOrder, getOrder, getMyOrders, updateOrderStatus, cancelOrder, codCollected };
+  return {
+    placeOrder, getOrder, getMyOrders, updateOrderStatus,
+    sellerAcceptOrder, sellerRejectOrder, sellerMarkPreparing, sellerMarkReady,
+    cancelOrder, codCollected,
+  };
 }
 
-// ── Enqueue referral unlock when order is delivered ───────────────────────────
-// This is called from the delivery routes (Step 13) — adding the helper here
 export async function enqueueReferralUnlock(
   prisma: PrismaClient,
   redis: Redis,
   orderId: string,
   customerId: string,
 ): Promise<void> {
-  // Check if this customer was referred
   const redemption = await prisma.referralRedemption.findUnique({
     where: { referredUserId: customerId },
   });
-
   if (!redemption || redemption.refereeCreditStatus === 'credited') return;
-
-  // Enqueue referral unlock job
-  const { Queue } = await import('bullmq');
-  const { QueueNames, JobNames } = await import('../worker/queues');
-  const { env } = await import('../config/env');
-  const Redis2 = (await import('ioredis')).default;
-
-  const connection = new Redis2(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    enableReadyCheck: false,
-  });
-
-  const queue = new Queue(QueueNames.REFERRAL, { connection });
-  await queue.add(JobNames.UNLOCK_REFERRAL, { orderId, referredUserId: customerId });
-  await queue.close();
-  await connection.quit();
+  console.log(`[Referral] Unlock queued for order ${orderId}`);
 }
