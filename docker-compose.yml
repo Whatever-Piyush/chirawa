@@ -1,0 +1,46 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: chirawa_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chirawa
+      POSTGRES_PASSWORD: chirawa_dev_password
+      POSTGRES_DB: chirawa_development
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chirawa -d chirawa_development"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: chirawa_redis
+    restart: unless-stopped
+    command: redis-server --requirepass chirawa_redis_dev_password --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "chirawa_redis_dev_password", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    name: chirawa_network

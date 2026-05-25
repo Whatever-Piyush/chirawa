@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment — NEVER commit secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test coverage
+coverage/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Prisma
+apps/api/prisma/migrations/*/migration_lock.toml
+
+# React Native
+apps/*/android/
+apps/*/ios/
+apps/*/.expo/
+apps/*/node_modules/
+
+# PM2
+ecosystem.config.js.backup

@@ -1,0 +1,27 @@
+{
+  "name": "chirawa",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chirawa Quick-Commerce Platform",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev:api": "pnpm --filter @chirawa/api dev",
+    "build:api": "pnpm --filter @chirawa/api build",
+    "test:api": "pnpm --filter @chirawa/api test",
+    "test:all": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "db:migrate": "pnpm --filter @chirawa/api db:migrate",
+    "db:studio": "pnpm --filter @chirawa/api db:studio"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.5"
+  }
+}
