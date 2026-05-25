@@ -1,0 +1,5 @@
+onlyBuiltDependencies:
+  - react-native-screens
+  - better-sqlite3
+  - esbuild
+  - sharp

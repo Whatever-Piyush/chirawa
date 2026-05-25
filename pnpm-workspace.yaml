@@ -8,3 +8,4 @@ allowBuilds:
   msgpackr-extract: true
   prisma: true
   protobufjs: true
+  react-native-screens: true
