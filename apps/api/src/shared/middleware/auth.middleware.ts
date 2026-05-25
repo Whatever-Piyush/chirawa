@@ -1,37 +1,65 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { AuthenticationError } from '../errors/app-errors';
+import { verifyAccessToken } from '../../modules/auth/token.service';
+import { AuthenticationError, ForbiddenError } from '../errors/app-errors';
 
-/**
- * Authentication middleware stub.
- * Full implementation in Step 4 (Auth module).
- *
- * Step 4 will:
- *  - Verify RS256 JWT signature and expiry
- *  - Extract role from JWT claims
- *  - Load minimal user context into request (userId, role, profileId)
- *  - Enforce resource ownership at service layer
- */
-export async function authenticate(
-  _request: FastifyRequest,
-  _reply: FastifyReply,
-): Promise<void> {
-  // Placeholder — throws so protected routes fail loudly until Step 4
-  throw new AuthenticationError('Auth middleware not yet implemented (Step 4)');
-}
-
-/** Role type for route-level authorization */
 export type Role = 'customer' | 'seller' | 'rider' | 'admin';
 
-/** Attached to request by authenticate() middleware after Step 4 */
 export interface AuthContext {
   userId: string;
   role: Role;
   profileId: string;
 }
 
-// Extend Fastify's Request type to include auth context
 declare module 'fastify' {
   interface FastifyRequest {
     auth?: AuthContext;
   }
+}
+
+/**
+ * Authenticate middleware — verify JWT and attach auth context to request.
+ * Use as preHandler on any protected route:
+ *
+ *   app.get('/me', { preHandler: [authenticate] }, handler)
+ */
+export async function authenticate(
+  request: FastifyRequest,
+  _reply: FastifyReply,
+): Promise<void> {
+  const header = request.headers.authorization;
+
+  if (!header?.startsWith('Bearer ')) {
+    throw new AuthenticationError('Authorization header required');
+  }
+
+  const token = header.slice(7); // Remove "Bearer "
+  const payload = verifyAccessToken(token); // Throws if invalid/expired
+
+  request.auth = {
+    userId: payload.sub,
+    role: payload.role as Role,
+    profileId: payload.profileId,
+  };
+}
+
+/**
+ * Role guard factory — use after authenticate.
+ *
+ * Example: requireRole('admin', 'seller')
+ * Allows admins and sellers, rejects customers and riders.
+ */
+export function requireRole(...allowedRoles: Role[]) {
+  return async function roleGuard(
+    request: FastifyRequest,
+    _reply: FastifyReply,
+  ): Promise<void> {
+    if (!request.auth) {
+      throw new AuthenticationError('Not authenticated');
+    }
+    if (!allowedRoles.includes(request.auth.role)) {
+      throw new ForbiddenError(
+        `Access denied. Required: ${allowedRoles.join(' or ')}`,
+      );
+    }
+  };
 }

@@ -5,7 +5,11 @@ import sensible from '@fastify/sensible';
 import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env';
 
-// Module route plugins — all stubbed now, filled in per step
+// Infrastructure plugins
+import prismaPlugin from './shared/plugins/prisma.plugin';
+import redisPlugin  from './shared/plugins/redis.plugin';
+
+// Module routes
 import authRoutes     from './modules/auth/auth.routes';
 import usersRoutes    from './modules/users/users.routes';
 import catalogRoutes  from './modules/catalog/catalog.routes';
@@ -24,39 +28,31 @@ export async function buildApp(): Promise<FastifyInstance> {
       ...(env.NODE_ENV !== 'production' && {
         transport: {
           target: 'pino-pretty',
-          options: {
-            translateTime: 'HH:MM:ss Z',
-            ignore: 'pid,hostname',
-            colorize: true,
-          },
+          options: { translateTime: 'HH:MM:ss Z', ignore: 'pid,hostname', colorize: true },
         },
       }),
     },
-    // Trust Cloudflare/Nginx proxy headers (X-Forwarded-For)
     trustProxy: true,
-    // Include a request ID on every request for log tracing
     genReqId: () => crypto.randomUUID(),
   });
 
-  // ── Security & Utility Plugins ──────────────────────────────────────────────
-  await app.register(sensible); // Adds reply.notFound(), badRequest() etc
+  // ── Infrastructure (register before routes) ───────────────────────────────
+  await app.register(prismaPlugin);
+  await app.register(redisPlugin);
 
-  await app.register(helmet, {
-    contentSecurityPolicy: false, // API only — no HTML served
-  });
-
+  // ── Security Plugins ──────────────────────────────────────────────────────
+  await app.register(sensible);
+  await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(cors, {
     origin: env.FRONTEND_URLS.split(',').map((u) => u.trim()),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
-
   await app.register(rateLimit, {
     global: true,
     max: 100,
     timeWindow: '1 minute',
-    // Custom Hindi error message
     errorResponseBuilder: (_req, context) => ({
       statusCode: 429,
       error: 'Too Many Requests',
@@ -66,12 +62,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   // ── Global Error Handler ──────────────────────────────────────────────────
-  // Single place that converts ALL errors to consistent JSON.
-  // Order matters: check most specific conditions first.
   app.setErrorHandler((error, request, reply) => {
     request.log.error({ err: error }, 'Request error');
 
-    // Our custom AppError (ValidationError, NotFoundError, etc.)
     if (error instanceof Error && 'statusCode' in error && 'code' in error) {
       return reply.status(error.statusCode as number).send({
         statusCode: error.statusCode,
@@ -81,7 +74,6 @@ export async function buildApp(): Promise<FastifyInstance> {
       });
     }
 
-    // Fastify's built-in validation errors (JSON schema failures)
     if (error.validation) {
       return reply.status(400).send({
         statusCode: 400,
@@ -92,12 +84,8 @@ export async function buildApp(): Promise<FastifyInstance> {
       });
     }
 
-    // Rate limit (already formatted by errorResponseBuilder above)
-    if (error.statusCode === 429) {
-      return reply.status(429).send(error);
-    }
+    if (error.statusCode === 429) return reply.status(429).send(error);
 
-    // Unhandled — hide internals in production
     return reply.status(500).send({
       statusCode: 500,
       error: 'Internal Server Error',
@@ -109,24 +97,19 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   // ── Health Check ──────────────────────────────────────────────────────────
-  // Higher rate limit — used by UptimeRobot every 5 minutes
   app.get(
     '/health',
     { config: { rateLimit: { max: 300, timeWindow: '1 minute' } } },
-    async (_request, reply) => {
-      return reply.send({
-        status: 'ok',
-        service: 'chirawa-api',
-        timestamp: new Date().toISOString(),
-        uptimeSeconds: Math.floor(process.uptime()),
-        environment: env.NODE_ENV,
-      });
-    },
+    async (_req, reply) => reply.send({
+      status: 'ok',
+      service: 'chirawa-api',
+      timestamp: new Date().toISOString(),
+      uptimeSeconds: Math.floor(process.uptime()),
+      environment: env.NODE_ENV,
+    }),
   );
 
-  // ── Module Routes ──────────────────────────────────────────────────────────
-  // Each module is a Fastify plugin with its own encapsulated scope.
-  // Prefix = /api/v1/{module} — versioned for future API changes.
+  // ── Module Routes ─────────────────────────────────────────────────────────
   await app.register(authRoutes,     { prefix: '/api/v1/auth' });
   await app.register(usersRoutes,    { prefix: '/api/v1/users' });
   await app.register(catalogRoutes,  { prefix: '/api/v1/catalog' });
