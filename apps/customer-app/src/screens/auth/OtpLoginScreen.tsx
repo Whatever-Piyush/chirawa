@@ -41,7 +41,7 @@ export default function OtpLoginScreen({ navigation }: Props) {
         {/* Logo */}
         <View style={styles.logoBox}>
           <Text style={styles.logoEmoji}>🛵</Text>
-          <Text style={styles.logoText}>Chirawa Delivery</Text>
+          <Text style={styles.logoText}>Bringly</Text>
           <Text style={styles.logoSub}>Ghar tak pahunchao</Text>
         </View>
 

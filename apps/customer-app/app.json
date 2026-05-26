@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Chirawa Delivery",
-    "slug": "chirawa-customer",
+    "name": "Bringly",
+    "slug": "bringly-customer",
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
@@ -10,14 +10,14 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#C0392B"
+      "backgroundColor": "#FF3E6C"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundColor": "#C0392B"
+        "backgroundColor": "#FF3E6C"
       },
-      "package": "com.chirawa.customer"
+      "package": "com.bringly.customer"
     },
     "plugins": [
       "expo-secure-store",

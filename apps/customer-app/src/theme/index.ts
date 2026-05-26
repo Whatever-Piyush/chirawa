@@ -1,5 +1,5 @@
 export const Colors = {
-  primary:    '#C0392B', // Terracotta
+  primary:    '#FF3E6C',
   background: '#FDF6EC', // Warm sand
   text:       '#1A1A1A', // Near black
   textLight:  '#666666',

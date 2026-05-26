@@ -54,7 +54,7 @@ export default function HomeScreen({ navigation }: Props) {
       <View style={styles.header}>
         <View>
           <Text style={styles.headerGreeting}>नमस्ते! 👋</Text>
-          <Text style={styles.headerTitle}>Chirawa Delivery</Text>
+          <Text style={styles.headerTitle}>Bringly</Text>
         </View>
         <TouchableOpacity
           onPress={() => navigation.navigate('Cart')}

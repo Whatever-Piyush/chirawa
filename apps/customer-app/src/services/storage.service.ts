@@ -2,8 +2,8 @@ import * as SecureStore from 'expo-secure-store';
 import type { AuthTokens } from '@chirawa/types';
 
 const KEYS = {
-  ACCESS_TOKEN:  'chirawa_access_token',
-  REFRESH_TOKEN: 'chirawa_refresh_token',
+  ACCESS_TOKEN:  'bringly_access_token',
+  REFRESH_TOKEN: 'bringly_refresh_token',
 };
 
 export const StorageService = {
