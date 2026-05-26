@@ -210,7 +210,15 @@ export class ChirawaApiClient {
     return this.request<OrderDetailResponse>('GET', `/orders/${orderId}`);
   }
 
-  async getMyOrders(): Promise<OrderDetailResponse[]> {
-    return this.request<OrderDetailResponse[]>('GET', '/orders');
+  async getMyOrders(params?: { page?: number; limit?: number }): Promise<OrderDetailResponse[]> {
+    let path = '/orders';
+    if (params) {
+      const q = new URLSearchParams();
+      if (params.page  !== undefined) q.set('page',  String(params.page));
+      if (params.limit !== undefined) q.set('limit', String(params.limit));
+      const qs = q.toString();
+      if (qs) path += `?${qs}`;
+    }
+    return this.request<OrderDetailResponse[]>('GET', path);
   }
 }
