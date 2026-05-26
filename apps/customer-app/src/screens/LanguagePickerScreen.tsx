@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { useLanguage } from '@chirawa/i18n';
+import { Colors, FontSize, Radius, Spacing } from '../theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -50,7 +51,7 @@ export default function LanguagePickerScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FF3E6C',
+    backgroundColor: Colors.primary,
   },
   topSection: {
     flex: 4,
@@ -67,35 +68,35 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   brandName: {
-    color: '#FFFFFF',
-    fontSize: 32,
-    fontWeight: 'bold',
+    color: Colors.white,
+    fontSize: FontSize.xxxl,
+    fontWeight: '900',
     marginBottom: 12,
   },
   subtitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
+    color: Colors.white,
+    fontSize: FontSize.lg,
     opacity: 0.85,
   },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    backgroundColor: Colors.card,
+    borderRadius: Radius.lg,
     width: SCREEN_WIDTH * 0.85,
     minHeight: 80,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 16,
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing.lg,
   },
   cardPrimary: {
     flex: 1,
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1A1A1A',
+    fontSize: FontSize.xxl,
+    fontWeight: '900',
+    color: Colors.text,
   },
   cardSecondary: {
-    fontSize: 14,
-    color: '#666666',
+    fontSize: FontSize.sm,
+    color: Colors.textLight,
     marginRight: 12,
   },
   radio: {
@@ -103,9 +104,9 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     borderWidth: 2,
-    borderColor: '#FF3E6C',
+    borderColor: Colors.primary,
   },
   radioSelected: {
-    backgroundColor: '#FF3E6C',
+    backgroundColor: Colors.primary,
   },
 });

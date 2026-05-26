@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, Animated, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '@chirawa/i18n';
 import { Colors } from '../theme';
@@ -42,18 +43,36 @@ export type TabParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab   = createBottomTabNavigator<TabParamList>();
 
+const TAB_ICONS: Record<string, string> = {
+  Home: '🏠', OrderHistory: '📦', Profile: '👤',
+};
+
 function TabIcon({ name, focused }: { name: string; focused: boolean }) {
-  const icons: Record<string, string> = {
-    Home: '🏠', OrderHistory: '📦', Profile: '👤',
-  };
+  const scale = useRef(new Animated.Value(focused ? 1.1 : 1)).current;
+
+  useEffect(() => {
+    Animated.spring(scale, {
+      toValue:         focused ? 1.1 : 1,
+      friction:        6,
+      tension:         180,
+      useNativeDriver: true,
+    }).start();
+  }, [focused, scale]);
+
   return (
-    <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>
-      {icons[name] ?? '•'}
-    </Text>
+    <Animated.Text
+      style={[
+        tabStyles.icon,
+        { opacity: focused ? 1 : 0.45, transform: [{ scale }] },
+      ]}
+    >
+      {TAB_ICONS[name] ?? '•'}
+    </Animated.Text>
   );
 }
 
 function MainTabs() {
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -63,11 +82,17 @@ function MainTabs() {
         tabBarInactiveTintColor: Colors.textMuted,
         tabBarStyle: {
           backgroundColor: Colors.white,
-          borderTopColor:  Colors.border,
-          height:          60,
-          paddingBottom:   8,
+          borderTopWidth:  0,
+          height:          60 + insets.bottom,
+          paddingBottom:   insets.bottom,
+          paddingTop:      6,
+          elevation:       20,
+          shadowColor:     '#000',
+          shadowOffset:    { width: 0, height: -4 },
+          shadowOpacity:   0.1,
+          shadowRadius:    20,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
       })}
     >
       <Tab.Screen name="Home"         component={HomeScreen}         options={{ title: 'होम' }} />
@@ -79,8 +104,8 @@ function MainTabs() {
 
 function LoadingScreen() {
   return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
-      <Text style={{ fontSize: 32, marginBottom: 16 }}>🛵</Text>
+    <View style={styles.loading}>
+      <Text style={styles.loadingEmoji}>🛵</Text>
       <ActivityIndicator color={Colors.primary} size="large" />
     </View>
   );
@@ -91,7 +116,7 @@ export default function AppNavigator() {
   const { hasChosen } = useLanguage();
 
   if (hasChosen === null) {
-    return <View style={{ flex: 1, backgroundColor: '#FF3E6C' }} />;
+    return <View style={{ flex: 1, backgroundColor: Colors.primary }} />;
   }
 
   if (hasChosen === false) {
@@ -102,12 +127,16 @@ export default function AppNavigator() {
 
   return (
     <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator screenOptions={{
+        headerShown:      false,
+        headerStyle:      { backgroundColor: Colors.white },
+        statusBarColor:   Colors.primary as never,
+        statusBarStyle:   'light' as never,
+      }}>
         {state.isAuthenticated ? (
           <>
             <Stack.Screen name="MainTabs"      component={MainTabs} />
-            <Stack.Screen name="ShopDetail"    component={ShopDetailScreen}
-              options={{ headerShown: true, headerTitle: '', headerTintColor: Colors.primary }} />
+            <Stack.Screen name="ShopDetail"    component={ShopDetailScreen} />
             <Stack.Screen name="Cart"          component={CartScreen}
               options={{ headerShown: true, headerTitle: 'Cart', headerTintColor: Colors.primary }} />
             <Stack.Screen name="Checkout"      component={CheckoutScreen}
@@ -125,3 +154,18 @@ export default function AppNavigator() {
     </NavigationContainer>
   );
 }
+
+const styles = StyleSheet.create({
+  loading: {
+    flex: 1, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: Colors.background,
+  },
+  loadingEmoji: { fontSize: 32, marginBottom: 16 },
+});
+
+const tabStyles = StyleSheet.create({
+  icon: {
+    fontSize: 22,
+    lineHeight: 26,
+  },
+});

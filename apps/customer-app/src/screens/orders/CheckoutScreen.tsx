@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,10 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
+  Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type {
   CartItem,
@@ -19,13 +22,12 @@ import type {
 } from '@chirawa/types';
 import { PaymentMethod } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, FontSize, MIN_TAP, Radius, Spacing } from '../../theme';
+import { Colors, FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Checkout'> };
 
-// Chirawa town centre — used for all addresses since the town is small and no map picker is needed
 const CHIRAWA_LAT     = 28.2330;
 const CHIRAWA_LNG     = 75.6307;
 const CHIRAWA_PINCODE = '333026';
@@ -56,11 +58,22 @@ interface PayCardProps {
 }
 
 function PayCard({ icon, title, hint, selected, badge, onPress }: PayCardProps) {
+  const checkScale = useRef(new Animated.Value(selected ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.spring(checkScale, {
+      toValue:         selected ? 1 : 0,
+      friction:        5,
+      tension:         200,
+      useNativeDriver: true,
+    }).start();
+  }, [selected, checkScale]);
+
   return (
     <TouchableOpacity
       style={[styles.payCard, selected && styles.payCardSelected]}
       onPress={onPress}
-      activeOpacity={0.8}
+      activeOpacity={0.85}
     >
       <View style={styles.payCardLeft}>
         <Text style={styles.payCardIcon}>{icon}</Text>
@@ -76,7 +89,11 @@ function PayCard({ icon, title, hint, selected, badge, onPress }: PayCardProps) 
           </View>
         ) : (
           <View style={[styles.radio, selected && styles.radioSelected]}>
-            {selected && <View style={styles.radioDot} />}
+            <Animated.View
+              style={[styles.radioCheck, { transform: [{ scale: checkScale }] }]}
+            >
+              <Text style={styles.radioCheckText}>✓</Text>
+            </Animated.View>
           </View>
         )}
       </View>
@@ -84,37 +101,61 @@ function PayCard({ icon, title, hint, selected, badge, onPress }: PayCardProps) 
   );
 }
 
+// ─── Animated dots loading indicator ──────────────────────────────────────────
+
+function LoadingDots() {
+  const a = useRef(new Animated.Value(0.3)).current;
+  const b = useRef(new Animated.Value(0.3)).current;
+  const c = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const make = (val: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(val, { toValue: 1,   duration: 320, useNativeDriver: true }),
+          Animated.timing(val, { toValue: 0.3, duration: 320, useNativeDriver: true }),
+        ]),
+      );
+    const anims = [make(a, 0), make(b, 160), make(c, 320)];
+    anims.forEach((x) => x.start());
+    return () => anims.forEach((x) => x.stop());
+  }, [a, b, c]);
+
+  return (
+    <View style={styles.dotsRow}>
+      <Animated.View style={[styles.dot, { opacity: a }]} />
+      <Animated.View style={[styles.dot, { opacity: b }]} />
+      <Animated.View style={[styles.dot, { opacity: c }]} />
+    </View>
+  );
+}
+
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 
 export default function CheckoutScreen({ navigation }: Props) {
   const t = useT();
+  const insets = useSafeAreaInsets();
 
-  // ── Cart ──────────────────────────────────────────────────────────────────
   const [cart, setCart]           = useState<CartResponse | null>(null);
   const [cartLoading, setCartLoading] = useState(true);
 
-  // ── Address form ──────────────────────────────────────────────────────────
   const [street, setStreet]     = useState('');
   const [area,   setArea]       = useState('');
 
-  // ── Address confirmation state ────────────────────────────────────────────
   const [addressId,  setAddressId]  = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
-  // ── Pricing ───────────────────────────────────────────────────────────────
   const [pricing, setPricing] = useState<PricingPreviewResponse | null>(null);
 
-  // ── Payment ───────────────────────────────────────────────────────────────
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PaymentMethod.COD);
   const [placing,       setPlacing]       = useState(false);
 
-  // ─── Header ───────────────────────────────────────────────────────────────
+  const placeBtnScale = useRef(new Animated.Value(1)).current;
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerTitle: t('checkout.title') });
   }, [navigation, t]);
-
-  // ─── Load cart ────────────────────────────────────────────────────────────
 
   const loadCart = useCallback(async () => {
     try {
@@ -133,18 +174,15 @@ export default function CheckoutScreen({ navigation }: Props) {
     } finally {
       setCartLoading(false);
     }
-  }, [navigation, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => { void loadCart(); }, [loadCart]);
-
-  // ─── Reset confirmation when address inputs change ────────────────────────
 
   useEffect(() => {
     setAddressId(null);
     setPricing(null);
   }, [street, area]);
-
-  // ─── Confirm address → create in backend → fetch pricing ─────────────────
 
   const handleConfirmAddress = useCallback(async () => {
     if (!street.trim() || !area.trim() || !cart) return;
@@ -169,7 +207,13 @@ export default function CheckoutScreen({ navigation }: Props) {
     }
   }, [street, area, cart, t]);
 
-  // ─── Place order ──────────────────────────────────────────────────────────
+  const pulseAndPlace = () => {
+    Animated.sequence([
+      Animated.spring(placeBtnScale, { toValue: 0.95, friction: 5, tension: 300, useNativeDriver: true }),
+      Animated.spring(placeBtnScale, { toValue: 1.05, friction: 5, tension: 300, useNativeDriver: true }),
+      Animated.spring(placeBtnScale, { toValue: 1,    friction: 5, tension: 300, useNativeDriver: true }),
+    ]).start(() => { void handlePlaceOrder(); });
+  };
 
   const handlePlaceOrder = useCallback(async () => {
     if (!cart || !street.trim()) return;
@@ -181,7 +225,6 @@ export default function CheckoutScreen({ navigation }: Props) {
 
     setPlacing(true);
     try {
-      // Create address on demand if the user skipped the "Confirm" step
       let addrId = addressId;
       if (!addrId) {
         const addr = await api.createAddress({
@@ -211,8 +254,6 @@ export default function CheckoutScreen({ navigation }: Props) {
     }
   }, [cart, street, area, addressId, paymentMethod, navigation, t]);
 
-  // ─── Derived pricing ──────────────────────────────────────────────────────
-
   const subtotalRupees  = cart ? Math.round(cart.subtotal / 100) : 0;
   const deliveryRupees  = pricing ? Math.round(pricing.deliveryFee / 100) : null;
   const totalRupees     = pricing ? Math.round(pricing.total / 100) : subtotalRupees;
@@ -220,16 +261,23 @@ export default function CheckoutScreen({ navigation }: Props) {
   const canPlaceOrder   = !!street.trim() && !!area.trim() && !placing && !!cart;
   const canConfirm      = !!street.trim() && !!area.trim() && !confirming;
 
-  // ─── Header component for FlatList ────────────────────────────────────────
-
   const ListHeader = (
     <>
+      {/* ── Trust badge ─────────────────────────────────────────────────── */}
+      <View style={styles.trustBadge}>
+        <Text style={styles.trustBadgeText}>✓  {t('checkout.safeSecure')}</Text>
+      </View>
+
       {/* ── A. Delivery Address ──────────────────────────────────────────── */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>{t('checkout.deliveryAddress')}</Text>
-
-        <View style={styles.cityChipRow}>
-          <Text style={styles.cityChip}>📍 {t('checkout.chirawa')}</Text>
+        <View style={styles.addressHeader}>
+          <View style={styles.pinCircle}>
+            <Text style={styles.pinEmoji}>📍</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sectionTitle}>{t('checkout.deliveryAddress')}</Text>
+            <Text style={styles.sectionSub}>{t('checkout.chirawa')}</Text>
+          </View>
         </View>
 
         <View style={styles.fieldGroup}>
@@ -242,6 +290,8 @@ export default function CheckoutScreen({ navigation }: Props) {
             placeholderTextColor={Colors.textMuted}
             returnKeyType="next"
             autoCapitalize="words"
+            blurOnSubmit={false}
+            onSubmitEditing={() => Keyboard.dismiss()}
           />
         </View>
 
@@ -255,6 +305,8 @@ export default function CheckoutScreen({ navigation }: Props) {
             placeholderTextColor={Colors.textMuted}
             returnKeyType="done"
             autoCapitalize="words"
+            blurOnSubmit={true}
+            onSubmitEditing={() => Keyboard.dismiss()}
           />
         </View>
 
@@ -266,7 +318,7 @@ export default function CheckoutScreen({ navigation }: Props) {
           ]}
           onPress={() => void handleConfirmAddress()}
           disabled={!canConfirm}
-          activeOpacity={0.8}
+          activeOpacity={0.85}
         >
           {confirming ? (
             <ActivityIndicator color={Colors.white} size="small" />
@@ -288,11 +340,8 @@ export default function CheckoutScreen({ navigation }: Props) {
     </>
   );
 
-  // ─── Footer component for FlatList ────────────────────────────────────────
-
   const ListFooter = (
     <>
-      {/* Pricing breakdown */}
       <View style={[styles.section, styles.sectionNoTopPad]}>
         <View style={styles.divider} />
 
@@ -342,12 +391,9 @@ export default function CheckoutScreen({ navigation }: Props) {
         />
       </View>
 
-      {/* Bottom spacer so content is not hidden behind sticky button */}
-      <View style={styles.bottomSpacer} />
+      <View style={[styles.bottomSpacer, { height: 180 + insets.bottom }]} />
     </>
   );
-
-  // ─── Loading ──────────────────────────────────────────────────────────────
 
   if (cartLoading) {
     return (
@@ -360,12 +406,10 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   if (!cart) return null;
 
-  // ─── Main render ──────────────────────────────────────────────────────────
-
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={88}
     >
       <FlatList
@@ -380,63 +424,83 @@ export default function CheckoutScreen({ navigation }: Props) {
         keyboardShouldPersistTaps="handled"
       />
 
-      {/* ── D. Sticky Place Order ─────────────────────────────────────────── */}
-      <View style={styles.stickyBottom}>
+      {/* ── D. Sticky Place Order ───────────────────────────────────────── */}
+      <View style={[styles.stickyBottom, { paddingBottom: Spacing.lg + insets.bottom }]}>
         <View style={styles.orderTotalBar}>
           <Text style={styles.orderTotalLabel}>{t('cart.total')}</Text>
           <Text style={styles.orderTotalValue}>₹{totalRupees}</Text>
         </View>
-        <TouchableOpacity
-          style={[styles.placeOrderBtn, !canPlaceOrder && styles.btnDisabled]}
-          onPress={() => void handlePlaceOrder()}
-          disabled={!canPlaceOrder}
-          activeOpacity={0.9}
-        >
-          {placing ? (
-            <ActivityIndicator color={Colors.white} />
-          ) : (
-            <Text style={styles.placeOrderBtnText}>{t('checkout.placeOrder')}</Text>
-          )}
-        </TouchableOpacity>
+        <Animated.View style={{ transform: [{ scale: placeBtnScale }] }}>
+          <TouchableOpacity
+            style={[styles.placeOrderBtn, !canPlaceOrder && styles.btnDisabled]}
+            onPress={pulseAndPlace}
+            disabled={!canPlaceOrder}
+            activeOpacity={0.9}
+          >
+            {placing ? (
+              <LoadingDots />
+            ) : (
+              <Text style={styles.placeOrderBtnText}>{t('checkout.placeOrder')}</Text>
+            )}
+          </TouchableOpacity>
+        </Animated.View>
+        <Text style={styles.secureFooter}>🔒  {t('checkout.securePayment')}</Text>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.background },
 
-  // Loading
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background, gap: Spacing.md },
   loadingText:      { fontSize: FontSize.md, color: Colors.textLight },
 
-  // List
   listContent: { paddingBottom: 0 },
+
+  // Trust badge
+  trustBadge: {
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    backgroundColor: '#E8F8F0',
+    borderRadius: Radius.full,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  trustBadgeText: {
+    color: Colors.accent,
+    fontWeight: '800',
+    fontSize: FontSize.sm,
+  },
 
   // Section card
   section: {
     backgroundColor: Colors.card, marginHorizontal: Spacing.lg,
     marginTop: Spacing.md, borderRadius: Radius.lg,
     padding: Spacing.lg, gap: Spacing.md,
+    ...Shadow.card,
   },
   sectionNoBottomPad: { paddingBottom: 0 },
   sectionNoTopPad:    { borderTopLeftRadius: 0, borderTopRightRadius: 0, paddingTop: 0, marginTop: 0 },
-  sectionTitle: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text },
+  sectionTitle: { fontSize: FontSize.lg, fontWeight: '800', color: Colors.text },
+  sectionSub:   { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '700', marginTop: 2 },
 
-  // City chip
-  cityChipRow: { flexDirection: 'row' },
-  cityChip: {
-    fontSize: FontSize.sm, color: Colors.primary, fontWeight: '600',
-    backgroundColor: '#FFF0F3', paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs, borderRadius: Radius.full,
-    alignSelf: 'flex-start',
+  // Address header
+  addressHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
   },
+  pinCircle: {
+    width: 48, height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pinEmoji: { fontSize: 24 },
 
   // Address form
   fieldGroup: { gap: Spacing.xs },
-  fieldLabel: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textLight },
+  fieldLabel: { fontSize: FontSize.sm, fontWeight: '700', color: Colors.textLight },
   textInput: {
     borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md,
     paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
@@ -451,11 +515,11 @@ const styles = StyleSheet.create({
     minHeight: MIN_TAP, justifyContent: 'center',
   },
   btnDisabled:  { backgroundColor: Colors.disabled },
-  btnConfirmed: { backgroundColor: Colors.success },
-  confirmAddressBtnText: { color: Colors.white, fontSize: FontSize.md, fontWeight: '700' },
+  btnConfirmed: { backgroundColor: Colors.accent },
+  confirmAddressBtnText: { color: Colors.white, fontSize: FontSize.md, fontWeight: '800' },
 
   // Order summary
-  shopNameRow:   { fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
+  shopNameRow:   { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
   summaryItem: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'flex-start', paddingHorizontal: Spacing.lg,
@@ -463,20 +527,20 @@ const styles = StyleSheet.create({
     minHeight: MIN_TAP,
   },
   summaryItemLeft:  { flex: 1, gap: 2 },
-  summaryItemName:  { fontSize: FontSize.md, color: Colors.text, fontWeight: '500', paddingRight: Spacing.md },
+  summaryItemName:  { fontSize: FontSize.md, color: Colors.text, fontWeight: '600', paddingRight: Spacing.md },
   summaryItemQty:   { fontSize: FontSize.sm, color: Colors.textMuted },
-  summaryItemPrice: { fontSize: FontSize.md, fontWeight: '700', color: Colors.primary },
+  summaryItemPrice: { fontSize: FontSize.md, fontWeight: '800', color: Colors.primary },
   itemSeparator:    { height: 1, backgroundColor: Colors.border },
 
   // Pricing
   divider:      { height: 1, backgroundColor: Colors.border, marginBottom: Spacing.xs },
   pricingRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   pricingLabel: { fontSize: FontSize.md, color: Colors.textLight },
-  pricingValue: { fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
+  pricingValue: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
   pricingMuted: { fontSize: FontSize.sm, color: Colors.textMuted, fontStyle: 'italic' },
   totalRow:     { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: Spacing.sm, marginTop: Spacing.xs },
-  totalLabel:   { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text },
-  totalValue:   { fontSize: FontSize.lg, fontWeight: '800', color: Colors.primary },
+  totalLabel:   { fontSize: FontSize.lg, fontWeight: '800', color: Colors.text },
+  totalValue:   { fontSize: FontSize.lg, fontWeight: '900', color: Colors.primary },
   breakdownText:{ fontSize: FontSize.sm, color: Colors.textMuted, fontStyle: 'italic', marginTop: Spacing.xs },
 
   // Payment method cards
@@ -485,32 +549,34 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: Colors.border, borderRadius: Radius.md,
     padding: Spacing.md, minHeight: MIN_TAP + 16,
   },
-  payCardSelected: { borderColor: Colors.primary, backgroundColor: '#FFF0F3' },
+  payCardSelected: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
   payCardLeft:  { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, flex: 1 },
   payCardRight: { marginLeft: Spacing.sm },
   payCardIcon:  { fontSize: 26 },
   payCardText:  { gap: 2 },
-  payCardTitle: { fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
+  payCardTitle: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
   payCardTitleSelected: { color: Colors.primary },
   payCardHint:  { fontSize: FontSize.sm, color: Colors.textMuted },
   radio: {
-    width: 22, height: 22, borderRadius: Radius.full,
+    width: 26, height: 26, borderRadius: Radius.full,
     borderWidth: 2, borderColor: Colors.border,
     justifyContent: 'center', alignItems: 'center',
+    overflow: 'hidden',
   },
-  radioSelected: { borderColor: Colors.primary },
-  radioDot: {
-    width: 10, height: 10, borderRadius: Radius.full,
-    backgroundColor: Colors.primary,
+  radioSelected: { borderColor: Colors.primary, backgroundColor: Colors.primary },
+  radioCheck: { alignItems: 'center', justifyContent: 'center' },
+  radioCheckText: {
+    color: Colors.white,
+    fontSize: 14,
+    fontWeight: '900',
   },
   comingSoonBadge: {
     backgroundColor: Colors.warning, borderRadius: Radius.sm,
     paddingHorizontal: Spacing.sm, paddingVertical: 2,
   },
-  comingSoonBadgeText: { fontSize: FontSize.xs, color: Colors.white, fontWeight: '700' },
+  comingSoonBadgeText: { fontSize: FontSize.xs, color: Colors.text, fontWeight: '800' },
 
-  // Bottom spacer
-  bottomSpacer: { height: 140 },
+  bottomSpacer: { height: 180 },
 
   // Sticky bottom
   stickyBottom: {
@@ -524,12 +590,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingBottom: Spacing.sm,
   },
-  orderTotalLabel: { fontSize: FontSize.md, color: Colors.textLight, fontWeight: '600' },
-  orderTotalValue: { fontSize: FontSize.xl, fontWeight: '800', color: Colors.primary },
+  orderTotalLabel: { fontSize: FontSize.md, color: Colors.textLight, fontWeight: '700' },
+  orderTotalValue: { fontSize: FontSize.xl, fontWeight: '900', color: Colors.primary },
   placeOrderBtn: {
     backgroundColor: Colors.primary, borderRadius: Radius.lg,
     paddingVertical: Spacing.md, alignItems: 'center',
     minHeight: MIN_TAP, justifyContent: 'center',
+    ...Shadow.strong,
   },
-  placeOrderBtnText: { color: Colors.white, fontSize: FontSize.lg, fontWeight: '800' },
+  placeOrderBtnText: { color: Colors.white, fontSize: FontSize.lg, fontWeight: '900' },
+  secureFooter: {
+    textAlign: 'center',
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    fontWeight: '700',
+    marginTop: 6,
+  },
+
+  // Loading dots
+  dotsRow: { flexDirection: 'row', gap: 6 },
+  dot: {
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: Colors.white,
+  },
 });

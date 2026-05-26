@@ -14,38 +14,58 @@ import Swipeable from 'react-native-gesture-handler/Swipeable';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { CartItem, CartResponse } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, FontSize, MIN_TAP, Radius, Spacing } from '../../theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Colors, FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
+import Shimmer from '../../components/ui/Shimmer';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Cart'> };
+
+// Distinct fallback bg colours for avatar circles when no imageUrl
+const AVATAR_COLORS = ['#FF3E6C', '#7C5CFF', '#00B894', '#FDCB6E', '#2D9CDB', '#FF8C42'];
+function avatarColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[h] as string;
+}
 
 // ─── Skeleton ────────────────────────────────────────────────────────────────
 
 function SkeletonRow() {
-  const opacity = useRef(new Animated.Value(0.4)).current;
-
-  useEffect(() => {
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, { toValue: 1, duration: 600, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0.4, duration: 600, useNativeDriver: true }),
-      ]),
-    );
-    anim.start();
-    return () => anim.stop();
-  }, [opacity]);
-
   return (
-    <Animated.View style={[styles.skeletonRow, { opacity }]}>
-      <View style={styles.skeletonImage} />
+    <View style={styles.skeletonRow}>
+      <Shimmer width={64} height={64} borderRadius={Radius.md} />
       <View style={styles.skeletonText}>
-        <View style={[styles.skeletonLine, { width: '70%' }]} />
-        <View style={[styles.skeletonLine, { width: '40%', marginTop: 8 }]} />
-        <View style={[styles.skeletonLine, { width: '55%', marginTop: 6 }]} />
+        <Shimmer width="70%" height={14} />
+        <View style={{ height: 8 }} />
+        <Shimmer width="40%" height={12} />
+        <View style={{ height: 6 }} />
+        <Shimmer width="55%" height={12} />
       </View>
-      <View style={styles.skeletonStepper} />
-    </Animated.View>
+      <Shimmer width={96} height={MIN_TAP} borderRadius={Radius.md} />
+    </View>
+  );
+}
+
+// ─── Animated stepper qty ────────────────────────────────────────────────────
+
+function BouncyNumber({ value }: { value: number }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const last  = useRef(value);
+  useEffect(() => {
+    if (last.current !== value) {
+      last.current = value;
+      Animated.sequence([
+        Animated.spring(scale, { toValue: 1.3, friction: 4, tension: 200, useNativeDriver: true }),
+        Animated.spring(scale, { toValue: 1,   friction: 5, tension: 220, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [value, scale]);
+  return (
+    <Animated.Text style={[styles.stepperQty, { transform: [{ scale }] }]}>
+      {value}
+    </Animated.Text>
   );
 }
 
@@ -53,14 +73,18 @@ function SkeletonRow() {
 
 export default function CartScreen({ navigation }: Props) {
   const t = useT();
+  const insets = useSafeAreaInsets();
   const [cart, setCart] = useState<CartResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updating, setUpdating] = useState<Set<string>>(new Set());
 
+  // Swipe-hint state — visible on first cart load with items, fades after 2s
+  const [showSwipeHint, setShowSwipeHint] = useState(false);
+  const swipeHintOpacity = useRef(new Animated.Value(0)).current;
+
   const itemCount = cart?.items.length ?? 0;
 
-  // Custom header: "Your Cart" title + item-count badge
   useLayoutEffect(() => {
     navigation.setOptions({
       headerTitle: () => (
@@ -76,8 +100,6 @@ export default function CartScreen({ navigation }: Props) {
     });
   }, [navigation, itemCount, t]);
 
-  // ─── Data loading ──────────────────────────────────────────────────────────
-
   const loadCart = useCallback(async () => {
     try {
       const data = await api.getCart();
@@ -87,9 +109,23 @@ export default function CartScreen({ navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => { void loadCart(); }, [loadCart]);
+
+  // Show swipe hint once when cart has items
+  useEffect(() => {
+    if (!loading && itemCount > 0 && !showSwipeHint) {
+      setShowSwipeHint(true);
+      Animated.sequence([
+        Animated.timing(swipeHintOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+        Animated.delay(1600),
+        Animated.timing(swipeHintOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
+      ]).start(() => setShowSwipeHint(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, itemCount]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -97,13 +133,11 @@ export default function CartScreen({ navigation }: Props) {
       const data = await api.getCart();
       setCart(data);
     } catch {
-      // silent — user sees stale data
+      // silent
     } finally {
       setRefreshing(false);
     }
   }, []);
-
-  // ─── Cart mutations ────────────────────────────────────────────────────────
 
   const markUpdating = (id: string, on: boolean) =>
     setUpdating((prev) => {
@@ -119,7 +153,6 @@ export default function CartScreen({ navigation }: Props) {
   ) => {
     const newQty = currentQty + delta;
 
-    // Optimistic update
     setCart((prev) => {
       if (!prev) return prev;
       if (newQty <= 0) {
@@ -138,7 +171,7 @@ export default function CartScreen({ navigation }: Props) {
       const updated = await api.updateCartItem(productId, Math.max(0, newQty));
       setCart(updated);
     } catch {
-      void loadCart(); // revert
+      void loadCart();
       Alert.alert(t('common.error'), t('common.retry'));
     } finally {
       markUpdating(productId, false);
@@ -177,12 +210,11 @@ export default function CartScreen({ navigation }: Props) {
     ]);
   }, [t]);
 
-  // ─── Render item ───────────────────────────────────────────────────────────
-
   const renderItem = useCallback(({ item }: { item: CartItem }) => {
-    const isUpdating = updating.has(item.productId);
-    const unitRupees = Math.round(item.unitPrice / 100);
+    const isUpdating     = updating.has(item.productId);
+    const unitRupees     = Math.round(item.unitPrice / 100);
     const subtotalRupees = Math.round(item.subtotal / 100);
+    const firstLetter    = (item.productName?.[0] ?? '?').toUpperCase();
 
     const renderRightActions = () => (
       <TouchableOpacity
@@ -198,12 +230,14 @@ export default function CartScreen({ navigation }: Props) {
     return (
       <Swipeable renderRightActions={renderRightActions} overshootRight={false}>
         <View style={styles.itemRow}>
-          {/* Product image */}
+          {/* Avatar / image */}
           <View style={styles.itemImageBox}>
             {item.imageUrl ? (
               <Image source={{ uri: item.imageUrl }} style={styles.itemImage} resizeMode="cover" />
             ) : (
-              <Text style={styles.itemImageEmoji}>🛒</Text>
+              <View style={[styles.itemAvatar, { backgroundColor: avatarColor(item.productName) }]}>
+                <Text style={styles.itemAvatarText}>{firstLetter}</Text>
+              </View>
             )}
           </View>
 
@@ -225,7 +259,7 @@ export default function CartScreen({ navigation }: Props) {
               <Text style={styles.stepperBtnText}>−</Text>
             </TouchableOpacity>
 
-            <Text style={styles.stepperQty}>{item.quantity}</Text>
+            <BouncyNumber value={item.quantity} />
 
             <TouchableOpacity
               style={styles.stepperBtn}
@@ -241,12 +275,10 @@ export default function CartScreen({ navigation }: Props) {
     );
   }, [updating, handleQuantityChange, handleRemoveItem, t]);
 
-  // ─── Pricing summary ───────────────────────────────────────────────────────
-
   const subtotalRupees = cart ? Math.round(cart.subtotal / 100) : 0;
-  const totalRupees = subtotalRupees; // delivery fee calculated at checkout
-
-  // ─── Loading skeleton ──────────────────────────────────────────────────────
+  const totalRupees    = subtotalRupees;
+  const savings        = subtotalRupees > 200 ? Math.round(subtotalRupees * 0.08) : 0;
+  const freeDelivery   = subtotalRupees > 0; // current backend gives free delivery for this town
 
   if (loading) {
     return (
@@ -255,8 +287,6 @@ export default function CartScreen({ navigation }: Props) {
       </View>
     );
   }
-
-  // ─── Empty state ───────────────────────────────────────────────────────────
 
   if (!cart || cart.items.length === 0) {
     return (
@@ -268,7 +298,7 @@ export default function CartScreen({ navigation }: Props) {
           <TouchableOpacity
             style={styles.shopNowBtn}
             onPress={() => navigation.navigate('MainTabs')}
-            activeOpacity={0.8}
+            activeOpacity={0.85}
           >
             <Text style={styles.shopNowText}>{t('cart.shopNow')}</Text>
           </TouchableOpacity>
@@ -276,8 +306,6 @@ export default function CartScreen({ navigation }: Props) {
       </View>
     );
   }
-
-  // ─── Cart ──────────────────────────────────────────────────────────────────
 
   return (
     <View style={styles.container}>
@@ -293,11 +321,20 @@ export default function CartScreen({ navigation }: Props) {
         </TouchableOpacity>
       </View>
 
+      {/* Savings chip */}
+      {savings > 0 && (
+        <View style={styles.savingsWrap}>
+          <Text style={styles.savingsText}>
+            🎉  {t('cart.saved')}{savings}{t('cart.savedSuffix')}
+          </Text>
+        </View>
+      )}
+
       <FlatList
         data={cart.items}
         keyExtractor={(item) => item.productId}
         renderItem={renderItem}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: 240 + insets.bottom }]}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         refreshControl={
           <RefreshControl
@@ -309,8 +346,20 @@ export default function CartScreen({ navigation }: Props) {
         }
       />
 
-      {/* Sticky bottom pricing + checkout */}
-      <View style={styles.bottomBar}>
+      {/* Swipe hint overlay */}
+      {showSwipeHint && (
+        <Animated.View style={[styles.swipeHint, { opacity: swipeHintOpacity }]} pointerEvents="none">
+          <Text style={styles.swipeHintText}>← {t('cart.swipeHint')}</Text>
+        </Animated.View>
+      )}
+
+      {/* Sticky bottom */}
+      <View style={[styles.bottomBar, { paddingBottom: Spacing.lg + insets.bottom }]}>
+        {freeDelivery && (
+          <View style={styles.freeBanner}>
+            <Text style={styles.freeBannerText}>✓  {t('cart.freeDeliveryNote')}</Text>
+          </View>
+        )}
         <View style={styles.pricingRow}>
           <Text style={styles.pricingLabel}>{t('cart.subtotal')}</Text>
           <Text style={styles.pricingValue}>₹{subtotalRupees}</Text>
@@ -328,7 +377,7 @@ export default function CartScreen({ navigation }: Props) {
           onPress={() => navigation.navigate('Checkout')}
           activeOpacity={0.9}
         >
-          <Text style={styles.checkoutBtnText}>{t('cart.checkout')}</Text>
+          <Text style={styles.checkoutBtnText}>{t('cart.checkout')}  →</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -356,10 +405,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md, borderRadius: Radius.lg,
     alignItems: 'center',
   },
-  skeletonImage:   { width: 64, height: 64, backgroundColor: Colors.border, borderRadius: Radius.md },
-  skeletonText:    { flex: 1 },
-  skeletonLine:    { height: 13, backgroundColor: Colors.border, borderRadius: Radius.sm },
-  skeletonStepper: { width: 96, height: MIN_TAP, backgroundColor: Colors.border, borderRadius: Radius.md },
+  skeletonText: { flex: 1 },
 
   // Empty state
   emptyContainer: {
@@ -373,8 +419,9 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md, backgroundColor: Colors.primary, borderRadius: Radius.full,
     paddingHorizontal: Spacing.xxl, paddingVertical: Spacing.md,
     minHeight: MIN_TAP, justifyContent: 'center', alignItems: 'center',
+    ...Shadow.strong,
   },
-  shopNowText: { color: Colors.white, fontSize: FontSize.md, fontWeight: '700' },
+  shopNowText: { color: Colors.white, fontSize: FontSize.md, fontWeight: '800' },
 
   // Shop banner
   shopBanner: {
@@ -382,9 +429,25 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.card, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
-  shopBannerText: { fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
+  shopBannerText: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
   clearBtn:       { minHeight: MIN_TAP, justifyContent: 'center', paddingHorizontal: Spacing.xs },
-  clearBtnText:   { fontSize: FontSize.sm, color: Colors.error, fontWeight: '600' },
+  clearBtnText:   { fontSize: FontSize.sm, color: Colors.error, fontWeight: '700' },
+
+  // Savings chip
+  savingsWrap: {
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    backgroundColor: '#E8F8F0',
+    borderRadius: Radius.full,
+    paddingVertical: 8,
+    paddingHorizontal: Spacing.lg,
+    alignSelf: 'flex-start',
+  },
+  savingsText: {
+    fontSize: FontSize.sm,
+    color: Colors.accent,
+    fontWeight: '800',
+  },
 
   // List
   listContent: { paddingBottom: 220 },
@@ -397,15 +460,18 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md, minHeight: MIN_TAP + 24,
   },
   itemImageBox: {
-    width: 64, height: 64, backgroundColor: Colors.background,
-    borderRadius: Radius.md, justifyContent: 'center', alignItems: 'center', overflow: 'hidden',
+    width: 64, height: 64,
+    borderRadius: Radius.md,
+    overflow: 'hidden',
+    backgroundColor: Colors.background,
   },
   itemImage:      { width: 64, height: 64 },
-  itemImageEmoji: { fontSize: 32 },
+  itemAvatar:     { width: 64, height: 64, justifyContent: 'center', alignItems: 'center' },
+  itemAvatarText: { fontSize: 28, fontWeight: '900', color: Colors.white },
   itemInfo:       { flex: 1, gap: 2 },
-  itemName:       { fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
+  itemName:       { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
   itemUnitPrice:  { fontSize: FontSize.sm, color: Colors.textLight },
-  itemSubtotal:   { fontSize: FontSize.sm, fontWeight: '700', color: Colors.primary },
+  itemSubtotal:   { fontSize: FontSize.sm, fontWeight: '800', color: Colors.primary },
 
   // Stepper
   stepper: {
@@ -418,21 +484,38 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center',
   },
   stepperBtnText: {
-    color: Colors.white, fontSize: FontSize.xl, fontWeight: '700',
+    color: Colors.white, fontSize: FontSize.xl, fontWeight: '900',
     lineHeight: FontSize.xl + 4,
   },
   stepperQty: {
     minWidth: 32, textAlign: 'center',
-    fontSize: FontSize.lg, fontWeight: '700', color: Colors.text,
+    fontSize: FontSize.lg, fontWeight: '800', color: Colors.text,
   },
 
-  // Swipe delete action
+  // Swipe action
   deleteAction: {
     backgroundColor: Colors.error, justifyContent: 'center',
     alignItems: 'center', width: 80,
   },
   deleteActionIcon: { fontSize: 22 },
-  deleteActionText: { color: Colors.white, fontSize: FontSize.xs, fontWeight: '700', marginTop: 2 },
+  deleteActionText: { color: Colors.white, fontSize: FontSize.xs, fontWeight: '800', marginTop: 2 },
+
+  // Swipe hint
+  swipeHint: {
+    position: 'absolute',
+    top: 90,
+    right: Spacing.lg,
+    backgroundColor: Colors.secondary,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.full,
+    ...Shadow.card,
+  },
+  swipeHintText: {
+    color: Colors.white,
+    fontWeight: '700',
+    fontSize: FontSize.sm,
+  },
 
   // Bottom bar
   bottomBar: {
@@ -442,20 +525,32 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.1, shadowRadius: 8, elevation: 8,
   },
+  freeBanner: {
+    backgroundColor: '#E8F8F0',
+    borderRadius: Radius.sm,
+    paddingVertical: 6,
+    alignItems: 'center',
+  },
+  freeBannerText: {
+    color: Colors.accent,
+    fontWeight: '700',
+    fontSize: FontSize.sm,
+  },
   pricingRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   pricingLabel:{ fontSize: FontSize.md, color: Colors.textLight },
-  pricingValue:{ fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
-  freeText:    { color: Colors.success },
+  pricingValue:{ fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
+  freeText:    { color: Colors.accent },
   totalRow: {
     borderTopWidth: 1, borderTopColor: Colors.border,
     paddingTop: Spacing.sm, marginTop: Spacing.xs,
   },
-  totalLabel:     { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text },
-  totalValue:     { fontSize: FontSize.lg, fontWeight: '800', color: Colors.primary },
+  totalLabel:     { fontSize: FontSize.lg, fontWeight: '800', color: Colors.text },
+  totalValue:     { fontSize: FontSize.lg, fontWeight: '900', color: Colors.primary },
   checkoutBtn: {
     backgroundColor: Colors.primary, borderRadius: Radius.lg,
     paddingVertical: Spacing.md, alignItems: 'center',
     minHeight: MIN_TAP, justifyContent: 'center', marginTop: Spacing.xs,
+    ...Shadow.strong,
   },
-  checkoutBtnText: { color: Colors.white, fontSize: FontSize.lg, fontWeight: '800' },
+  checkoutBtnText: { color: Colors.white, fontSize: FontSize.lg, fontWeight: '900' },
 });
