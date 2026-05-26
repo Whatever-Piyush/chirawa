@@ -11,7 +11,7 @@ type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Verify
 export default function VerifyOtpScreen({ route }: Props) {
   const { phone } = route.params;
   const { signIn } = useAuth();
-  const [otp, setOtp] = useState('');
+  const [otp, setOtp] = useState(__DEV__ ? '123456' : '');
   const [loading, setLoading] = useState(false);
   async function handleVerify() {
     if (otp.length !== 6) return;
@@ -32,6 +32,7 @@ export default function VerifyOtpScreen({ route }: Props) {
         <TextInput style={styles.input} placeholder="• • • • • •" placeholderTextColor={Colors.textMuted}
           keyboardType="number-pad" maxLength={6} value={otp}
           onChangeText={(v) => { setOtp(v); if (v.length === 6) void handleVerify(); }} autoFocus />
+        {__DEV__ && <Text style={styles.devHint}>Dev mode: OTP pre-filled</Text>}
         <TouchableOpacity style={[styles.btn, otp.length !== 6 && styles.btnOff]} onPress={handleVerify} disabled={otp.length !== 6 || loading}>
           {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.btnText}>Verify</Text>}
         </TouchableOpacity>
@@ -47,5 +48,6 @@ const styles = StyleSheet.create({
   input: { backgroundColor: Colors.white, borderWidth: 2, borderColor: Colors.primary, borderRadius: Radius.md, padding: Spacing.lg, fontSize: FontSize.xxxl, fontWeight: '700', textAlign: 'center', letterSpacing: 12, color: Colors.text },
   btn:    { backgroundColor: Colors.primary, borderRadius: Radius.md, height: 54, justifyContent: 'center', alignItems: 'center' },
   btnOff: { opacity: 0.5 },
-  btnText: { color: Colors.white, fontSize: FontSize.lg, fontWeight: '700' },
+  btnText:  { color: Colors.white, fontSize: FontSize.lg, fontWeight: '700' },
+  devHint:  { fontSize: FontSize.xs, color: Colors.textMuted, textAlign: 'center' },
 });

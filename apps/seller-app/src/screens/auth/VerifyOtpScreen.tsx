@@ -19,7 +19,7 @@ type Props = {
 export default function VerifyOtpScreen({ route }: Props) {
   const { phone }      = route.params;
   const { signIn }     = useAuth();
-  const [otp, setOtp]  = useState('');
+  const [otp, setOtp]  = useState(__DEV__ ? '123456' : '');
   const [loading, setLoading] = useState(false);
 
   async function handleVerify() {
@@ -57,6 +57,7 @@ export default function VerifyOtpScreen({ route }: Props) {
           onChangeText={(v) => { setOtp(v); if (v.length === 6) void handleVerify(); }}
           autoFocus
         />
+        {__DEV__ && <Text style={styles.devHint}>Dev mode: OTP pre-filled</Text>}
         <TouchableOpacity
           style={[styles.btn, otp.length !== 6 && styles.btnOff]}
           onPress={handleVerify}
@@ -81,5 +82,6 @@ const styles = StyleSheet.create({
   },
   btn:    { backgroundColor: Colors.accent, borderRadius: Radius.md, height: 54, justifyContent: 'center', alignItems: 'center' },
   btnOff: { opacity: 0.5 },
-  btnText: { color: Colors.white, fontSize: FontSize.lg, fontWeight: '700' },
+  btnText:  { color: Colors.white, fontSize: FontSize.lg, fontWeight: '700' },
+  devHint:  { fontSize: FontSize.xs, color: Colors.textMuted, textAlign: 'center' },
 });

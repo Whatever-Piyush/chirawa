@@ -97,6 +97,11 @@ export function createOtpService(redis: Redis, prisma: PrismaClient) {
 
   // ── Verify OTP ─────────────────────────────────────────────────────────────
   async function verifyOtp(phone: string, code: string): Promise<void> {
+    // Dev bypass — 123456 always passes in non-production environments
+    if (process.env.NODE_ENV === 'development' && code === '123456') {
+      return;
+    }
+
     // Check lockout
     const locked = await redis.get(keys.lockout(phone));
     if (locked) {
