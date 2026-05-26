@@ -8,10 +8,12 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { Colors, Spacing, FontSize, Radius } from '../../theme';
 import { api } from '../../services/api.service';
+import { useT } from '@chirawa/i18n';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'OtpLogin'> };
 
 export default function OtpLoginScreen({ navigation }: Props) {
+  const t = useT();
   const [phone,   setPhone]   = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -24,7 +26,7 @@ export default function OtpLoginScreen({ navigation }: Props) {
       await api.sendOtp({ phone });
       navigation.navigate('VerifyOtp', { phone });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Kuch galat ho gaya';
+      const msg = err instanceof Error ? err.message : t('common.error');
       Alert.alert('Error', msg);
     } finally {
       setLoading(false);
@@ -42,12 +44,12 @@ export default function OtpLoginScreen({ navigation }: Props) {
         <View style={styles.logoBox}>
           <Text style={styles.logoEmoji}>🛵</Text>
           <Text style={styles.logoText}>Bringly</Text>
-          <Text style={styles.logoSub}>Ghar tak pahunchao</Text>
+          <Text style={styles.logoSub}>{t('auth.tagline')}</Text>
         </View>
 
         {/* Form */}
         <View style={styles.form}>
-          <Text style={styles.label}>Apna mobile number dalein</Text>
+          <Text style={styles.label}>{t('auth.phoneLabel')}</Text>
 
           <View style={styles.phoneRow}>
             <View style={styles.countryCode}>
@@ -73,13 +75,11 @@ export default function OtpLoginScreen({ navigation }: Props) {
           >
             {loading
               ? <ActivityIndicator color={Colors.white} />
-              : <Text style={styles.btnText}>OTP Bhejo</Text>
+              : <Text style={styles.btnText}>{t('auth.sendOtp')}</Text>
             }
           </TouchableOpacity>
 
-          <Text style={styles.terms}>
-            Login karke aap hamare Terms aur Privacy Policy se sehmat hote hain
-          </Text>
+          <Text style={styles.terms}>{t('auth.terms')}</Text>
         </View>
       </View>
     </KeyboardAvoidingView>

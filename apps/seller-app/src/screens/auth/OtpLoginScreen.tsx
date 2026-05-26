@@ -7,10 +7,12 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { Colors, Spacing, FontSize, Radius } from '../../theme';
 import { SellerApi } from '../../services/api.service';
+import { useT } from '@chirawa/i18n';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'OtpLogin'> };
 
 export default function OtpLoginScreen({ navigation }: Props) {
+  const t = useT();
   const [phone, setPhone]     = useState('');
   const [loading, setLoading] = useState(false);
   const isValid = /^[6-9]\d{9}$/.test(phone);
@@ -22,7 +24,7 @@ export default function OtpLoginScreen({ navigation }: Props) {
       await SellerApi.sendOtp(phone);
       navigation.navigate('VerifyOtp', { phone });
     } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Kuch galat hua');
+      Alert.alert('Error', e instanceof Error ? e.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -32,12 +34,12 @@ export default function OtpLoginScreen({ navigation }: Props) {
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.content}>
         <Text style={styles.emoji}>🏪</Text>
-        <Text style={styles.title}>Seller Login</Text>
-        <Text style={styles.subtitle}>Apni dukaan manage karein</Text>
+        <Text style={styles.title}>{t('auth.sellerLogin')}</Text>
+        <Text style={styles.subtitle}>{t('auth.sellerTagline')}</Text>
 
         <TextInput
           style={styles.input}
-          placeholder="Mobile Number"
+          placeholder={t('auth.mobileNumber')}
           placeholderTextColor={Colors.textMuted}
           keyboardType="phone-pad"
           maxLength={10}
@@ -53,7 +55,7 @@ export default function OtpLoginScreen({ navigation }: Props) {
         >
           {loading
             ? <ActivityIndicator color={Colors.white} />
-            : <Text style={styles.btnText}>OTP Bhejo</Text>
+            : <Text style={styles.btnText}>{t('auth.sendOtp')}</Text>
           }
         </TouchableOpacity>
       </View>
@@ -72,7 +74,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md, padding: Spacing.lg, fontSize: FontSize.xl,
     fontWeight: '600', color: Colors.text,
   },
-  btn:    { backgroundColor: Colors.accent, borderRadius: Radius.md, height: 54, justifyContent: 'center', alignItems: 'center' },
+  btn:    { backgroundColor: Colors.primary, borderRadius: Radius.md, height: 54, justifyContent: 'center', alignItems: 'center' },
   btnOff: { opacity: 0.5 },
   btnText: { color: Colors.white, fontSize: FontSize.lg, fontWeight: '700' },
 });

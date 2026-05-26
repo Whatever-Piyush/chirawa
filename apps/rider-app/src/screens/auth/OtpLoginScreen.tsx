@@ -4,33 +4,48 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { Colors, Spacing, FontSize, Radius } from '../../theme';
 import { RiderApi } from '../../services/api.service';
+import { useT } from '@chirawa/i18n';
+
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'OtpLogin'> };
+
 export default function OtpLoginScreen({ navigation }: Props) {
-  const [phone, setPhone]   = useState('');
+  const t = useT();
+  const [phone, setPhone]     = useState('');
   const [loading, setLoading] = useState(false);
   const isValid = /^[6-9]\d{9}$/.test(phone);
+
   async function handleSend() {
     if (!isValid) return;
     setLoading(true);
     try { await RiderApi.sendOtp(phone); navigation.navigate('VerifyOtp', { phone }); }
-    catch (e: unknown) { Alert.alert('Error', e instanceof Error ? e.message : 'Kuch galat hua'); }
+    catch (e: unknown) { Alert.alert('Error', e instanceof Error ? e.message : t('common.error')); }
     finally { setLoading(false); }
   }
+
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.content}>
         <Text style={styles.emoji}>🚴</Text>
-        <Text style={styles.title}>Rider Login</Text>
-        <Text style={styles.sub}>Deliveries manage karein</Text>
-        <TextInput style={styles.input} placeholder="Mobile Number" placeholderTextColor={Colors.textMuted}
-          keyboardType="phone-pad" maxLength={10} value={phone} onChangeText={setPhone} autoFocus />
+        <Text style={styles.title}>{t('auth.riderLogin')}</Text>
+        <Text style={styles.sub}>{t('auth.riderTagline')}</Text>
+        <TextInput
+          style={styles.input}
+          placeholder={t('auth.mobileNumber')}
+          placeholderTextColor={Colors.textMuted}
+          keyboardType="phone-pad"
+          maxLength={10}
+          value={phone}
+          onChangeText={setPhone}
+          autoFocus
+        />
         <TouchableOpacity style={[styles.btn, !isValid && styles.btnOff]} onPress={handleSend} disabled={!isValid || loading}>
-          {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.btnText}>OTP Bhejo</Text>}
+          {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.btnText}>{t('auth.sendOtp')}</Text>}
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
 }
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   content:   { flex: 1, justifyContent: 'center', padding: Spacing.xl, gap: Spacing.lg },

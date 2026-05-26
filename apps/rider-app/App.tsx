@@ -2,16 +2,19 @@ import 'react-native-gesture-handler';
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { LanguageProvider } from '@chirawa/i18n';
 import { AuthProvider } from './src/context/AuthContext';
 import AppNavigator from './src/navigation/AppNavigator';
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <StatusBar style="light" backgroundColor="#27AE60" />
-        <AppNavigator />
-      </AuthProvider>
-    </SafeAreaProvider>
+    <LanguageProvider>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <StatusBar style="light" backgroundColor="#27AE60" />
+          <AppNavigator />
+        </AuthProvider>
+      </SafeAreaProvider>
+    </LanguageProvider>
   );
 }
