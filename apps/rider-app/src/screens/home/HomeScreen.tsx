@@ -106,7 +106,7 @@ export default function HomeScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Chirawa Rider</Text>
+        <Text style={styles.headerTitle}>Bringly Rider</Text>
         <View style={[styles.statusDot, { backgroundColor: isOnline ? Colors.online : Colors.offline }]} />
       </View>
 
