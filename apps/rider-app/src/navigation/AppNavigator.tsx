@@ -4,7 +4,9 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '@chirawa/i18n';
 import { Colors } from '../theme';
+import LanguagePickerScreen from '../screens/LanguagePickerScreen';
 
 import OtpLoginScreen    from '../screens/auth/OtpLoginScreen';
 import VerifyOtpScreen   from '../screens/auth/VerifyOtpScreen';
@@ -46,6 +48,16 @@ function MainTabs() {
 
 export default function AppNavigator() {
   const { state } = useAuth();
+  const { hasChosen } = useLanguage();
+
+  if (hasChosen === null) {
+    return <View style={{ flex: 1, backgroundColor: '#FF3E6C' }} />;
+  }
+
+  if (hasChosen === false) {
+    return <LanguagePickerScreen />;
+  }
+
   if (state.isLoading) return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator color={Colors.primary} size="large" /></View>;
   return (
     <NavigationContainer>
