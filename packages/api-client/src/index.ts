@@ -13,6 +13,8 @@ import type {
   PricingPreviewRequest,
   PricingPreviewResponse,
   OrderDetailResponse,
+  CreateAddressRequest,
+  AddressResponse,
 } from '@chirawa/types';
 
 export class ApiError extends Error {
@@ -180,6 +182,16 @@ export class ChirawaApiClient {
 
   async clearCart(): Promise<void> {
     return this.request<void>('DELETE', '/cart');
+  }
+
+  // ─── Addresses ───────────────────────────────────────────────────────────
+
+  async createAddress(data: CreateAddressRequest): Promise<AddressResponse> {
+    return this.request<AddressResponse>('POST', '/users/me/addresses', data);
+  }
+
+  async getAddresses(): Promise<AddressResponse[]> {
+    return this.request<AddressResponse[]>('GET', '/users/me/addresses');
   }
 
   // ─── Pricing ─────────────────────────────────────────────────────────────

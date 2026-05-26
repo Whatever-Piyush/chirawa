@@ -12,6 +12,7 @@ export * from './dto/order.dto';
 export * from './dto/cart.dto';
 export * from './dto/product.dto';
 export * from './dto/pricing.dto';
+export * from './dto/address.dto';
 
 // Domain types
 export * from './domain/money';
