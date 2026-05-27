@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, KeyboardAvoidingView, Platform,
-  Alert, ActivityIndicator,
+  Alert, ActivityIndicator, Keyboard, ScrollView,
 } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
@@ -27,7 +27,7 @@ export default function OtpLoginScreen({ navigation }: Props) {
       navigation.navigate('VerifyOtp', { phone });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : t('common.error');
-      Alert.alert('Error', msg);
+      Alert.alert(t('common.error'), msg);
     } finally {
       setLoading(false);
     }
@@ -36,9 +36,13 @@ export default function OtpLoginScreen({ navigation }: Props) {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
 
         {/* Logo */}
         <View style={styles.logoBox}>
@@ -63,6 +67,9 @@ export default function OtpLoginScreen({ navigation }: Props) {
               maxLength={10}
               value={phone}
               onChangeText={setPhone}
+              returnKeyType="done"
+              blurOnSubmit={true}
+              onSubmitEditing={() => Keyboard.dismiss()}
               autoFocus
             />
           </View>
@@ -81,14 +88,14 @@ export default function OtpLoginScreen({ navigation }: Props) {
 
           <Text style={styles.terms}>{t('auth.terms')}</Text>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  content:   { flex: 1, justifyContent: 'center', paddingHorizontal: Spacing.xl },
+  content:   { flexGrow: 1, justifyContent: 'center', paddingHorizontal: Spacing.xl, paddingVertical: Spacing.xxl },
   logoBox:   { alignItems: 'center', marginBottom: Spacing.xxxl },
   logoEmoji: { fontSize: 64, marginBottom: Spacing.sm },
   logoText:  { fontSize: FontSize.xxl, fontWeight: '800', color: Colors.primary },

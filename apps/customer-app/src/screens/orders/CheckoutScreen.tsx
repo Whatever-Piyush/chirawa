@@ -288,9 +288,9 @@ export default function CheckoutScreen({ navigation }: Props) {
             onChangeText={setStreet}
             placeholder={t('checkout.streetPlaceholder')}
             placeholderTextColor={Colors.textMuted}
-            returnKeyType="next"
+            returnKeyType="done"
             autoCapitalize="words"
-            blurOnSubmit={false}
+            blurOnSubmit={true}
             onSubmitEditing={() => Keyboard.dismiss()}
           />
         </View>

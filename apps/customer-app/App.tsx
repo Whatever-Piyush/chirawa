@@ -12,18 +12,18 @@ import { ToastProvider } from './src/components/ui';
 export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ErrorBoundary>
-        <ToastProvider>
-          <LanguageProvider>
-            <SafeAreaProvider>
+      <SafeAreaProvider>
+        <ErrorBoundary>
+          <ToastProvider>
+            <LanguageProvider>
               <AuthProvider>
                 <StatusBar style="light" translucent backgroundColor="transparent" />
                 <AppNavigator />
               </AuthProvider>
-            </SafeAreaProvider>
-          </LanguageProvider>
-        </ToastProvider>
-      </ErrorBoundary>
+            </LanguageProvider>
+          </ToastProvider>
+        </ErrorBoundary>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

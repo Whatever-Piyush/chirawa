@@ -1,12 +1,23 @@
 import React, { useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, ActivityIndicator, Animated, StyleSheet } from 'react-native';
+import {
+  createBottomTabNavigator,
+  type BottomTabBarButtonProps,
+} from '@react-navigation/bottom-tabs';
+import {
+  View,
+  ActivityIndicator,
+  Animated,
+  Pressable,
+  StyleSheet,
+  type GestureResponderEvent,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
-import { useLanguage } from '@chirawa/i18n';
-import { Colors } from '../theme';
+import { useLanguage, useT } from '@chirawa/i18n';
+import { Colors, FontSize, Spacing } from '../theme';
+import { Text } from '../components/ui';
 import LanguagePickerScreen from '../screens/LanguagePickerScreen';
 
 // Auth Screens
@@ -43,11 +54,13 @@ export type TabParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab   = createBottomTabNavigator<TabParamList>();
 
-const TAB_ICONS: Record<string, string> = {
-  Home: '🏠', OrderHistory: '📦', Profile: '👤',
+const TAB_ICONS: Record<keyof TabParamList, string> = {
+  Home:         '🏠',
+  OrderHistory: '📦',
+  Profile:      '👤',
 };
 
-function TabIcon({ name, focused }: { name: string; focused: boolean }) {
+function TabIcon({ name, focused }: { name: keyof TabParamList; focused: boolean }) {
   const scale = useRef(new Animated.Value(focused ? 1.1 : 1)).current;
 
   useEffect(() => {
@@ -60,44 +73,103 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
   }, [focused, scale]);
 
   return (
-    <Animated.Text
-      style={[
-        tabStyles.icon,
-        { opacity: focused ? 1 : 0.45, transform: [{ scale }] },
-      ]}
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Text
+        variant="body"
+        style={{ fontSize: 22, lineHeight: 26, opacity: focused ? 1 : 0.55 }}
+      >
+        {TAB_ICONS[name]}
+      </Text>
+    </Animated.View>
+  );
+}
+
+function TabLabel({ label, focused }: { label: string; focused: boolean }) {
+  return (
+    <Text
+      variant="caption"
+      color={focused ? Colors.primary : Colors.textTertiary}
+      weight={focused ? 'bold' : 'regular'}
+      style={{ fontSize: FontSize.xs, marginTop: 2 }}
     >
-      {TAB_ICONS[name] ?? '•'}
-    </Animated.Text>
+      {label}
+    </Text>
+  );
+}
+
+function TabButton(props: BottomTabBarButtonProps) {
+  const { onPress, children, accessibilityLabel, testID } = props;
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const pressIn = () => {
+    Animated.spring(scale, {
+      toValue: 0.9, friction: 8, tension: 300, useNativeDriver: true,
+    }).start();
+  };
+  const pressOut = () => {
+    Animated.spring(scale, {
+      toValue: 1, friction: 8, tension: 300, useNativeDriver: true,
+    }).start();
+  };
+
+  return (
+    <Pressable
+      onPress={onPress as (e: GestureResponderEvent) => void}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      testID={testID}
+      style={tabStyles.button}
+    >
+      <Animated.View style={[tabStyles.buttonInner, { transform: [{ scale }] }]}>
+        {children}
+      </Animated.View>
+    </Pressable>
   );
 }
 
 function MainTabs() {
   const insets = useSafeAreaInsets();
+  const t = useT();
+
+  const tabLabels: Record<keyof TabParamList, string> = {
+    Home:         t('home.tabHome'),
+    OrderHistory: t('home.tabOrders'),
+    Profile:      t('home.tabProfile'),
+  };
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        headerShown:     false,
-        tabBarIcon:      ({ focused }) => <TabIcon name={route.name} focused={focused} />,
+        headerShown: false,
+        tabBarShowLabel: true,
+        tabBarButton: (props) => <TabButton {...props} />,
+        tabBarIcon:  ({ focused }) => (
+          <TabIcon name={route.name as keyof TabParamList} focused={focused} />
+        ),
+        tabBarLabel: ({ focused }) => (
+          <TabLabel label={tabLabels[route.name as keyof TabParamList]} focused={focused} />
+        ),
         tabBarActiveTintColor:   Colors.primary,
-        tabBarInactiveTintColor: Colors.textMuted,
+        tabBarInactiveTintColor: Colors.textTertiary,
         tabBarStyle: {
           backgroundColor: Colors.white,
           borderTopWidth:  0,
-          height:          60 + insets.bottom,
+          height:          56 + insets.bottom,
           paddingBottom:   insets.bottom,
-          paddingTop:      6,
-          elevation:       20,
+          paddingTop:      Spacing.xs,
           shadowColor:     '#000',
-          shadowOffset:    { width: 0, height: -4 },
-          shadowOpacity:   0.1,
-          shadowRadius:    20,
+          shadowOpacity:   0.08,
+          shadowOffset:    { width: 0, height: -3 },
+          shadowRadius:    10,
+          elevation:       16,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
       })}
     >
-      <Tab.Screen name="Home"         component={HomeScreen}         options={{ title: 'होम' }} />
-      <Tab.Screen name="OrderHistory" component={OrderHistoryScreen} options={{ title: 'ऑर्डर' }} />
-      <Tab.Screen name="Profile"      component={ProfileScreen}      options={{ title: 'प्रोफाइल' }} />
+      <Tab.Screen name="Home"         component={HomeScreen} />
+      <Tab.Screen name="OrderHistory" component={OrderHistoryScreen} />
+      <Tab.Screen name="Profile"      component={ProfileScreen} />
     </Tab.Navigator>
   );
 }
@@ -105,7 +177,7 @@ function MainTabs() {
 function LoadingScreen() {
   return (
     <View style={styles.loading}>
-      <Text style={styles.loadingEmoji}>🛵</Text>
+      <Text variant="hero" style={{ fontSize: 32, marginBottom: Spacing.lg }}>🛵</Text>
       <ActivityIndicator color={Colors.primary} size="large" />
     </View>
   );
@@ -160,12 +232,17 @@ const styles = StyleSheet.create({
     flex: 1, justifyContent: 'center', alignItems: 'center',
     backgroundColor: Colors.background,
   },
-  loadingEmoji: { fontSize: 32, marginBottom: 16 },
 });
 
 const tabStyles = StyleSheet.create({
-  icon: {
-    fontSize: 22,
-    lineHeight: 26,
+  button: {
+    flex: 1,
+    alignItems:     'center',
+    justifyContent: 'center',
+  },
+  buttonInner: {
+    alignItems:     'center',
+    justifyContent: 'center',
+    paddingTop:     Spacing.xs,
   },
 });
