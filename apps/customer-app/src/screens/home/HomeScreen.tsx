@@ -69,20 +69,23 @@ function ShopCard({
   minLabel: string;
 }) {
   const opacity   = useRef(new Animated.Value(0)).current;
-  const translate = useRef(new Animated.Value(20)).current;
+  const translate = useRef(new Animated.Value(30)).current;
 
+  const hasAnimated = useRef(false);
   useEffect(() => {
+    if (hasAnimated.current) return;
+    hasAnimated.current = true;
     Animated.parallel([
       Animated.timing(opacity, {
         toValue:         1,
-        duration:        320,
-        delay:           index * 50,
+        duration:        300,
+        delay:           index * 60,
         useNativeDriver: true,
       }),
       Animated.timing(translate, {
         toValue:         0,
-        duration:        320,
-        delay:           index * 50,
+        duration:        300,
+        delay:           index * 60,
         useNativeDriver: true,
       }),
     ]).start();
@@ -145,6 +148,92 @@ export default function HomeScreen({ navigation }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [cartCount,  setCartCount]  = useState(0);
 
+  // ── 5A. Screen entrance animations (run once on mount) ───────────────────
+  const headerOpacity   = useRef(new Animated.Value(0)).current;
+  const searchTranslate = useRef(new Animated.Value(20)).current;
+  const searchOpacity   = useRef(new Animated.Value(0)).current;
+  const bannerTranslate = useRef(new Animated.Value(20)).current;
+  const bannerOpacity   = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(headerOpacity, {
+        toValue:         1,
+        duration:        300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(searchOpacity, {
+        toValue:         1,
+        duration:        300,
+        delay:           100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(searchTranslate, {
+        toValue:         0,
+        duration:        300,
+        delay:           100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(bannerOpacity, {
+        toValue:         1,
+        duration:        300,
+        delay:           200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(bannerTranslate, {
+        toValue:         0,
+        duration:        300,
+        delay:           200,
+        useNativeDriver: true,
+      }),
+    ]).start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── 5B. Cart badge animation (springs on count change) ───────────────────
+  const badgeScale = useRef(new Animated.Value(cartCount > 0 ? 1 : 0)).current;
+  const prevCartCount = useRef<number>(cartCount);
+
+  useEffect(() => {
+    const prev = prevCartCount.current;
+    const curr = cartCount;
+    if (prev === curr) return;
+
+    if (prev === 0 && curr > 0) {
+      // First item: scale 0 → 1 with bouncy spring
+      Animated.spring(badgeScale, {
+        toValue:         1,
+        friction:        5,
+        tension:         200,
+        useNativeDriver: true,
+      }).start();
+    } else if (curr > prev) {
+      // Increase: 1 → 1.6 → 1 bounce
+      Animated.sequence([
+        Animated.spring(badgeScale, {
+          toValue:         1.6,
+          friction:        4,
+          tension:         300,
+          useNativeDriver: true,
+        }),
+        Animated.spring(badgeScale, {
+          toValue:         1,
+          friction:        4,
+          tension:         300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } else if (curr === 0) {
+      // Last item removed: scale 1 → 0
+      Animated.timing(badgeScale, {
+        toValue:         0,
+        duration:        150,
+        useNativeDriver: true,
+      }).start();
+    }
+    prevCartCount.current = curr;
+  }, [cartCount, badgeScale]);
+
   const loadShops = useCallback(async () => {
     try {
       const data = await api.getShops() as Shop[];
@@ -172,10 +261,10 @@ export default function HomeScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       {/* ── 1. Header ─────────────────────────────────────────────────────── */}
-      <View
+      <Animated.View
         style={[
           styles.header,
-          { paddingTop: insets.top + Spacing.md },
+          { paddingTop: insets.top + Spacing.md, opacity: headerOpacity },
         ]}
       >
         <View style={styles.headerRow}>
@@ -206,26 +295,35 @@ export default function HomeScreen({ navigation }: Props) {
             accessibilityLabel="Cart"
           >
             <Text variant="body" style={styles.cartEmoji}>🛒</Text>
-            {cartCount > 0 && (
-              <View style={styles.cartBadge}>
-                <Text
-                  color={Colors.white}
-                  style={styles.cartBadgeText}
-                >
-                  {cartCount}
-                </Text>
-              </View>
-            )}
+            <Animated.View
+              style={[styles.cartBadge, { transform: [{ scale: badgeScale }] }]}
+              pointerEvents="none"
+            >
+              <Text
+                color={Colors.white}
+                style={styles.cartBadgeText}
+              >
+                {cartCount}
+              </Text>
+            </Animated.View>
           </PressableScale>
         </View>
-      </View>
+      </Animated.View>
 
       {/* ── 2. Search bar — lives OUTSIDE the ScrollView so it is never
                clipped by the scroll container's top edge.
                marginTop: -20 on the wrapper pulls it 20 px up into the
                header's paddingBottom zone; the bar itself is fully visible
                and tappable because it is a normal-flow sibling view. ────── */}
-      <View style={styles.searchContainer}>
+      <Animated.View
+        style={[
+          styles.searchContainer,
+          {
+            opacity:   searchOpacity,
+            transform: [{ translateY: searchTranslate }],
+          },
+        ]}
+      >
         <TouchableOpacity
           style={styles.searchWrap}
           activeOpacity={0.8}
@@ -234,7 +332,7 @@ export default function HomeScreen({ navigation }: Props) {
           <Text variant="body" style={styles.searchIcon}>🔍</Text>
           <Text style={styles.searchPlaceholder}>{t('home.searchPlaceholder')}</Text>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -255,7 +353,15 @@ export default function HomeScreen({ navigation }: Props) {
         }
       >
         {/* ── 3. Promo banner ────────────────────────────────────────────── */}
-        <View style={styles.bannerOuter}>
+        <Animated.View
+          style={[
+            styles.bannerOuter,
+            {
+              opacity:   bannerOpacity,
+              transform: [{ translateY: bannerTranslate }],
+            },
+          ]}
+        >
           <FauxGradient
             from="#FF3E6C"
             to="#FF8C42"
@@ -282,7 +388,7 @@ export default function HomeScreen({ navigation }: Props) {
           <View style={styles.dotsRow}>
             <View style={[styles.dot, styles.dotActive]} />
           </View>
-        </View>
+        </Animated.View>
 
         {/* ── 4. Section header ──────────────────────────────────────────── */}
         <View style={styles.sectionHeader}>

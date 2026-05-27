@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, KeyboardAvoidingView, Platform,
-  Alert, ActivityIndicator, Keyboard, ScrollView,
+  Alert, Keyboard, ScrollView,
 } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { Colors, Spacing, FontSize, Radius } from '../../theme';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
+import { DotsLoader } from '../../components/ui';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'OtpLogin'> };
 
@@ -81,7 +82,7 @@ export default function OtpLoginScreen({ navigation }: Props) {
             activeOpacity={0.8}
           >
             {loading
-              ? <ActivityIndicator color={Colors.white} />
+              ? <DotsLoader color={Colors.white} size={8} />
               : <Text style={styles.btnText}>{t('auth.sendOtp')}</Text>
             }
           </TouchableOpacity>

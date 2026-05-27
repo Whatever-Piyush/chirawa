@@ -1,24 +1,15 @@
 import React, { useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import {
-  createBottomTabNavigator,
-  type BottomTabBarButtonProps,
-} from '@react-navigation/bottom-tabs';
-import {
-  View,
-  ActivityIndicator,
-  Animated,
-  Pressable,
-  StyleSheet,
-  type GestureResponderEvent,
-} from 'react-native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { View, Animated, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage, useT } from '@chirawa/i18n';
 import { Colors, FontSize, Spacing } from '../theme';
-import { Text } from '../components/ui';
+import { Text, DotsLoader } from '../components/ui';
 import LanguagePickerScreen from '../screens/LanguagePickerScreen';
+import AnimatedTabButton from './AnimatedTabButton';
 
 // Auth Screens
 import OtpLoginScreen   from '../screens/auth/OtpLoginScreen';
@@ -99,38 +90,6 @@ function TabLabel({ label, focused }: { label: string; focused: boolean }) {
   );
 }
 
-function TabButton(props: BottomTabBarButtonProps) {
-  const { onPress, children, accessibilityLabel, testID } = props;
-  const scale = useRef(new Animated.Value(1)).current;
-
-  const pressIn = () => {
-    Animated.spring(scale, {
-      toValue: 0.9, friction: 8, tension: 300, useNativeDriver: true,
-    }).start();
-  };
-  const pressOut = () => {
-    Animated.spring(scale, {
-      toValue: 1, friction: 8, tension: 300, useNativeDriver: true,
-    }).start();
-  };
-
-  return (
-    <Pressable
-      onPress={onPress as (e: GestureResponderEvent) => void}
-      onPressIn={pressIn}
-      onPressOut={pressOut}
-      accessibilityLabel={accessibilityLabel}
-      accessibilityRole="button"
-      testID={testID}
-      style={tabStyles.button}
-    >
-      <Animated.View style={[tabStyles.buttonInner, { transform: [{ scale }] }]}>
-        {children}
-      </Animated.View>
-    </Pressable>
-  );
-}
-
 function MainTabs() {
   const insets = useSafeAreaInsets();
   const t = useT();
@@ -146,7 +105,7 @@ function MainTabs() {
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarShowLabel: true,
-        tabBarButton: (props) => <TabButton {...props} />,
+        tabBarButton: (props) => <AnimatedTabButton {...props} />,
         tabBarIcon:  ({ focused }) => (
           <TabIcon name={route.name as keyof TabParamList} focused={focused} />
         ),
@@ -180,7 +139,7 @@ function LoadingScreen() {
   return (
     <View style={styles.loading}>
       <Text variant="hero" style={{ fontSize: 32, marginBottom: Spacing.lg }}>🛵</Text>
-      <ActivityIndicator color={Colors.primary} size="large" />
+      <DotsLoader color={Colors.primary} size={10} />
     </View>
   );
 }
@@ -202,10 +161,12 @@ export default function AppNavigator() {
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={{
-        headerShown:      false,
-        headerStyle:      { backgroundColor: Colors.white },
-        statusBarColor:   Colors.primary as never,
-        statusBarStyle:   'light' as never,
+        headerShown:       false,
+        headerStyle:       { backgroundColor: Colors.white },
+        statusBarColor:    Colors.primary as never,
+        statusBarStyle:    'light' as never,
+        animation:         'slide_from_right',
+        animationDuration: 220,
       }}>
         {state.isAuthenticated ? (
           <>
@@ -234,18 +195,5 @@ const styles = StyleSheet.create({
   loading: {
     flex: 1, justifyContent: 'center', alignItems: 'center',
     backgroundColor: Colors.background,
-  },
-});
-
-const tabStyles = StyleSheet.create({
-  button: {
-    flex: 1,
-    alignItems:     'center',
-    justifyContent: 'center',
-  },
-  buttonInner: {
-    alignItems:     'center',
-    justifyContent: 'center',
-    paddingTop:     Spacing.xs,
   },
 });

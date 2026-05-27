@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Animated, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { Colors, Radius } from '../../theme';
 
 interface Props {
@@ -15,37 +15,38 @@ export default function Shimmer({
   borderRadius = Radius.sm,
   style,
 }: Props) {
-  const progress = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(0.5)).current;
 
   useEffect(() => {
     const anim = Animated.loop(
       Animated.sequence([
-        Animated.timing(progress, {
+        Animated.timing(opacity, {
           toValue:         1,
           duration:        900,
-          useNativeDriver: false,
+          useNativeDriver: true,
         }),
-        Animated.timing(progress, {
-          toValue:         0,
+        Animated.timing(opacity, {
+          toValue:         0.5,
           duration:        900,
-          useNativeDriver: false,
+          useNativeDriver: true,
         }),
       ]),
     );
     anim.start();
     return () => anim.stop();
-  }, [progress]);
-
-  const backgroundColor = progress.interpolate({
-    inputRange:  [0, 1],
-    outputRange: [Colors.shimmer, Colors.shimmerHigh],
-  });
+  }, [opacity]);
 
   return (
     <Animated.View
       style={[
         styles.container,
-        { width, height, borderRadius, backgroundColor },
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor: Colors.shimmer,
+          opacity,
+        },
         style,
       ]}
     />

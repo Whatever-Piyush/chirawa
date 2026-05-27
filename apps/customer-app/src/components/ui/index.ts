@@ -9,6 +9,7 @@ export type { BadgeVariant }          from './Badge';
 
 export { default as Divider }         from './Divider';
 export { default as Shimmer }         from './Shimmer';
+export { default as DotsLoader }      from './DotsLoader';
 export { default as PressableScale }  from './PressableScale';
 export { default as FauxGradient }    from './FauxGradient';
 

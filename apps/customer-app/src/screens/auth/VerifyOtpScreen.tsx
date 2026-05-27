@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, Alert, ActivityIndicator,
+  StyleSheet, Alert,
   KeyboardAvoidingView, Platform, Keyboard, ScrollView,
 } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -11,6 +11,7 @@ import { Colors, Spacing, FontSize, Radius } from '../../theme';
 import { api } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
 import { useT } from '@chirawa/i18n';
+import { DotsLoader } from '../../components/ui';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'VerifyOtp'>;
@@ -85,7 +86,7 @@ export default function VerifyOtpScreen({ navigation, route }: Props) {
           activeOpacity={0.8}
         >
           {loading
-            ? <ActivityIndicator color={Colors.white} />
+            ? <DotsLoader color={Colors.white} size={8} />
             : <Text style={styles.btnText}>{t('auth.verifyOtp')}</Text>
           }
         </TouchableOpacity>
