@@ -214,6 +214,14 @@ export class ChirawaApiClient {
     return this.request<PlaceOrderResponse>('POST', '/orders', data);
   }
 
+  async cancelOrder(orderId: string, reason?: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(
+      'DELETE',
+      `/orders/${orderId}`,
+      reason ? { reason } : undefined,
+    );
+  }
+
   async getOrder(orderId: string): Promise<OrderDetailResponse> {
     return this.request<OrderDetailResponse>('GET', `/orders/${orderId}`);
   }

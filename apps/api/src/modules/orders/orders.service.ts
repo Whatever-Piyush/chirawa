@@ -10,6 +10,7 @@ import {
 import {
   emitOrderStatusChanged,
   emitNewOrderForSeller,
+  emitOrderCancelledForSeller,
 } from '../../shared/events/event-bus';
 
 interface CartData {
@@ -268,13 +269,42 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   }
 
   async function cancelOrder(orderId: string, userId: string, reason?: string) {
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    const order = await prisma.order.findUnique({
+      where:   { id: orderId },
+      include: { shop: { include: { seller: { select: { userId: true } } } } },
+    });
     if (!order) throw new NotFoundError('Order');
     if (order.customerId !== userId) throw new ForbiddenError('Not your order');
-    if (!['pending_payment', 'paid'].includes(order.status)) {
-      throw new BusinessRuleError('Order cancel nahi ho sakta');
+    if (!['pending_payment', 'paid', 'confirmed'].includes(order.status)) {
+      throw new BusinessRuleError('ऑर्डर रद्द नहीं किया जा सकता — यह पहले से आगे बढ़ चुका है');
     }
+
+    // Online order with money actually captured → log a refund for manual Razorpay processing
+    const capturedPayment = order.paymentMethod !== 'cod'
+      ? await prisma.payment.findFirst({ where: { orderId, status: 'captured' } })
+      : null;
+
     await updateOrderStatus(orderId, 'cancelled', 'customer', userId, reason);
+
+    if (capturedPayment) {
+      await prisma.transaction.create({
+        data: {
+          type:          'refund',
+          amountPaise:   order.totalAmount,
+          referenceId:   order.id,
+          referenceType: 'order',
+          description:   'Auto-refund on cancellation — process via Razorpay dashboard',
+        },
+      });
+    }
+
+    // Notify the seller in real time (service → event bus → socket plugin)
+    emitOrderCancelledForSeller({
+      orderId,
+      sellerId: order.shop.seller.userId,
+      reason:   reason ?? '',
+    });
+
     return { message: 'Order cancel ho gaya' };
   }
 

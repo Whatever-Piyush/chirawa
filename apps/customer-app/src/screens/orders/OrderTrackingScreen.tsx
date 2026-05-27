@@ -8,19 +8,23 @@ import {
   Animated,
   Linking,
   ActivityIndicator,
+  Alert,
   Dimensions,
   Easing,
+  Modal,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { io, type Socket } from 'socket.io-client';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { OrderDetailResponse, OrderItemResponse } from '@chirawa/types';
 import { OrderStatus } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { api } from '../../services/api.service';
 import { StorageService } from '../../services/storage.service';
 import { useT } from '@chirawa/i18n';
+import { useToast } from '../../components/ui';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'OrderTracking'>;
@@ -49,6 +53,15 @@ const STEP_KEYS = [
   'tracking.onTheWay',
   'tracking.delivered',
 ] as const;
+
+const CANCEL_REASONS = [
+  'मैंने गलती से ऑर्डर दे दिया',
+  'मुझे सामान की जरूरत नहीं रही',
+  'डिलीवरी में बहुत देर हो रही है',
+  'मैं दूसरी जगह से ले रहा हूं',
+  'पता गलत दर्ज हो गया',
+  'अन्य कारण',
+];
 
 const STATUS_EMOJI: Partial<Record<OrderStatus, string>> = {
   [OrderStatus.PENDING_PAYMENT]:  '🎉',
@@ -282,10 +295,15 @@ function DeliveredBanner({ t }: { t: (key: string) => string }) {
 export default function OrderTrackingScreen({ navigation, route }: Props) {
   const { orderId } = route.params;
   const t = useT();
+  const toast = useToast();
+  const insets = useSafeAreaInsets();
 
-  const [order,    setOrder]    = useState<OrderDetailResponse | null>(null);
-  const [loading,  setLoading]  = useState(true);
-  const [riderPos, setRiderPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [order,      setOrder]      = useState<OrderDetailResponse | null>(null);
+  const [loading,    setLoading]    = useState(true);
+  const [riderPos,   setRiderPos]   = useState<{ lat: number; lng: number } | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelSheetVisible, setCancelSheetVisible] = useState(false);
+  const [selectedReason,     setSelectedReason]     = useState<string | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const pollRef   = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -374,6 +392,23 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
     void Linking.openURL(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`);
   }
 
+  async function handleCancelOrder() {
+    if (!selectedReason) return;
+    setCancelling(true);
+    try {
+      await api.cancelOrder(orderId, selectedReason);
+      setCancelSheetVisible(false);
+      setSelectedReason(null);
+      toast.show(t('cancellation.cancelled'), 'success');
+      // Order status updates via the existing polling / socket subscription
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : t('cancellation.cancelFailed');
+      Alert.alert(t('cancellation.failTitle'), msg, [{ text: 'ठीक है' }]);
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -387,7 +422,7 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
   // ── Order-derived values — order is non-null past this point ─────────────
   // The API returns the raw Prisma object whose total field is `totalAmount`
   // (not `total` as in the OrderDetailResponse DTO), so we cast narrowly.
-  const orderPrisma  = order as unknown as { totalAmount?: number; deliveryStreet?: string; deliveryLocality?: string; deliveryCity?: string };
+  const orderPrisma  = order as unknown as { totalAmount?: number; deliveryStreet?: string; deliveryLocality?: string; deliveryCity?: string; paymentMethod?: string };
   const currentStep  = STATUS_STEP[order.status] ?? 0;
   const isDelivered  = order.status === OrderStatus.DELIVERED;
   const isCancelled  = order.status === OrderStatus.CANCELLED;
@@ -398,8 +433,14 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
   );
   const statusEmoji  = STATUS_EMOJI[order.status] ?? '🎉';
   const riderInitial = (order.rider?.name?.[0] ?? 'R').toUpperCase();
+  const isCancellable =
+    order.status === OrderStatus.PENDING_PAYMENT ||
+    order.status === OrderStatus.PAID ||
+    order.status === OrderStatus.CONFIRMED;
+  const showRefundNote = !!orderPrisma.paymentMethod && orderPrisma.paymentMethod !== 'cod';
 
   return (
+    <>
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.scrollContent}
@@ -431,6 +472,17 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
             </View>
           )}
         </View>
+      )}
+
+      {/* ── B1. Cancel button (only while still cancellable) ─────────────── */}
+      {isCancellable && !isCancelled && (
+        <TouchableOpacity
+          style={styles.cancelBtn}
+          onPress={() => setCancelSheetVisible(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.cancelBtnText}>{t('cancellation.button')}</Text>
+        </TouchableOpacity>
       )}
 
       {/* ── B2. Rider card ──────────────────────────────────────────────── */}
@@ -487,6 +539,68 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
         <Text style={styles.helpBtnText}>💬  {t('tracking.needHelp')}</Text>
       </TouchableOpacity>
     </ScrollView>
+
+      {/* ── Cancellation reason bottom sheet ────────────────────────────── */}
+      <Modal
+        visible={cancelSheetVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCancelSheetVisible(false)}
+      >
+        <View style={styles.sheetBackdrop}>
+          <View style={[styles.sheet, { paddingBottom: insets.bottom + 20 }]}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>{t('cancellation.title')}</Text>
+            <Text style={styles.sheetSubtitle}>{t('cancellation.subtitle')}</Text>
+
+            {CANCEL_REASONS.map((reason) => {
+              const selected = selectedReason === reason;
+              return (
+                <TouchableOpacity
+                  key={reason}
+                  style={styles.reasonRow}
+                  onPress={() => setSelectedReason(reason)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.radio, selected && styles.radioSelected]}>
+                    {selected && <View style={styles.radioDot} />}
+                  </View>
+                  <Text style={[styles.reasonText, selected && styles.reasonTextSelected]}>
+                    {reason}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+
+            {showRefundNote && (
+              <Text style={styles.refundNote}>{t('cancellation.refundNote')}</Text>
+            )}
+
+            <TouchableOpacity
+              style={[
+                styles.confirmBtn,
+                { backgroundColor: selectedReason ? Colors.error : Colors.border },
+              ]}
+              onPress={handleCancelOrder}
+              disabled={!selectedReason || cancelling}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.confirmBtnText}>
+                {cancelling ? t('cancellation.cancelling') : t('cancellation.confirm')}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.goBackBtn}
+              onPress={() => setCancelSheetVisible(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.goBackText}>{t('cancellation.goBack')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -643,4 +757,82 @@ const styles = StyleSheet.create({
     ...Shadow.card,
   },
   helpBtnText: { fontSize: FontSize.md, fontWeight: '800', color: Colors.text },
+
+  // Cancel order
+  cancelBtn: {
+    borderWidth:     1.5,
+    borderColor:     Colors.error,
+    borderRadius:    Radius.lg,
+    paddingVertical: 12,
+    alignItems:      'center',
+    justifyContent:  'center',
+    minHeight:       MIN_TAP,
+    backgroundColor: Colors.errorLight,
+  },
+  cancelBtnText: {
+    color:      Colors.error,
+    fontSize:   FontSize.md,
+    fontWeight: FontWeight.semibold,
+  },
+
+  // Cancellation reason bottom sheet
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius:  Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  sheetHandle: {
+    width: 40, height: 4,
+    backgroundColor: Colors.border,
+    borderRadius: Radius.full,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  sheetTitle: {
+    fontSize: FontSize.lg, fontWeight: FontWeight.bold,
+    color: Colors.textPrimary, marginBottom: 4,
+  },
+  sheetSubtitle: {
+    fontSize: FontSize.sm, color: Colors.textSecondary, marginBottom: 16,
+  },
+  reasonRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider,
+    minHeight: 48,
+  },
+  radio: {
+    width: 22, height: 22, borderRadius: 11,
+    borderWidth: 2, borderColor: Colors.border,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  radioSelected: { backgroundColor: Colors.error, borderColor: Colors.error },
+  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.white },
+  reasonText: {
+    flex: 1, fontSize: FontSize.md, color: Colors.textPrimary, marginLeft: 12,
+  },
+  reasonTextSelected: { fontWeight: FontWeight.semibold, color: Colors.error },
+  refundNote: {
+    fontSize: FontSize.sm, color: Colors.textSecondary,
+    marginTop: 12, lineHeight: 18,
+  },
+  confirmBtn: {
+    marginTop: 20, height: 52, borderRadius: Radius.lg,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  confirmBtnText: {
+    color: Colors.white, fontWeight: FontWeight.bold, fontSize: FontSize.md,
+  },
+  goBackBtn: {
+    marginTop: 12, alignSelf: 'center',
+    minHeight: 32, justifyContent: 'center',
+  },
+  goBackText: { color: Colors.textSecondary, fontSize: FontSize.sm },
 });

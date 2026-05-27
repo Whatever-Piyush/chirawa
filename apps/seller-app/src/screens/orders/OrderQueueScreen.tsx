@@ -75,6 +75,19 @@ export default function OrderQueueScreen() {
 
     socket.on('order:status', () => { void loadOrders(); });
 
+    socket.on('order:cancelled', (data: { orderId: string; reason?: string }) => {
+      setOrders((prev) => prev.filter((o) => o.id !== data.orderId));
+      // If the cancelled order is the one currently alarming, close it + silence the alarm
+      setNewOrder((cur) => {
+        if (cur?.orderId === data.orderId) {
+          void stopAlarm();
+          return null;
+        }
+        return cur;
+      });
+      Alert.alert('❌ ऑर्डर रद्द हुआ', 'ग्राहक ने ऑर्डर कैंसिल कर दिया', [{ text: 'ठीक है' }]);
+    });
+
     socketRef.current = socket;
     return () => {
       socket.disconnect();
@@ -328,7 +341,7 @@ const styles = StyleSheet.create({
 
   // Reject reason sheet
   reasonOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  reasonSheet:   { backgroundColor: Colors.white, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl, padding: Spacing.xl, gap: Spacing.md },
+  reasonSheet:   { backgroundColor: Colors.white, borderTopLeftRadius: Radius.lg, borderTopRightRadius: Radius.lg, padding: Spacing.xl, gap: Spacing.md },
   reasonTitle:   { fontSize: FontSize.xl, fontWeight: '800', color: Colors.text },
   reasonBtn:     { backgroundColor: Colors.background, borderRadius: Radius.md, padding: Spacing.lg },
   reasonText:    { fontSize: FontSize.md, color: Colors.text },

@@ -14,10 +14,11 @@ eventBus.setMaxListeners(20);
 
 // ── Event names ───────────────────────────────────────────────────────────────
 export const Events = {
-  ORDER_STATUS_CHANGED:    'order:status:changed',
-  NEW_ORDER_FOR_SELLER:    'order:new:for_seller',
-  ORDER_ASSIGNED_TO_RIDER: 'order:assigned:to_rider',
-  RIDER_LOCATION_UPDATE:   'rider:location:update',
+  ORDER_STATUS_CHANGED:       'order:status:changed',
+  NEW_ORDER_FOR_SELLER:       'order:new:for_seller',
+  ORDER_CANCELLED_FOR_SELLER: 'order:cancelled:for_seller',
+  ORDER_ASSIGNED_TO_RIDER:    'order:assigned:to_rider',
+  RIDER_LOCATION_UPDATE:      'rider:location:update',
 } as const;
 
 // ── Event payload types ───────────────────────────────────────────────────────
@@ -40,6 +41,12 @@ export interface NewOrderForSellerPayload {
   deliveryLocality: string;
 }
 
+export interface OrderCancelledForSellerPayload {
+  orderId:  string;
+  sellerId: string;
+  reason:   string;
+}
+
 export interface OrderAssignedToRiderPayload {
   orderId:  string;
   riderId:  string;
@@ -57,6 +64,10 @@ export function emitOrderStatusChanged(payload: OrderStatusChangedPayload): void
 
 export function emitNewOrderForSeller(payload: NewOrderForSellerPayload): void {
   eventBus.emit(Events.NEW_ORDER_FOR_SELLER, payload);
+}
+
+export function emitOrderCancelledForSeller(payload: OrderCancelledForSellerPayload): void {
+  eventBus.emit(Events.ORDER_CANCELLED_FOR_SELLER, payload);
 }
 
 export function emitOrderAssignedToRider(payload: OrderAssignedToRiderPayload): void {

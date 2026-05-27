@@ -6,6 +6,7 @@ import {
   eventBus, Events,
   type OrderStatusChangedPayload,
   type NewOrderForSellerPayload,
+  type OrderCancelledForSellerPayload,
   type OrderAssignedToRiderPayload,
 } from '../events/event-bus';
 
@@ -185,6 +186,17 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
     });
 
     app.log.debug(`🔔 New order alert sent to seller: ${payload.sellerId}`);
+  });
+
+  eventBus.on(Events.ORDER_CANCELLED_FOR_SELLER, (payload: OrderCancelledForSellerPayload) => {
+    // Customer cancelled — tell the seller so their queue updates + alarm closes
+    io.to(`seller:${payload.sellerId}`).emit('order:cancelled', {
+      orderId:   payload.orderId,
+      reason:    payload.reason,
+      timestamp: new Date().toISOString(),
+    });
+
+    app.log.debug(`❌ Order ${payload.orderId} cancelled → seller ${payload.sellerId}`);
   });
 
   eventBus.on(Events.ORDER_ASSIGNED_TO_RIDER, (payload: OrderAssignedToRiderPayload) => {
