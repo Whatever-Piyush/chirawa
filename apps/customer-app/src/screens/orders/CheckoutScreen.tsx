@@ -37,11 +37,8 @@ const CHIRAWA_PINCODE = '333026';
 function SummaryItem({ item }: { item: CartItem }) {
   return (
     <View style={styles.summaryItem}>
-      <View style={styles.summaryItemLeft}>
-        <Text style={styles.summaryItemName} numberOfLines={2}>{item.productName}</Text>
-        <Text style={styles.summaryItemQty}>×{item.quantity}</Text>
-      </View>
-      <Text style={styles.summaryItemPrice}>₹{Math.round(item.subtotal / 100)}</Text>
+      <Text style={styles.summaryItemName} numberOfLines={2}>{item.productName}</Text>
+      <Text style={styles.summaryItemMeta}>×{item.quantity}  ₹{Math.round(item.subtotal / 100)}</Text>
     </View>
   );
 }
@@ -87,14 +84,10 @@ function PayCard({ icon, title, hint, selected, badge, onPress }: PayCardProps) 
           <View style={styles.comingSoonBadge}>
             <Text style={styles.comingSoonBadgeText}>{badge}</Text>
           </View>
+        ) : selected ? (
+          <Animated.Text style={[styles.payCheck, { transform: [{ scale: checkScale }] }]}>✓</Animated.Text>
         ) : (
-          <View style={[styles.radio, selected && styles.radioSelected]}>
-            <Animated.View
-              style={[styles.radioCheck, { transform: [{ scale: checkScale }] }]}
-            >
-              <Text style={styles.radioCheckText}>✓</Text>
-            </Animated.View>
-          </View>
+          <View style={styles.radio} />
         )}
       </View>
     </TouchableOpacity>
@@ -142,6 +135,9 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   const [street, setStreet]     = useState('');
   const [area,   setArea]       = useState('');
+
+  const [streetFocused, setStreetFocused] = useState(false);
+  const [areaFocused,   setAreaFocused]   = useState(false);
 
   const [addressId,  setAddressId]  = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -265,7 +261,7 @@ export default function CheckoutScreen({ navigation }: Props) {
     <>
       {/* ── Trust badge ─────────────────────────────────────────────────── */}
       <View style={styles.trustBadge}>
-        <Text style={styles.trustBadgeText}>✓  {t('checkout.safeSecure')}</Text>
+        <Text style={styles.trustBadgeText}>🔒  {t('checkout.trustBadge')}</Text>
       </View>
 
       {/* ── A. Delivery Address ──────────────────────────────────────────── */}
@@ -283,9 +279,11 @@ export default function CheckoutScreen({ navigation }: Props) {
         <View style={styles.fieldGroup}>
           <Text style={styles.fieldLabel}>{t('checkout.streetLabel')}</Text>
           <TextInput
-            style={styles.textInput}
+            style={[styles.textInput, streetFocused && styles.textInputFocused]}
             value={street}
             onChangeText={setStreet}
+            onFocus={() => setStreetFocused(true)}
+            onBlur={() => setStreetFocused(false)}
             placeholder={t('checkout.streetPlaceholder')}
             placeholderTextColor={Colors.textMuted}
             returnKeyType="done"
@@ -298,9 +296,11 @@ export default function CheckoutScreen({ navigation }: Props) {
         <View style={styles.fieldGroup}>
           <Text style={styles.fieldLabel}>{t('checkout.areaLabel')}</Text>
           <TextInput
-            style={styles.textInput}
+            style={[styles.textInput, areaFocused && styles.textInputFocused]}
             value={area}
             onChangeText={setArea}
+            onFocus={() => setAreaFocused(true)}
+            onBlur={() => setAreaFocused(false)}
             placeholder={t('checkout.areaPlaceholder')}
             placeholderTextColor={Colors.textMuted}
             returnKeyType="done"
@@ -386,7 +386,7 @@ export default function CheckoutScreen({ navigation }: Props) {
           title={t('checkout.payOnline')}
           hint={t('checkout.onlineHint')}
           selected={false}
-          badge="Soon"
+          badge={t('common.comingSoon')}
           onPress={() => Alert.alert('🚀', t('checkout.comingSoon'))}
         />
       </View>
@@ -432,7 +432,7 @@ export default function CheckoutScreen({ navigation }: Props) {
         </View>
         <Animated.View style={{ transform: [{ scale: placeBtnScale }] }}>
           <TouchableOpacity
-            style={[styles.placeOrderBtn, !canPlaceOrder && styles.btnDisabled]}
+            style={[styles.placeOrderBtn, !canPlaceOrder && styles.placeBtnDisabled]}
             onPress={pulseAndPlace}
             disabled={!canPlaceOrder}
             activeOpacity={0.9}
@@ -462,14 +462,14 @@ const styles = StyleSheet.create({
   trustBadge: {
     marginHorizontal: Spacing.lg,
     marginTop: Spacing.md,
-    backgroundColor: '#E8F8F0',
+    backgroundColor: Colors.successLight,
     borderRadius: Radius.full,
-    paddingVertical: 10,
+    padding: 10,
     alignItems: 'center',
   },
   trustBadgeText: {
-    color: Colors.accent,
-    fontWeight: '800',
+    color: Colors.success,
+    fontWeight: '600',
     fontSize: FontSize.sm,
   },
 
@@ -502,11 +502,12 @@ const styles = StyleSheet.create({
   fieldGroup: { gap: Spacing.xs },
   fieldLabel: { fontSize: FontSize.sm, fontWeight: '700', color: Colors.textLight },
   textInput: {
-    borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
-    fontSize: FontSize.md, color: Colors.text, backgroundColor: Colors.background,
-    minHeight: MIN_TAP,
+    borderWidth: 1.5, borderColor: Colors.border, borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    fontSize: FontSize.md, color: Colors.text, backgroundColor: Colors.surface,
+    height: 52,
   },
+  textInputFocused: { borderColor: Colors.borderFocus },
 
   // Confirm address button
   confirmAddressBtn: {
@@ -522,14 +523,12 @@ const styles = StyleSheet.create({
   shopNameRow:   { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
   summaryItem: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'flex-start', paddingHorizontal: Spacing.lg,
+    alignItems: 'center', paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm, backgroundColor: Colors.background,
-    minHeight: MIN_TAP,
+    minHeight: MIN_TAP, gap: Spacing.md,
   },
-  summaryItemLeft:  { flex: 1, gap: 2 },
-  summaryItemName:  { fontSize: FontSize.md, color: Colors.text, fontWeight: '600', paddingRight: Spacing.md },
-  summaryItemQty:   { fontSize: FontSize.sm, color: Colors.textMuted },
-  summaryItemPrice: { fontSize: FontSize.md, fontWeight: '800', color: Colors.primary },
+  summaryItemName:  { flex: 1, fontSize: FontSize.md, color: Colors.text, fontWeight: '600' },
+  summaryItemMeta:  { fontSize: FontSize.md, color: Colors.textSecondary, fontWeight: '600' },
   itemSeparator:    { height: 1, backgroundColor: Colors.border },
 
   // Pricing
@@ -546,10 +545,11 @@ const styles = StyleSheet.create({
   // Payment method cards
   payCard: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    borderWidth: 1.5, borderColor: Colors.border, borderRadius: Radius.md,
-    padding: Spacing.md, minHeight: MIN_TAP + 16,
+    borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md,
+    backgroundColor: Colors.surface,
+    padding: Spacing.md, minHeight: 72,
   },
-  payCardSelected: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  payCardSelected: { borderWidth: 2, borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
   payCardLeft:  { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, flex: 1 },
   payCardRight: { marginLeft: Spacing.sm },
   payCardIcon:  { fontSize: 26 },
@@ -557,18 +557,14 @@ const styles = StyleSheet.create({
   payCardTitle: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
   payCardTitleSelected: { color: Colors.primary },
   payCardHint:  { fontSize: FontSize.sm, color: Colors.textMuted },
+  payCheck: {
+    color: Colors.primary,
+    fontSize: FontSize.xl,
+    fontWeight: '900',
+  },
   radio: {
     width: 26, height: 26, borderRadius: Radius.full,
     borderWidth: 2, borderColor: Colors.border,
-    justifyContent: 'center', alignItems: 'center',
-    overflow: 'hidden',
-  },
-  radioSelected: { borderColor: Colors.primary, backgroundColor: Colors.primary },
-  radioCheck: { alignItems: 'center', justifyContent: 'center' },
-  radioCheckText: {
-    color: Colors.white,
-    fontSize: 14,
-    fontWeight: '900',
   },
   comingSoonBadge: {
     backgroundColor: Colors.warning, borderRadius: Radius.sm,
@@ -593,16 +589,17 @@ const styles = StyleSheet.create({
   orderTotalLabel: { fontSize: FontSize.md, color: Colors.textLight, fontWeight: '700' },
   orderTotalValue: { fontSize: FontSize.xl, fontWeight: '900', color: Colors.primary },
   placeOrderBtn: {
-    backgroundColor: Colors.primary, borderRadius: Radius.lg,
-    paddingVertical: Spacing.md, alignItems: 'center',
-    minHeight: MIN_TAP, justifyContent: 'center',
-    ...Shadow.strong,
+    backgroundColor: Colors.primary, borderRadius: Radius.xl,
+    alignItems: 'center',
+    height: 56, justifyContent: 'center',
+    ...Shadow.primary,
   },
+  placeBtnDisabled: { opacity: 0.5 },
   placeOrderBtnText: { color: Colors.white, fontSize: FontSize.lg, fontWeight: '900' },
   secureFooter: {
     textAlign: 'center',
     fontSize: FontSize.xs,
-    color: Colors.textMuted,
+    color: Colors.textTertiary,
     fontWeight: '700',
     marginTop: 6,
   },

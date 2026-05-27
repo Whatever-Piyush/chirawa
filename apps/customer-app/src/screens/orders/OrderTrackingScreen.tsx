@@ -59,7 +59,7 @@ const STATUS_EMOJI: Partial<Record<OrderStatus, string>> = {
   [OrderStatus.PICKED_UP]:        '🛵',
   [OrderStatus.OUT_FOR_DELIVERY]: '🛵',
   [OrderStatus.DELIVERED]:        '🎊',
-  [OrderStatus.CANCELLED]:        '😕',
+  [OrderStatus.CANCELLED]:        '❌',
 };
 
 // ─── Compact order item row ───────────────────────────────────────────────────
@@ -74,24 +74,26 @@ function ItemRow({ item }: { item: OrderItemResponse }) {
   );
 }
 
-// ─── Pulsing dot for active step ──────────────────────────────────────────────
+// ─── Pulsing ring for active step ─────────────────────────────────────────────
 
-function PulsingDot({ children }: { children: React.ReactNode }) {
-  const scale = useRef(new Animated.Value(1)).current;
+function PulsingRing() {
+  const scale   = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(0.6)).current;
   useEffect(() => {
     const anim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(scale, { toValue: 1.15, duration: 700, useNativeDriver: true }),
-        Animated.timing(scale, { toValue: 1,    duration: 700, useNativeDriver: true }),
+      Animated.parallel([
+        Animated.timing(scale,   { toValue: 1.6, duration: 1500, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0,   duration: 1500, useNativeDriver: true }),
       ]),
     );
     anim.start();
     return () => anim.stop();
-  }, [scale]);
+  }, [scale, opacity]);
   return (
-    <Animated.View style={[styles.stepDotActive, { transform: [{ scale }] }]}>
-      {children}
-    </Animated.View>
+    <Animated.View
+      pointerEvents="none"
+      style={[styles.pulseRing, { transform: [{ scale }], opacity }]}
+    />
   );
 }
 
@@ -113,9 +115,12 @@ function ProgressStepper({
           <React.Fragment key={key}>
             <View style={styles.stepCol}>
               {active ? (
-                <PulsingDot>
-                  <Text style={[styles.stepDotText, styles.stepDotTextLight]}>{String(i + 1)}</Text>
-                </PulsingDot>
+                <View style={styles.stepDotWrap}>
+                  <PulsingRing />
+                  <View style={[styles.stepDot, styles.stepDotActive]}>
+                    <Text style={[styles.stepDotText, styles.stepDotTextLight]}>{String(i + 1)}</Text>
+                  </View>
+                </View>
               ) : done ? (
                 <View style={[styles.stepDot, styles.stepDotDone]}>
                   <Text style={[styles.stepDotText, styles.stepDotTextLight]}>✓</Text>
@@ -152,7 +157,7 @@ function StatusEmojiCard({ emoji }: { emoji: string }) {
     Animated.spring(scale, {
       toValue:         1,
       friction:        5,
-      tension:         100,
+      tension:         40,
       useNativeDriver: true,
     }).start();
   }, [emoji, scale]);
@@ -233,6 +238,7 @@ function Confetti() {
 function DeliveredBanner({ t }: { t: (key: string) => string }) {
   const scale   = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(0)).current;
+  const [selectedRating, setSelectedRating] = useState(0);
 
   useEffect(() => {
     Animated.parallel([
@@ -253,7 +259,14 @@ function DeliveredBanner({ t }: { t: (key: string) => string }) {
       <Text style={styles.rateHow}>{t('tracking.rateHow')}</Text>
       <View style={styles.starRow}>
         {[1, 2, 3, 4, 5].map((n) => (
-          <Text key={n} style={styles.star}>⭐</Text>
+          <TouchableOpacity
+            key={n}
+            onPress={() => setSelectedRating(n)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+          >
+            <Text style={styles.star}>{n <= selectedRating ? '⭐' : '☆'}</Text>
+          </TouchableOpacity>
         ))}
       </View>
 
@@ -485,7 +498,7 @@ const styles = StyleSheet.create({
     padding: Spacing.lg, gap: Spacing.sm, ...Shadow.card,
   },
   stepperCard:   { paddingVertical: Spacing.xl },
-  cancelledCard: { backgroundColor: '#FFF5F5', borderWidth: 1, borderColor: Colors.error },
+  cancelledCard: { backgroundColor: Colors.errorLight, borderWidth: 1, borderColor: Colors.error },
 
   // Progress stepper
   stepper: { flexDirection: 'row', alignItems: 'flex-start' },
@@ -493,34 +506,41 @@ const styles = StyleSheet.create({
     alignItems: 'center', gap: Spacing.xs,
     flexShrink: 0, width: 64,
   },
-  stepDot: {
-    width: 32, height: 32, borderRadius: 16,
-    borderWidth: 2, borderColor: Colors.border,
+  stepDotWrap: {
+    width: 44, height: 44,
     justifyContent: 'center', alignItems: 'center',
-    backgroundColor: Colors.white,
+  },
+  pulseRing: {
+    position: 'absolute',
+    width: 44, height: 44, borderRadius: Radius.full,
+    borderWidth: 2, borderColor: Colors.primary,
+  },
+  stepDot: {
+    width: 44, height: 44, borderRadius: 22,
+    borderWidth: 1.5, borderColor: Colors.border,
+    justifyContent: 'center', alignItems: 'center',
+    backgroundColor: Colors.surface,
   },
   stepDotActive: {
-    width: 32, height: 32, borderRadius: 16,
+    borderWidth: 0,
     backgroundColor: Colors.primary,
-    justifyContent: 'center', alignItems: 'center',
-    ...Shadow.strong,
   },
   stepDotDone: { borderColor: Colors.primary, backgroundColor: Colors.primary },
-  stepDotText: { fontSize: FontSize.sm, fontWeight: '800', color: Colors.textMuted },
+  stepDotText: { fontSize: FontSize.md, fontWeight: '700', color: Colors.textMuted },
   stepDotTextLight: { color: Colors.white },
   stepLabel:        { fontSize: FontSize.xs, color: Colors.textMuted, textAlign: 'center', fontWeight: '600' },
   stepLabelActive:  { color: Colors.primary, fontWeight: '800' },
   stepLabelDone:    { color: Colors.primary, fontWeight: '700' },
   stepLine: {
-    flex: 1, height: 2, backgroundColor: Colors.border,
-    alignSelf: 'center', marginBottom: Spacing.xl,
+    flex: 1, height: 3, backgroundColor: Colors.border,
+    marginTop: 21,
   },
   stepLineDone: { backgroundColor: Colors.primary },
 
   // Status emoji
   statusEmoji: {
-    fontSize: 64,
-    lineHeight: 90,
+    fontSize: 56,
+    lineHeight: 79,
     includeFontPadding: false,
     textAlignVertical: 'center',
     textAlign: 'center',
@@ -570,7 +590,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
   starRow: { flexDirection: 'row', gap: 6 },
-  star:    { fontSize: 28 },
+  star:    { fontSize: 32, includeFontPadding: false },
   rateBtn: {
     marginTop: Spacing.sm, backgroundColor: Colors.white,
     borderRadius: Radius.full, paddingHorizontal: Spacing.xl,

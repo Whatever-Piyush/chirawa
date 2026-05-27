@@ -2,107 +2,139 @@ import React from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Linking,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, FontSize, MIN_TAP, Radius, Shadow, Spacing, Gradients } from '../../theme';
-import { useT } from '@chirawa/i18n';
+import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing, Gradients } from '../../theme';
+import { useT, useLanguage } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
+import type { TabParamList } from '../../navigation/AppNavigator';
 import FauxGradient from '../../components/ui/FauxGradient';
-import PressableScale from '../../components/ui/PressableScale';
 
 const WHATSAPP_NUMBER = '919999999999';
 
-interface MenuItem {
+type NavProp = BottomTabNavigationProp<TabParamList>;
+
+interface MenuItemData {
   emoji:   string;
-  labelKey: string;
+  label:   string;
   onPress: () => void;
 }
+
+// ─── Reusable menu pieces ─────────────────────────────────────────────────────
+
+function MenuRow({ emoji, label, onPress }: MenuItemData) {
+  return (
+    <TouchableOpacity style={styles.menuItem} onPress={onPress} activeOpacity={0.7}>
+      <Text style={styles.menuEmoji}>{emoji}</Text>
+      <Text style={styles.menuLabel}>{label}</Text>
+      <Text style={styles.menuChevron}>›</Text>
+    </TouchableOpacity>
+  );
+}
+
+function MenuCard({ items }: { items: MenuItemData[] }) {
+  return (
+    <View style={styles.menuCard}>
+      {items.map((it, idx) => (
+        <React.Fragment key={it.label}>
+          <MenuRow {...it} />
+          {idx < items.length - 1 && <View style={styles.menuDivider} />}
+        </React.Fragment>
+      ))}
+    </View>
+  );
+}
+
+// ─── Main Screen ─────────────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
   const t = useT();
   const { state, signOut } = useAuth();
+  const { setLanguage } = useLanguage();
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<NavProp>();
 
   const phone   = state.phone ?? '—';
-  const initial = (phone && phone.length > 0 ? phone[phone.length - 1] : 'U') as string;
+  const initial = (phone !== '—' && phone.length > 0 ? phone[0] : 'U') as string;
 
-  const handleHelp = () => {
+  const openWhatsApp = () => {
     const msg = encodeURIComponent('Hi, I need help with Bringly app');
     void Linking.openURL(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`);
   };
 
-  const handleAbout = () => {
-    Alert.alert('Bringly', t('profile.aboutText'));
-  };
-
-  const handleAddresses = () => {
-    Alert.alert('📍', t('common.comingSoon'));
-  };
-
-  const handleLogout = () => {
-    Alert.alert(t('common.logout'), t('profile.logoutConfirm'), [
+  const handleLanguage = () => {
+    Alert.alert(t('profile.chooseLanguage'), undefined, [
+      { text: 'हिंदी',  onPress: () => setLanguage('hi') },
+      { text: 'English', onPress: () => setLanguage('en') },
       { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: t('common.logout'),
-        style: 'destructive',
-        onPress: () => { void signOut(); },
-      },
     ]);
   };
 
-  const items: MenuItem[] = [
-    { emoji: '📦', labelKey: 'profile.myOrders', onPress: () => undefined }, // tab-only nav placeholder
-    { emoji: '📍', labelKey: 'profile.addresses', onPress: handleAddresses },
-    { emoji: '❓', labelKey: 'profile.help', onPress: handleHelp },
-    { emoji: 'ℹ️', labelKey: 'profile.aboutApp', onPress: handleAbout },
+  const handleLogout = () => {
+    Alert.alert(t('profile.logoutTitle'), t('profile.logoutBody'), [
+      { text: t('profile.logoutStay'), style: 'cancel' },
+      { text: t('profile.logoutYes'),  style: 'destructive', onPress: () => { void signOut(); } },
+    ]);
+  };
+
+  const accountItems: MenuItemData[] = [
+    { emoji: '📦', label: t('profile.myOrders'),    onPress: () => navigation.navigate('OrderHistory') },
+    { emoji: '📍', label: t('profile.myAddresses'), onPress: () => Alert.alert('📍', t('profile.addressSoon')) },
+  ];
+
+  const settingsItems: MenuItemData[] = [
+    { emoji: '🌐', label: t('profile.changeLanguage'), onPress: handleLanguage },
+    { emoji: '🔔', label: t('profile.notifications'),  onPress: () => Alert.alert('🔔', t('profile.notifSoon')) },
+  ];
+
+  const helpItems: MenuItemData[] = [
+    { emoji: '💬', label: t('profile.whatsappSupport'), onPress: openWhatsApp },
+    { emoji: '⭐', label: t('profile.rateApp'),         onPress: () => Alert.alert('⭐', t('profile.rateSoon')) },
+    { emoji: 'ℹ️', label: t('profile.aboutApp'),        onPress: () => Alert.alert('Bringly', t('profile.aboutFull')) },
   ];
 
   return (
     <View style={styles.container}>
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: insets.top, paddingBottom: insets.bottom + Spacing.xxxl }]}
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header card */}
+        {/* ── Header ──────────────────────────────────────────────────────── */}
         <FauxGradient
           from={Gradients.primary[0]}
           to={Gradients.primary[1]}
-          style={[styles.headerCard, { paddingTop: Spacing.xl }]}
+          style={[styles.header, { paddingTop: insets.top + Spacing.lg }]}
         >
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{initial}</Text>
           </View>
           <Text style={styles.phoneText}>+91 {phone}</Text>
           <View style={styles.memberBadge}>
-            <Text style={styles.memberBadgeText}>✨  {t('profile.member')}</Text>
+            <Text style={styles.memberBadgeText}>✨  Bringly {t('profile.member')}</Text>
           </View>
         </FauxGradient>
 
-        {/* Menu items */}
-        <View style={styles.menu}>
-          {items.map((it) => (
-            <PressableScale
-              key={it.labelKey}
-              onPress={it.onPress}
-              style={styles.menuItem}
-            >
-              <Text style={styles.menuEmoji}>{it.emoji}</Text>
-              <Text style={styles.menuLabel}>{t(it.labelKey)}</Text>
-              <Text style={styles.menuChevron}>›</Text>
-            </PressableScale>
-          ))}
+        {/* ── Menu sections ───────────────────────────────────────────────── */}
+        <View style={styles.body}>
+          <MenuCard items={accountItems} />
+
+          <Text style={styles.sectionTitle}>{t('profile.settings')}</Text>
+          <MenuCard items={settingsItems} />
+
+          <Text style={styles.sectionTitle}>{t('profile.helpSection')}</Text>
+          <MenuCard items={helpItems} />
+
+          {/* Logout */}
+          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.85}>
+            <Text style={styles.logoutBtnText}>🚪  {t('common.logout')}</Text>
+          </TouchableOpacity>
+
+          {/* Footer */}
+          <Text style={[styles.footer, { marginBottom: insets.bottom + Spacing.lg }]}>
+            {t('profile.versionFooter')}
+          </Text>
         </View>
-
-        {/* Logout */}
-        <TouchableOpacity
-          style={styles.logoutBtn}
-          onPress={handleLogout}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.logoutBtnText}>{t('common.logout')}</Text>
-        </TouchableOpacity>
-
-        {/* Footer */}
-        <Text style={styles.versionFooter}>{t('profile.versionFooter')}</Text>
       </ScrollView>
     </View>
   );
@@ -110,10 +142,10 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  scroll:    { paddingHorizontal: 0, gap: Spacing.lg },
+  scroll:    { paddingBottom: Spacing.xxxl },
 
   // Header
-  headerCard: {
+  header: {
     alignItems: 'center',
     paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.xxl,
@@ -122,80 +154,92 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: Radius.xl,
   },
   avatar: {
-    width: 88, height: 88, borderRadius: 44,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    borderWidth: 3, borderColor: Colors.white,
+    width: 72, height: 72, borderRadius: Radius.full,
+    backgroundColor: Colors.primaryDark,
+    borderWidth: 3, borderColor: 'rgba(255,255,255,0.3)',
     justifyContent: 'center', alignItems: 'center',
-    marginBottom: Spacing.sm,
   },
   avatarText: {
     color: Colors.white,
-    fontSize: 38,
-    fontWeight: '900',
+    fontSize: FontSize.xxxl,
+    fontWeight: FontWeight.bold,
   },
   phoneText: {
     color: Colors.white,
-    fontSize: FontSize.xl,
-    fontWeight: '900',
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.semibold,
+    marginTop: Spacing.md,
   },
   memberBadge: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
     paddingHorizontal: Spacing.md,
     paddingVertical: 4,
     borderRadius: Radius.full,
-    marginTop: 4,
+    marginTop: Spacing.sm,
   },
   memberBadgeText: {
     color: Colors.white,
-    fontSize: FontSize.sm,
-    fontWeight: '700',
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semibold,
   },
 
-  // Menu
-  menu: {
-    marginHorizontal: Spacing.lg,
+  // Body
+  body: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.lg,
+  },
+  sectionTitle: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semibold,
+    color: Colors.textMuted,
+    paddingBottom: Spacing.sm,
+    marginTop: Spacing.xs,
+    textTransform: 'uppercase',
+  },
+
+  // Menu card
+  menuCard: {
     backgroundColor: Colors.card,
     borderRadius: Radius.lg,
     overflow: 'hidden',
-    ...Shadow.card,
+    marginBottom: Spacing.md,
+    ...Shadow.sm,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 14,
     paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    minHeight: MIN_TAP + 8,
+    minHeight: MIN_TAP,
     gap: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
   },
-  menuEmoji: { fontSize: 22 },
-  menuLabel: { flex: 1, fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
-  menuChevron: { fontSize: 24, color: Colors.textMuted, fontWeight: '700' },
+  menuEmoji:   { fontSize: 22 },
+  menuLabel:   { flex: 1, fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.textPrimary },
+  menuChevron: { fontSize: FontSize.xl, color: Colors.textMuted, fontWeight: FontWeight.bold },
+  menuDivider: { height: 1, backgroundColor: Colors.border },
 
   // Logout
   logoutBtn: {
-    marginHorizontal: Spacing.lg,
-    minHeight: MIN_TAP,
+    marginTop: Spacing.sm,
+    height: 52,
     borderRadius: Radius.lg,
     borderWidth: 1.5,
     borderColor: Colors.error,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.errorLight,
     justifyContent: 'center',
     alignItems: 'center',
   },
   logoutBtnText: {
     color: Colors.error,
-    fontWeight: '800',
+    fontWeight: FontWeight.semibold,
     fontSize: FontSize.md,
   },
 
   // Footer
-  versionFooter: {
+  footer: {
     textAlign: 'center',
     color: Colors.textMuted,
     fontSize: FontSize.xs,
-    fontWeight: '700',
-    marginTop: Spacing.md,
+    marginTop: Spacing.xxl,
   },
 });
