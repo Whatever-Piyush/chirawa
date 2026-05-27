@@ -165,6 +165,7 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
 
   const [shop,    setShop]   = useState<ShopDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error,   setError]  = useState(false);
   const [cart,    setCart]   = useState<Record<string, number>>({});
 
   // Slide-up cart bar animation
@@ -177,10 +178,25 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
-  useEffect(() => {
-    void loadShop();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const loadShop = useCallback(async () => {
+    setError(false);
+    try {
+      const data = await api.getShop(shopId) as ShopDetail;
+      setShop(data);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
   }, [shopId]);
+
+  useEffect(() => { void loadShop(); }, [loadShop]);
+
+  const handleRetry = useCallback(() => {
+    setError(false);
+    setLoading(true);
+    void loadShop();
+  }, [loadShop]);
 
   // Slide cart bar in/out
   useEffect(() => {
@@ -191,17 +207,6 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
       useNativeDriver: true,
     }).start();
   }, [totalCartCount, cartBarY]);
-
-  async function loadShop() {
-    try {
-      const data = await api.getShop(shopId) as ShopDetail;
-      setShop(data);
-    } catch {
-      Alert.alert(t('common.error'), t('shop.loadFailed'));
-    } finally {
-      setLoading(false);
-    }
-  }
 
   // ── Cart loading ───────────────────────────────────────────────────────────
 
@@ -337,8 +342,24 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
     );
   }
 
-  if (!shop) {
-    return <View style={styles.container}>{renderHeader()}</View>;
+  if (error || !shop) {
+    return (
+      <View style={styles.container}>
+        {renderHeader()}
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorEmoji}>😕</Text>
+          <Text style={styles.errorTitle}>इंटरनेट नहीं है</Text>
+          <Text style={styles.errorSubtext}>कनेक्शन चेक करें और दोबारा कोशिश करें</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={handleRetry}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.retryText}>🔄 दोबारा कोशिश करें</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
   }
 
   // ── No-inventory empty state ───────────────────────────────────────────────
@@ -655,5 +676,45 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: FontWeight.bold,
     fontSize: FontSize.md,
+  },
+
+  // Error state
+  errorContainer: {
+    flex:              1,
+    justifyContent:    'center',
+    alignItems:        'center',
+    padding:           32,
+    gap:               12,
+  },
+  errorEmoji: {
+    fontSize:           64,
+    lineHeight:         90,
+    includeFontPadding: false,
+  },
+  errorTitle: {
+    fontSize:   FontSize.xl,
+    fontWeight: FontWeight.bold,
+    color:      Colors.textPrimary,
+    textAlign:  'center',
+  },
+  errorSubtext: {
+    fontSize:  FontSize.md,
+    color:     Colors.textSecondary,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor:   Colors.primary,
+    paddingHorizontal: 32,
+    paddingVertical:   14,
+    borderRadius:      Radius.full,
+    marginTop:         8,
+    minHeight:         MIN_TAP,
+    justifyContent:    'center',
+    alignItems:        'center',
+  },
+  retryText: {
+    color:      Colors.white,
+    fontWeight: FontWeight.bold,
+    fontSize:   FontSize.md,
   },
 });

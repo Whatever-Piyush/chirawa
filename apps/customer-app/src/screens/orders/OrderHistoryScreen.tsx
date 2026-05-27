@@ -120,6 +120,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
   const [shopMap,     setShopMap]     = useState<Map<string, string>>(new Map());
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
+  const [error,       setError]       = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [reorderingId, setReorderingId] = useState<string | null>(null);
 
@@ -132,6 +133,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
   // ─── Load data (orders + shops in parallel) ────────────────────────────────
 
   const loadData = useCallback(async () => {
+    setError(false);
     try {
       const [ordersRaw, shopsRaw] = await Promise.all([
         api.getMyOrders({ page: 1, limit: PAGE_SIZE }) as unknown as Promise<OrderListItem[]>,
@@ -140,14 +142,20 @@ export default function OrderHistoryScreen({ navigation }: Props) {
       setOrders(ordersRaw);
       setShopMap(new Map(shopsRaw.map((s) => [s.id, s.name])));
     } catch {
-      Alert.alert(t('common.error'), t('common.retry'));
+      setError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [t]);
+  }, []);
 
   useEffect(() => { void loadData(); }, [loadData]);
+
+  const handleRetry = useCallback(() => {
+    setError(false);
+    setLoading(true);
+    void loadData();
+  }, [loadData]);
 
   // ─── Pull-to-refresh ───────────────────────────────────────────────────────
 
@@ -265,6 +273,27 @@ export default function OrderHistoryScreen({ navigation }: Props) {
     );
   }
 
+  // ─── Render: error state ───────────────────────────────────────────────────
+
+  if (error && orders.length === 0) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorEmoji}>😕</Text>
+          <Text style={styles.errorTitle}>इंटरनेट नहीं है</Text>
+          <Text style={styles.errorSubtext}>कनेक्शन चेक करें और दोबारा कोशिश करें</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={handleRetry}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.retryText}>🔄 दोबारा कोशिश करें</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   // ─── Render: empty state ───────────────────────────────────────────────────
 
   if (orders.length === 0) {
@@ -368,4 +397,44 @@ const styles = StyleSheet.create({
     minHeight: MIN_TAP, justifyContent: 'center', alignItems: 'center',
   },
   shopNowText: { color: Colors.white, fontSize: FontSize.md, fontWeight: '700' },
+
+  // Error state
+  errorContainer: {
+    flex:              1,
+    justifyContent:    'center',
+    alignItems:        'center',
+    padding:           32,
+    gap:               12,
+  },
+  errorEmoji: {
+    fontSize:           64,
+    lineHeight:         90,
+    includeFontPadding: false,
+  },
+  errorTitle: {
+    fontSize:   FontSize.xl,
+    fontWeight: '700',
+    color:      Colors.text,
+    textAlign:  'center',
+  },
+  errorSubtext: {
+    fontSize:  FontSize.md,
+    color:     Colors.textLight,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor:   Colors.primary,
+    paddingHorizontal: 32,
+    paddingVertical:   14,
+    borderRadius:      Radius.full,
+    marginTop:         8,
+    minHeight:         MIN_TAP,
+    justifyContent:    'center',
+    alignItems:        'center',
+  },
+  retryText: {
+    color:      Colors.white,
+    fontWeight: '700',
+    fontSize:   FontSize.md,
+  },
 });

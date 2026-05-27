@@ -7,7 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, FontSize, FontWeight, Radius, Shadow, Spacing } from '../../theme';
+import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import {
@@ -146,6 +146,7 @@ export default function HomeScreen({ navigation }: Props) {
   const [shops,      setShops]      = useState<Shop[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error,      setError]      = useState(false);
   const [cartCount,  setCartCount]  = useState(0);
 
   // ── 5A. Screen entrance animations (run once on mount) ───────────────────
@@ -235,16 +236,23 @@ export default function HomeScreen({ navigation }: Props) {
   }, [cartCount, badgeScale]);
 
   const loadShops = useCallback(async () => {
+    setError(false);
     try {
       const data = await api.getShops() as Shop[];
       setShops(data);
-    } catch (err) {
-      console.error('Failed to load shops:', err);
+    } catch {
+      setError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
+
+  const handleRetry = useCallback(() => {
+    setError(false);
+    setLoading(true);
+    void loadShops();
+  }, [loadShops]);
 
   const loadCartCount = useCallback(async () => {
     try {
@@ -402,12 +410,25 @@ export default function HomeScreen({ navigation }: Props) {
           </PressableScale>
         </View>
 
-        {/* ── 5/6/7. Shop list / skeleton / empty ─────────────────────────── */}
+        {/* ── 5/6/7/8. Skeleton / error / empty / list ───────────────────── */}
         {loading ? (
           <View style={styles.listGap}>
             <ShopCardSkeleton />
             <ShopCardSkeleton />
             <ShopCardSkeleton />
+          </View>
+        ) : error && shops.length === 0 ? (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorEmoji}>😕</Text>
+            <Text style={styles.errorTitle}>इंटरनेट नहीं है</Text>
+            <Text style={styles.errorSubtext}>कनेक्शन चेक करें और दोबारा कोशिश करें</Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={handleRetry}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.retryText}>🔄 दोबारा कोशिश करें</Text>
+            </TouchableOpacity>
           </View>
         ) : shops.length === 0 ? (
           <View style={styles.empty}>
@@ -657,4 +678,45 @@ const styles = StyleSheet.create({
   },
   emptyEmoji: { fontSize: 64, marginBottom: Spacing.sm },
   emptyHint:  { marginTop: Spacing.xs },
+
+  // 8. Error state
+  errorContainer: {
+    flex:              1,
+    justifyContent:    'center',
+    alignItems:        'center',
+    padding:           32,
+    gap:               12,
+    marginTop:         60,
+  },
+  errorEmoji: {
+    fontSize:           64,
+    lineHeight:         90,
+    includeFontPadding: false,
+  },
+  errorTitle: {
+    fontSize:   FontSize.xl,
+    fontWeight: FontWeight.bold,
+    color:      Colors.textPrimary,
+    textAlign:  'center',
+  },
+  errorSubtext: {
+    fontSize:  FontSize.md,
+    color:     Colors.textSecondary,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor:   Colors.primary,
+    paddingHorizontal: 32,
+    paddingVertical:   14,
+    borderRadius:      Radius.full,
+    marginTop:         8,
+    minHeight:         MIN_TAP,
+    justifyContent:    'center',
+    alignItems:        'center',
+  },
+  retryText: {
+    color:      Colors.white,
+    fontWeight: FontWeight.bold,
+    fontSize:   FontSize.md,
+  },
 });
