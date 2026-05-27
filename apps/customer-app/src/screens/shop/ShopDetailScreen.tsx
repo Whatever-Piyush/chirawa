@@ -1,14 +1,14 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  Alert, Animated, Dimensions,
+  Alert, Animated, Dimensions, Image,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, FontSize, MIN_TAP, Radius, Shadow, Spacing, Gradients } from '../../theme';
+import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing, Gradients } from '../../theme';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import PressableScale from '../../components/ui/PressableScale';
@@ -33,18 +33,26 @@ const COLUMNS = 2;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH = (SCREEN_WIDTH - Spacing.lg * 2 - Spacing.md) / COLUMNS;
 
+// Deterministic fallback colours for the letter-avatar when a product has no image
+const AVATAR_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'] as const;
+function avatarColor(name: string): string {
+  const code = name.charCodeAt(0) || 0;
+  return AVATAR_COLORS[code % AVATAR_COLORS.length] as string;
+}
+
 // ─── Skeleton card ────────────────────────────────────────────────────────────
 
 function ProductCardSkeleton() {
   return (
     <View style={[styles.productCard, { width: CARD_WIDTH }]}>
-      <Shimmer width={CARD_WIDTH - Spacing.md * 2} height={CARD_WIDTH - Spacing.md * 2} borderRadius={Radius.md} />
-      <View style={{ height: 8 }} />
-      <Shimmer width="80%" height={14} />
-      <View style={{ height: 6 }} />
-      <Shimmer width="50%" height={12} />
-      <View style={{ height: 10 }} />
-      <Shimmer width="100%" height={36} borderRadius={Radius.md} />
+      <Shimmer width={CARD_WIDTH} height={CARD_WIDTH} borderRadius={Radius.lg} />
+      <View style={styles.productBottom}>
+        <Shimmer width="85%" height={14} />
+        <View style={{ height: 6 }} />
+        <Shimmer width="50%" height={14} />
+        <View style={{ height: 10 }} />
+        <Shimmer width="100%" height={34} borderRadius={Radius.full} />
+      </View>
     </View>
   );
 }
@@ -59,8 +67,8 @@ function BouncyQty({ qty }: { qty: number }) {
     if (last.current !== qty) {
       last.current = qty;
       Animated.sequence([
-        Animated.spring(scale, { toValue: 1.3, friction: 4, tension: 200, useNativeDriver: true }),
-        Animated.spring(scale, { toValue: 1,   friction: 5, tension: 200, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1.4, duration: 75, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1,   duration: 75, useNativeDriver: true }),
       ]).start();
     }
   }, [qty, scale]);
@@ -71,6 +79,82 @@ function BouncyQty({ qty }: { qty: number }) {
     </Animated.Text>
   );
 }
+
+// ─── Product card (memoised) ──────────────────────────────────────────────────
+
+interface ProductGridCardProps {
+  item:     Product;
+  qty:      number;
+  addLabel: string;
+  outLabel: string;
+  onAdd:    (productId: string) => void;
+  onInc:    (productId: string, currentQty: number) => void;
+  onDec:    (productId: string, currentQty: number) => void;
+}
+
+const ProductGridCard = React.memo(function ProductGridCard({
+  item, qty, addLabel, outLabel, onAdd, onInc, onDec,
+}: ProductGridCardProps) {
+  const oos = item.stockStatus === 'out_of_stock';
+
+  return (
+    <View style={[styles.productCard, { width: CARD_WIDTH }, oos && styles.productCardDisabled]}>
+      <View style={styles.productImageBox}>
+        {item.imageUrl ? (
+          <Image source={{ uri: item.imageUrl }} style={styles.productImage} resizeMode="cover" />
+        ) : item.name ? (
+          <View style={[styles.productAvatar, { backgroundColor: avatarColor(item.name) }]}>
+            <Text style={styles.productAvatarText}>{item.name.charAt(0).toUpperCase()}</Text>
+          </View>
+        ) : (
+          <Text style={styles.productImageEmoji}>🛒</Text>
+        )}
+      </View>
+
+      <View style={styles.productBottom}>
+        <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
+        {item.unit ? <Text style={styles.productUnit}>{item.unit}</Text> : null}
+        <Text style={styles.productPrice}>₹{Math.round(item.price / 100)}</Text>
+
+        <View style={styles.productActions}>
+          {oos ? (
+            <View style={styles.outBadge}>
+              <Text style={styles.outBadgeText}>{outLabel}</Text>
+            </View>
+          ) : qty > 0 ? (
+            <View style={styles.stepper}>
+              <TouchableOpacity
+                onPress={() => onDec(item.id, qty)}
+                style={styles.stepperBtn}
+                activeOpacity={0.8}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Text style={styles.stepperBtnText}>−</Text>
+              </TouchableOpacity>
+              <BouncyQty qty={qty} />
+              <TouchableOpacity
+                onPress={() => onInc(item.id, qty)}
+                style={styles.stepperBtn}
+                activeOpacity={0.8}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Text style={styles.stepperBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.addPill}
+              onPress={() => onAdd(item.id)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.addPillText}>{addLabel}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+});
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 
@@ -84,7 +168,7 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
   const [cart,    setCart]   = useState<Record<string, number>>({});
 
   // Slide-up cart bar animation
-  const cartBarY = useRef(new Animated.Value(120)).current;
+  const cartBarY = useRef(new Animated.Value(80)).current;
 
   const totalCartCount = Object.values(cart).reduce((s, q) => s + q, 0);
 
@@ -101,9 +185,9 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
   // Slide cart bar in/out
   useEffect(() => {
     Animated.spring(cartBarY, {
-      toValue:         totalCartCount > 0 ? 0 : 120,
+      toValue:         totalCartCount > 0 ? 0 : 80,
       friction:        7,
-      tension:         100,
+      tension:         200,
       useNativeDriver: true,
     }).start();
   }, [totalCartCount, cartBarY]);
@@ -140,7 +224,7 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
 
   // ── Cart mutation handlers (optimistic) ────────────────────────────────────
 
-  async function handleAdd(productId: string) {
+  const handleAdd = useCallback(async (productId: string) => {
     setCart((prev) => ({ ...prev, [productId]: 1 }));
     try {
       await api.addToCart({ productId, quantity: 1 });
@@ -149,9 +233,10 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
       const msg = err instanceof Error ? err.message : t('shop.addFailed');
       Alert.alert(t('common.error'), msg);
     }
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  async function handleIncrement(productId: string, currentQty: number) {
+  const handleIncrement = useCallback(async (productId: string, currentQty: number) => {
     const newQty = currentQty + 1;
     setCart((prev) => ({ ...prev, [productId]: newQty }));
     try {
@@ -159,9 +244,9 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
     } catch {
       setCart((prev) => ({ ...prev, [productId]: currentQty }));
     }
-  }
+  }, []);
 
-  async function handleDecrement(productId: string, currentQty: number) {
+  const handleDecrement = useCallback(async (productId: string, currentQty: number) => {
     const newQty = currentQty - 1;
     if (newQty <= 0) {
       setCart((prev) => { const n = { ...prev }; delete n[productId]; return n; });
@@ -173,7 +258,7 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
     } catch {
       setCart((prev) => ({ ...prev, [productId]: currentQty }));
     }
-  }
+  }, []);
 
   function handleNotify() {
     Alert.alert('🔔', t('shop.notifyAck'));
@@ -181,11 +266,32 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  const allProducts = shop?.categories.flatMap((c) => c.products) ?? [];
+  const allProducts = useMemo(
+    () => shop?.categories.flatMap((c) => c.products) ?? [],
+    [shop],
+  );
   const cartSubtotal = allProducts.reduce(
     (s, p) => s + (cart[p.id] ?? 0) * Math.round(p.price / 100),
     0,
   );
+
+  // Resolved once per render — stable string values keep ProductGridCard memoised
+  const addLabel = t('shop.add');
+  const outLabel = t('shop.outOfStock');
+
+  const keyExtractor = useCallback((item: Product) => item.id, []);
+
+  const renderProduct = useCallback(({ item }: { item: Product }) => (
+    <ProductGridCard
+      item={item}
+      qty={cart[item.id] ?? 0}
+      addLabel={addLabel}
+      outLabel={outLabel}
+      onAdd={handleAdd}
+      onInc={handleIncrement}
+      onDec={handleDecrement}
+    />
+  ), [cart, addLabel, outLabel, handleAdd, handleIncrement, handleDecrement]);
 
   // ── Gradient header (always shown) ─────────────────────────────────────────
 
@@ -296,66 +402,18 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
 
       <FlatList
         data={allProducts}
-        keyExtractor={(item) => item.id}
+        keyExtractor={keyExtractor}
+        renderItem={renderProduct}
         numColumns={COLUMNS}
         columnWrapperStyle={styles.gridRow}
         contentContainerStyle={[
           styles.gridContent,
           { paddingBottom: 100 + insets.bottom },
         ]}
-        renderItem={({ item }) => {
-          const qty  = cart[item.id] ?? 0;
-          const oos  = item.stockStatus === 'out_of_stock';
-          return (
-            <PressableScale
-              scaleTo={0.97}
-              onPress={() => undefined}
-              style={[styles.productCard, { width: CARD_WIDTH }, oos && styles.productCardDisabled]}
-            >
-              <View style={styles.productImageBox}>
-                <Text style={styles.productImageEmoji}>🛒</Text>
-              </View>
-              <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
-              {item.unit ? <Text style={styles.productUnit}>{item.unit}</Text> : null}
-              <Text style={styles.productPrice}>₹{Math.round(item.price / 100)}</Text>
-              <View style={styles.productActions}>
-                {oos ? (
-                  <View style={styles.outBadge}>
-                    <Text style={styles.outBadgeText}>{t('shop.outOfStock')}</Text>
-                  </View>
-                ) : qty > 0 ? (
-                  <View style={styles.stepper}>
-                    <TouchableOpacity
-                      onPress={() => void handleDecrement(item.id, qty)}
-                      style={styles.stepperBtn}
-                      activeOpacity={0.8}
-                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                    >
-                      <Text style={styles.stepperBtnText}>−</Text>
-                    </TouchableOpacity>
-                    <BouncyQty qty={qty} />
-                    <TouchableOpacity
-                      onPress={() => void handleIncrement(item.id, qty)}
-                      style={styles.stepperBtn}
-                      activeOpacity={0.8}
-                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                    >
-                      <Text style={styles.stepperBtnText}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.addPill}
-                    onPress={() => void handleAdd(item.id)}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.addPillText}>{t('shop.add')}</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </PressableScale>
-          );
-        }}
+        removeClippedSubviews
+        windowSize={5}
+        maxToRenderPerBatch={8}
+        initialNumToRender={6}
       />
 
       {/* Sticky bottom cart bar (animated slide up) */}
@@ -363,7 +421,7 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
         style={[
           styles.cartBar,
           {
-            paddingBottom: Spacing.lg + insets.bottom,
+            paddingBottom: insets.bottom + Spacing.md,
             transform: [{ translateY: cartBarY }],
           },
         ]}
@@ -460,12 +518,12 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   gridContent: {
-    paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.lg,
     gap: Spacing.md,
   },
   gridRow: {
     gap: Spacing.md,
+    paddingHorizontal: Spacing.lg,
     justifyContent: 'space-between',
   },
 
@@ -473,65 +531,73 @@ const styles = StyleSheet.create({
   productCard: {
     backgroundColor: Colors.card,
     borderRadius: Radius.lg,
-    padding: Spacing.md,
-    ...Shadow.card,
-    gap: 2,
+    overflow: 'visible',
+    ...Shadow.sm,
   },
   productCardDisabled: { opacity: 0.55 },
   productImageBox: {
     width: '100%',
     aspectRatio: 1,
-    backgroundColor: Colors.background,
-    borderRadius: Radius.md,
+    backgroundColor: Colors.surfaceAlt,
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
+    overflow: 'hidden',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: Spacing.sm,
   },
-  productImageEmoji: { fontSize: 44 },
-  productName:   { fontSize: FontSize.sm, fontWeight: '700', color: Colors.text, minHeight: 36 },
+  productImage: { width: '100%', height: '100%' },
+  productAvatar: {
+    width: 72, height: 72,
+    borderRadius: Radius.full,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  productAvatarText: { color: Colors.white, fontSize: FontSize.xxl, fontWeight: FontWeight.heavy },
+  productImageEmoji: { fontSize: 48, lineHeight: 60, includeFontPadding: false },
+  productBottom: { padding: 10, gap: 2 },
+  productName:   { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textPrimary, minHeight: 36 },
   productUnit:   { fontSize: FontSize.xs, color: Colors.textMuted, marginBottom: 2 },
-  productPrice:  { fontSize: FontSize.lg, fontWeight: '900', color: Colors.primary, marginTop: 2 },
+  productPrice:  { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.primary, marginTop: 2 },
   productActions:{ marginTop: Spacing.sm },
 
   addPill: {
     backgroundColor: Colors.primary,
     borderRadius: Radius.full,
-    paddingVertical: 10,
+    height: 34,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 38,
   },
-  addPillText: { color: Colors.white, fontWeight: '800', fontSize: FontSize.sm },
+  addPillText: { color: Colors.white, fontWeight: FontWeight.bold, fontSize: FontSize.sm },
 
   outBadge: {
     backgroundColor: Colors.border,
     borderRadius: Radius.full,
-    paddingVertical: 10,
+    height: 34,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  outBadgeText: { fontSize: FontSize.xs, color: Colors.textLight, fontWeight: '700' },
+  outBadgeText: { fontSize: FontSize.xs, color: Colors.textLight, fontWeight: FontWeight.bold },
 
   stepper: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: Colors.accent,
-    borderRadius: Radius.full,
-    paddingHorizontal: 4,
-    minHeight: 38,
+    height: 34,
   },
   stepperBtn: {
-    width: 32, height: 32,
+    width: 34, height: 34,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  stepperBtnText: { color: Colors.white, fontSize: FontSize.lg, fontWeight: '900', lineHeight: 22 },
+  stepperBtnText: { color: Colors.white, fontSize: FontSize.lg, fontWeight: FontWeight.heavy, lineHeight: 22 },
   stepperQty: {
-    color: Colors.white,
+    color: Colors.textPrimary,
     fontSize: FontSize.md,
-    fontWeight: '900',
+    fontWeight: FontWeight.bold,
     textAlign: 'center',
-    minWidth: 18,
+    minWidth: 28,
   },
 
   // Cart bar
@@ -541,7 +607,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.md,
-    ...Shadow.strong,
+    ...Shadow.primary,
   },
   cartBarInner: {
     minHeight: MIN_TAP,
@@ -549,8 +615,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  cartBarLeft:  { color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
-  cartBarRight: { color: Colors.white, fontWeight: '900', fontSize: FontSize.md },
+  cartBarLeft:  { color: Colors.white, fontWeight: FontWeight.semibold, fontSize: FontSize.md },
+  cartBarRight: { color: Colors.white, fontWeight: FontWeight.bold, fontSize: FontSize.md },
 
   // Empty
   emptyContainer: {
@@ -560,16 +626,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xxl,
     gap: Spacing.md,
   },
-  emptyEmoji: { fontSize: 80 },
+  emptyEmoji: { fontSize: 72, lineHeight: 101, includeFontPadding: false },
   emptyTitle: {
-    fontSize: FontSize.xxl,
-    fontWeight: '900',
-    color: Colors.text,
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.bold,
+    color: Colors.textPrimary,
     textAlign: 'center',
   },
   emptyBody: {
     fontSize: FontSize.md,
-    color: Colors.textLight,
+    color: Colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
   },
@@ -580,14 +646,14 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     paddingHorizontal: Spacing.xxl,
     paddingVertical: Spacing.md,
-    backgroundColor: Colors.primaryLight,
+    backgroundColor: 'transparent',
     minHeight: MIN_TAP,
     justifyContent: 'center',
     alignItems: 'center',
   },
   notifyBtnText: {
     color: Colors.primary,
-    fontWeight: '800',
+    fontWeight: FontWeight.bold,
     fontSize: FontSize.md,
   },
 });

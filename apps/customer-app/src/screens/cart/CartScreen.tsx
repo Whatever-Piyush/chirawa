@@ -22,12 +22,12 @@ import Shimmer from '../../components/ui/Shimmer';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Cart'> };
 
-// Distinct fallback bg colours for avatar circles when no imageUrl
-const AVATAR_COLORS = ['#FF3E6C', '#7C5CFF', '#00B894', '#FDCB6E', '#2D9CDB', '#FF8C42'];
+// Deterministic fallback colours for the letter-avatar when a product has no image
+// (same palette + logic as ShopDetailScreen)
+const AVATAR_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'] as const;
 function avatarColor(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[h] as string;
+  const code = name.charCodeAt(0) || 0;
+  return AVATAR_COLORS[code % AVATAR_COLORS.length] as string;
 }
 
 // ─── Skeleton ────────────────────────────────────────────────────────────────
@@ -57,8 +57,8 @@ function BouncyNumber({ value }: { value: number }) {
     if (last.current !== value) {
       last.current = value;
       Animated.sequence([
-        Animated.spring(scale, { toValue: 1.3, friction: 4, tension: 200, useNativeDriver: true }),
-        Animated.spring(scale, { toValue: 1,   friction: 5, tension: 220, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1.3, duration: 75, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1,   duration: 75, useNativeDriver: true }),
       ]).start();
     }
   }, [value, scale]);
@@ -68,6 +68,82 @@ function BouncyNumber({ value }: { value: number }) {
     </Animated.Text>
   );
 }
+
+// ─── Cart row (memoised) ─────────────────────────────────────────────────────
+
+interface CartItemRowProps {
+  item:       CartItem;
+  isUpdating: boolean;
+  removeLabel: string;
+  onChange:   (productId: string, delta: number, currentQty: number) => void;
+  onRemove:   (productId: string) => void;
+}
+
+const CartItemRow = React.memo(function CartItemRow({
+  item, isUpdating, removeLabel, onChange, onRemove,
+}: CartItemRowProps) {
+  const unitRupees     = Math.round(item.unitPrice / 100);
+  const subtotalRupees = Math.round(item.subtotal / 100);
+  const firstLetter    = (item.productName?.[0] ?? '?').toUpperCase();
+
+  const renderRightActions = () => (
+    <TouchableOpacity
+      style={styles.deleteAction}
+      onPress={() => onRemove(item.productId)}
+      activeOpacity={0.8}
+    >
+      <Text style={styles.deleteActionIcon}>🗑️</Text>
+      <Text style={styles.deleteActionText}>{removeLabel}</Text>
+    </TouchableOpacity>
+  );
+
+  return (
+    <Swipeable renderRightActions={renderRightActions} overshootRight={false}>
+      <View style={styles.itemRow}>
+        {/* Avatar / image */}
+        <View style={styles.itemImageBox}>
+          {item.imageUrl ? (
+            <Image source={{ uri: item.imageUrl }} style={styles.itemImage} resizeMode="cover" />
+          ) : (
+            <View style={[styles.itemAvatar, { backgroundColor: avatarColor(item.productName) }]}>
+              <Text style={styles.itemAvatarText}>{firstLetter}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Name + pricing */}
+        <View style={styles.itemInfo}>
+          <Text style={styles.itemName} numberOfLines={2}>{item.productName}</Text>
+          <Text style={styles.itemUnitPrice}>₹{unitRupees} × {item.quantity}</Text>
+          <Text style={styles.itemSubtotal}>= ₹{subtotalRupees}</Text>
+        </View>
+
+        {/* Quantity stepper */}
+        <View style={[styles.stepper, isUpdating && styles.stepperDisabled]}>
+          <TouchableOpacity
+            style={styles.stepperBtn}
+            onPress={() => !isUpdating && onChange(item.productId, -1, item.quantity)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            <Text style={styles.stepperBtnText}>−</Text>
+          </TouchableOpacity>
+
+          <BouncyNumber value={item.quantity} />
+
+          <TouchableOpacity
+            style={styles.stepperBtn}
+            onPress={() => !isUpdating && onChange(item.productId, 1, item.quantity)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            <Text style={styles.stepperBtnText}>+</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Swipeable>
+  );
+});
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 
@@ -139,12 +215,12 @@ export default function CartScreen({ navigation }: Props) {
     }
   }, []);
 
-  const markUpdating = (id: string, on: boolean) =>
+  const markUpdating = useCallback((id: string, on: boolean) =>
     setUpdating((prev) => {
       const next = new Set(prev);
       on ? next.add(id) : next.delete(id);
       return next;
-    });
+    }), []);
 
   const handleQuantityChange = useCallback(async (
     productId: string,
@@ -176,7 +252,8 @@ export default function CartScreen({ navigation }: Props) {
     } finally {
       markUpdating(productId, false);
     }
-  }, [loadCart, t]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadCart, markUpdating]);
 
   const handleRemoveItem = useCallback(async (productId: string) => {
     setCart((prev) => prev
@@ -190,7 +267,8 @@ export default function CartScreen({ navigation }: Props) {
       void loadCart();
       Alert.alert(t('common.error'), t('common.retry'));
     }
-  }, [loadCart, t]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadCart]);
 
   const handleClearCart = useCallback(() => {
     Alert.alert(t('cart.clearCart'), t('cart.clearCartConfirm'), [
@@ -210,70 +288,19 @@ export default function CartScreen({ navigation }: Props) {
     ]);
   }, [t]);
 
-  const renderItem = useCallback(({ item }: { item: CartItem }) => {
-    const isUpdating     = updating.has(item.productId);
-    const unitRupees     = Math.round(item.unitPrice / 100);
-    const subtotalRupees = Math.round(item.subtotal / 100);
-    const firstLetter    = (item.productName?.[0] ?? '?').toUpperCase();
+  const removeLabel = t('cart.remove');
 
-    const renderRightActions = () => (
-      <TouchableOpacity
-        style={styles.deleteAction}
-        onPress={() => void handleRemoveItem(item.productId)}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.deleteActionIcon}>🗑️</Text>
-        <Text style={styles.deleteActionText}>{t('cart.remove')}</Text>
-      </TouchableOpacity>
-    );
+  const keyExtractor = useCallback((item: CartItem) => item.productId, []);
 
-    return (
-      <Swipeable renderRightActions={renderRightActions} overshootRight={false}>
-        <View style={styles.itemRow}>
-          {/* Avatar / image */}
-          <View style={styles.itemImageBox}>
-            {item.imageUrl ? (
-              <Image source={{ uri: item.imageUrl }} style={styles.itemImage} resizeMode="cover" />
-            ) : (
-              <View style={[styles.itemAvatar, { backgroundColor: avatarColor(item.productName) }]}>
-                <Text style={styles.itemAvatarText}>{firstLetter}</Text>
-              </View>
-            )}
-          </View>
-
-          {/* Name + pricing */}
-          <View style={styles.itemInfo}>
-            <Text style={styles.itemName} numberOfLines={2}>{item.productName}</Text>
-            <Text style={styles.itemUnitPrice}>₹{unitRupees} × {item.quantity}</Text>
-            <Text style={styles.itemSubtotal}>= ₹{subtotalRupees}</Text>
-          </View>
-
-          {/* Quantity stepper */}
-          <View style={[styles.stepper, isUpdating && styles.stepperDisabled]}>
-            <TouchableOpacity
-              style={styles.stepperBtn}
-              onPress={() => !isUpdating && void handleQuantityChange(item.productId, -1, item.quantity)}
-              activeOpacity={0.7}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            >
-              <Text style={styles.stepperBtnText}>−</Text>
-            </TouchableOpacity>
-
-            <BouncyNumber value={item.quantity} />
-
-            <TouchableOpacity
-              style={styles.stepperBtn}
-              onPress={() => !isUpdating && void handleQuantityChange(item.productId, 1, item.quantity)}
-              activeOpacity={0.7}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            >
-              <Text style={styles.stepperBtnText}>+</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Swipeable>
-    );
-  }, [updating, handleQuantityChange, handleRemoveItem, t]);
+  const renderItem = useCallback(({ item }: { item: CartItem }) => (
+    <CartItemRow
+      item={item}
+      isUpdating={updating.has(item.productId)}
+      removeLabel={removeLabel}
+      onChange={handleQuantityChange}
+      onRemove={handleRemoveItem}
+    />
+  ), [updating, removeLabel, handleQuantityChange, handleRemoveItem]);
 
   const subtotalRupees = cart ? Math.round(cart.subtotal / 100) : 0;
   const totalRupees    = subtotalRupees;
@@ -332,8 +359,12 @@ export default function CartScreen({ navigation }: Props) {
 
       <FlatList
         data={cart.items}
-        keyExtractor={(item) => item.productId}
+        keyExtractor={keyExtractor}
         renderItem={renderItem}
+        removeClippedSubviews
+        windowSize={5}
+        maxToRenderPerBatch={8}
+        initialNumToRender={6}
         contentContainerStyle={[styles.listContent, { paddingBottom: 240 + insets.bottom }]}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         refreshControl={
@@ -414,7 +445,7 @@ const styles = StyleSheet.create({
     overflow: 'visible',
   },
   emptyEmoji: { fontSize: 80, lineHeight: 112, includeFontPadding: false, textAlignVertical: 'center' },
-  emptyTitle: { fontSize: FontSize.xl, fontWeight: '700', color: Colors.text, textAlign: 'center' },
+  emptyTitle: { fontSize: FontSize.xxl, fontWeight: '700', color: Colors.text, textAlign: 'center' },
   emptyHint:  { fontSize: FontSize.md, color: Colors.textLight, textAlign: 'center' },
   shopNowBtn: {
     marginTop: Spacing.md, backgroundColor: Colors.primary, borderRadius: Radius.full,
@@ -438,7 +469,7 @@ const styles = StyleSheet.create({
   savingsWrap: {
     marginHorizontal: Spacing.lg,
     marginTop: Spacing.md,
-    backgroundColor: '#E8F8F0',
+    backgroundColor: Colors.successLight,
     borderRadius: Radius.full,
     paddingVertical: 8,
     paddingHorizontal: Spacing.lg,
@@ -446,7 +477,7 @@ const styles = StyleSheet.create({
   },
   savingsText: {
     fontSize: FontSize.sm,
-    color: Colors.accent,
+    color: Colors.success,
     fontWeight: '800',
   },
 
@@ -465,10 +496,12 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     overflow: 'hidden',
     backgroundColor: Colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   itemImage:      { width: 64, height: 64 },
-  itemAvatar:     { width: 64, height: 64, justifyContent: 'center', alignItems: 'center' },
-  itemAvatarText: { fontSize: 28, fontWeight: '900', color: Colors.white },
+  itemAvatar:     { width: 48, height: 48, borderRadius: Radius.full, justifyContent: 'center', alignItems: 'center' },
+  itemAvatarText: { fontSize: FontSize.xl, fontWeight: '700', color: Colors.white },
   itemInfo:       { flex: 1, gap: 2 },
   itemName:       { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
   itemUnitPrice:  { fontSize: FontSize.sm, color: Colors.textLight },
@@ -527,13 +560,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1, shadowRadius: 8, elevation: 8,
   },
   freeBanner: {
-    backgroundColor: '#E8F8F0',
+    backgroundColor: Colors.successLight,
     borderRadius: Radius.sm,
     paddingVertical: 6,
     alignItems: 'center',
   },
   freeBannerText: {
-    color: Colors.accent,
+    color: Colors.success,
     fontWeight: '700',
     fontSize: FontSize.sm,
   },
