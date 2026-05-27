@@ -8,14 +8,16 @@ import {
 } from 'react-native';
 
 interface Props {
-  children: React.ReactNode;
-  onPress?: (e: GestureResponderEvent) => void;
+  children:    React.ReactNode;
+  onPress?:    (e: GestureResponderEvent) => void;
   onLongPress?: (e: GestureResponderEvent) => void;
-  disabled?: boolean;
-  style?: StyleProp<ViewStyle>;
-  scaleTo?: number;
-  hitSlop?: number;
-  testID?: string;
+  disabled?:   boolean;
+  style?:      StyleProp<ViewStyle>;
+  scaleTo?:    number;
+  hitSlop?:    number | { top?: number; bottom?: number; left?: number; right?: number };
+  testID?:     string;
+  accessibilityLabel?: string;
+  accessibilityRole?:  'button' | 'link' | 'none';
 }
 
 export default function PressableScale({
@@ -24,13 +26,15 @@ export default function PressableScale({
   onLongPress,
   disabled,
   style,
-  scaleTo = 0.96,
+  scaleTo = 0.95,
   hitSlop,
   testID,
+  accessibilityLabel,
+  accessibilityRole = 'button',
 }: Props) {
   const scale = useRef(new Animated.Value(1)).current;
 
-  const handlePressIn = () => {
+  const pressIn = () => {
     Animated.spring(scale, {
       toValue:         scaleTo,
       friction:        8,
@@ -39,7 +43,7 @@ export default function PressableScale({
     }).start();
   };
 
-  const handlePressOut = () => {
+  const pressOut = () => {
     Animated.spring(scale, {
       toValue:         1,
       friction:        8,
@@ -52,11 +56,13 @@ export default function PressableScale({
     <Pressable
       onPress={onPress}
       onLongPress={onLongPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
       disabled={disabled}
       hitSlop={hitSlop}
       testID={testID}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole={accessibilityRole}
     >
       <Animated.View style={[{ transform: [{ scale }] }, style]}>
         {children}

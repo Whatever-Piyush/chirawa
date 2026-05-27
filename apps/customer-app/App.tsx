@@ -7,22 +7,22 @@ import { LanguageProvider } from '@chirawa/i18n';
 import { AuthProvider } from './src/context/AuthContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import ErrorBoundary from './src/components/ErrorBoundary';
-import { ToastProvider } from './src/components/ui/Toast';
+import { ToastProvider } from './src/components/ui';
 
 export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ErrorBoundary>
-        <LanguageProvider>
-          <SafeAreaProvider>
-            <AuthProvider>
-              <ToastProvider>
+        <ToastProvider>
+          <LanguageProvider>
+            <SafeAreaProvider>
+              <AuthProvider>
                 <StatusBar style="light" translucent backgroundColor="transparent" />
                 <AppNavigator />
-              </ToastProvider>
-            </AuthProvider>
-          </SafeAreaProvider>
-        </LanguageProvider>
+              </AuthProvider>
+            </SafeAreaProvider>
+          </LanguageProvider>
+        </ToastProvider>
       </ErrorBoundary>
     </GestureHandlerRootView>
   );

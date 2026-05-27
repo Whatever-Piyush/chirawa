@@ -19,51 +19,41 @@ export default function Shimmer({
 
   useEffect(() => {
     const anim = Animated.loop(
-      Animated.timing(progress, {
-        toValue:         1,
-        duration:        1100,
-        useNativeDriver: true,
-      }),
+      Animated.sequence([
+        Animated.timing(progress, {
+          toValue:         1,
+          duration:        900,
+          useNativeDriver: false,
+        }),
+        Animated.timing(progress, {
+          toValue:         0,
+          duration:        900,
+          useNativeDriver: false,
+        }),
+      ]),
     );
     anim.start();
     return () => anim.stop();
   }, [progress]);
 
-  const translateX = progress.interpolate({
+  const backgroundColor = progress.interpolate({
     inputRange:  [0, 1],
-    outputRange: [-180, 180],
+    outputRange: [Colors.shimmer, Colors.shimmerHigh],
   });
 
   return (
-    <View
+    <Animated.View
       style={[
         styles.container,
-        { width, height, borderRadius, backgroundColor: Colors.shimmer1 },
+        { width, height, borderRadius, backgroundColor },
         style,
       ]}
-    >
-      <Animated.View
-        style={[
-          styles.sweep,
-          {
-            transform: [{ translateX }],
-            backgroundColor: Colors.shimmer2,
-          },
-        ]}
-      />
-    </View>
+    />
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     overflow: 'hidden',
-  },
-  sweep: {
-    position: 'absolute',
-    top:    0,
-    bottom: 0,
-    width:  90,
-    opacity: 0.55,
   },
 });
