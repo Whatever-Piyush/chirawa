@@ -251,6 +251,12 @@ export const translations = {
     goBack:         { en: 'Go back',                            hi: 'वापस जाएं' },
     failTitle:      { en: 'Could not cancel',                   hi: 'रद्द नहीं हो सका' },
     refundNote:     { en: 'Paid amount will be refunded in 5–7 business days', hi: 'भुगतान की राशि 5–7 दिनों में वापस होगी' },
+    reason1:        { en: 'I ordered by mistake',               hi: 'मैंने गलती से ऑर्डर दे दिया' },
+    reason2:        { en: 'I no longer need the items',         hi: 'मुझे सामान की जरूरत नहीं रही' },
+    reason3:        { en: 'Delivery is taking too long',        hi: 'डिलीवरी में बहुत देर हो रही है' },
+    reason4:        { en: "I'm getting it elsewhere",           hi: 'मैं दूसरी जगह से ले रहा हूं' },
+    reason5:        { en: 'Wrong address entered',              hi: 'पता गलत दर्ज हो गया' },
+    reason6:        { en: 'Other reason',                       hi: 'अन्य कारण' },
   },
   search: {
     placeholder:    { en: 'Search shops and items...',          hi: 'दुकान या सामान ढूंढो...' },

@@ -54,15 +54,6 @@ const STEP_KEYS = [
   'tracking.delivered',
 ] as const;
 
-const CANCEL_REASONS = [
-  'मैंने गलती से ऑर्डर दे दिया',
-  'मुझे सामान की जरूरत नहीं रही',
-  'डिलीवरी में बहुत देर हो रही है',
-  'मैं दूसरी जगह से ले रहा हूं',
-  'पता गलत दर्ज हो गया',
-  'अन्य कारण',
-];
-
 const STATUS_EMOJI: Partial<Record<OrderStatus, string>> = {
   [OrderStatus.PENDING_PAYMENT]:  '🎉',
   [OrderStatus.PAID]:             '🎉',
@@ -438,6 +429,14 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
     order.status === OrderStatus.PAID ||
     order.status === OrderStatus.CONFIRMED;
   const showRefundNote = !!orderPrisma.paymentMethod && orderPrisma.paymentMethod !== 'cod';
+  const cancelReasons  = [
+    t('cancellation.reason1'),
+    t('cancellation.reason2'),
+    t('cancellation.reason3'),
+    t('cancellation.reason4'),
+    t('cancellation.reason5'),
+    t('cancellation.reason6'),
+  ];
 
   return (
     <>
@@ -553,7 +552,7 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
             <Text style={styles.sheetTitle}>{t('cancellation.title')}</Text>
             <Text style={styles.sheetSubtitle}>{t('cancellation.subtitle')}</Text>
 
-            {CANCEL_REASONS.map((reason) => {
+            {cancelReasons.map((reason) => {
               const selected = selectedReason === reason;
               return (
                 <TouchableOpacity
