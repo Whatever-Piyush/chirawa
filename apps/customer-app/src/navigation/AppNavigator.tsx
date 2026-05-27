@@ -32,6 +32,7 @@ import CheckoutScreen   from '../screens/orders/CheckoutScreen';
 import OrderTrackingScreen from '../screens/orders/OrderTrackingScreen';
 import OrderHistoryScreen  from '../screens/orders/OrderHistoryScreen';
 import ProfileScreen    from '../screens/profile/ProfileScreen';
+import SearchScreen     from '../screens/search/SearchScreen';
 
 export type RootStackParamList = {
   // Auth
@@ -39,6 +40,7 @@ export type RootStackParamList = {
   VerifyOtp:  { phone: string };
   // Main
   MainTabs:   undefined;
+  Search:     undefined;
   ShopDetail: { shopId: string; shopName: string };
   Cart:       undefined;
   Checkout:   undefined;
@@ -208,6 +210,7 @@ export default function AppNavigator() {
         {state.isAuthenticated ? (
           <>
             <Stack.Screen name="MainTabs"      component={MainTabs} />
+            <Stack.Screen name="Search"        component={SearchScreen} options={{ headerShown: false }} />
             <Stack.Screen name="ShopDetail"    component={ShopDetailScreen} />
             <Stack.Screen name="Cart"          component={CartScreen}
               options={{ headerShown: true, headerTitle: 'Cart', headerTintColor: Colors.primary }} />

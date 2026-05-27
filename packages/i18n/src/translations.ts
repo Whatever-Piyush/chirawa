@@ -197,6 +197,21 @@ export const translations = {
     versionFooter: { en: 'Bringly v1.0 • Chirawa\'s own app 🏡', hi: 'Bringly v1.0 • Chirawa का अपना app 🏡' },
     title:         { en: 'Profile',                       hi: 'प्रोफाइल' },
   },
+  search: {
+    placeholder:    { en: 'Search shops and items...',          hi: 'दुकान या सामान ढूंढो...' },
+    shopsSection:   { en: 'Shops',                              hi: 'दुकानें' },
+    productsSection:{ en: 'Items',                              hi: 'सामान' },
+    popularTitle:   { en: 'Popular Searches',                   hi: 'लोकप्रिय खोजें' },
+    recentTitle:    { en: 'Recent Searches',                    hi: 'हाल की खोजें' },
+    clearRecent:    { en: '× Clear',                            hi: '× साफ़ करें' },
+    noResults:      { en: 'not found 😕',                       hi: 'नहीं मिला 😕' },
+    browseShops:    { en: 'Browse shops instead',               hi: 'दुकानों में जाकर देखें' },
+    addToCart:      { en: '+ Add',                              hi: '+ जोड़ें' },
+    addedToCart:    { en: 'Added to cart! 🛒',                  hi: 'कार्ट में जोड़ा गया! 🛒' },
+    addFailed:      { en: 'Could not add to cart',              hi: 'कार्ट में नहीं जोड़ा गया' },
+    open:           { en: 'Open',                               hi: 'खुला है' },
+    closed:         { en: 'Closed',                             hi: 'बंद है' },
+  },
 } as const;
 
 export type Language = 'en' | 'hi';

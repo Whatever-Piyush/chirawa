@@ -14,6 +14,7 @@ import notificationsPlugin from './modules/notifications/notifications.plugin';
 import authRoutes          from './modules/auth/auth.routes';
 import usersRoutes         from './modules/users/users.routes';
 import catalogRoutes       from './modules/catalog/catalog.routes';
+import searchRoutes        from './modules/catalog/search.routes';
 import cartRoutes          from './modules/cart/cart.routes';
 import pricingRoutes       from './modules/pricing/pricing.routes';
 import ordersRoutes        from './modules/orders/orders.routes';
@@ -55,7 +56,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
   await app.register(rateLimit, {
     global:     true,
-    max:        100,
+    // Dev gets a generous limit so HMR/poll loops don't trip the limiter;
+    // production stays tight at 100/min per IP.
+    max:        env.NODE_ENV === 'development' ? 1000 : 100,
     timeWindow: '1 minute',
     errorResponseBuilder: (_req, context) => ({
       statusCode: 429,
@@ -106,6 +109,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(authRoutes,          { prefix: '/api/v1/auth' });
   await app.register(usersRoutes,         { prefix: '/api/v1/users' });
   await app.register(catalogRoutes,       { prefix: '/api/v1/catalog' });
+  await app.register(searchRoutes,        { prefix: '/api/v1' });
   await app.register(cartRoutes,          { prefix: '/api/v1/cart' });
   await app.register(pricingRoutes,       { prefix: '/api/v1/pricing' });
   await app.register(ordersRoutes,        { prefix: '/api/v1/orders' });

@@ -15,6 +15,7 @@ import type {
   OrderDetailResponse,
   CreateAddressRequest,
   AddressResponse,
+  SearchResponse,
 } from '@chirawa/types';
 
 export class ApiError extends Error {
@@ -92,6 +93,9 @@ export class ChirawaApiClient {
   }
 
   private async parseResponse<T>(response: Response): Promise<T> {
+    // 204 No Content (e.g. DELETE /cart) — no body to parse
+    if (response.status === 204) return undefined as T;
+
     const data = await response.json() as Record<string, unknown>;
 
     if (!response.ok) {
@@ -220,5 +224,16 @@ export class ChirawaApiClient {
       if (qs) path += `?${qs}`;
     }
     return this.request<OrderDetailResponse[]>('GET', path);
+  }
+
+  // ─── Search ──────────────────────────────────────────────────────────────
+
+  async search(query: string): Promise<SearchResponse> {
+    return this.request<SearchResponse>(
+      'GET',
+      `/search?q=${encodeURIComponent(query)}&limit=20`,
+      undefined,
+      false, // public endpoint — no auth required
+    );
   }
 }

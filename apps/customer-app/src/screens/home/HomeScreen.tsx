@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View, FlatList, StyleSheet,
-  RefreshControl, TextInput, ScrollView, Animated, Keyboard,
+  RefreshControl, TouchableOpacity, ScrollView, Animated,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -143,7 +143,6 @@ export default function HomeScreen({ navigation }: Props) {
   const [shops,      setShops]      = useState<Shop[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [search,     setSearch]     = useState('');
   const [cartCount,  setCartCount]  = useState(0);
 
   const loadShops = useCallback(async () => {
@@ -169,10 +168,6 @@ export default function HomeScreen({ navigation }: Props) {
 
   useEffect(() => { void loadShops(); }, [loadShops]);
   useFocusEffect(useCallback(() => { void loadCartCount(); }, [loadCartCount]));
-
-  const filtered = shops.filter((s) =>
-    s.name.toLowerCase().includes(search.toLowerCase()),
-  );
 
   return (
     <View style={styles.container}>
@@ -243,20 +238,15 @@ export default function HomeScreen({ navigation }: Props) {
           />
         }
       >
-        {/* ── 2. Search bar (overlaps header) ────────────────────────────── */}
-        <View style={styles.searchWrap}>
+        {/* ── 2. Search bar (tap → SearchScreen) ─────────────────────────── */}
+        <TouchableOpacity
+          style={styles.searchWrap}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('Search')}
+        >
           <Text variant="body" style={styles.searchIcon}>🔍</Text>
-          <TextInput
-            style={styles.searchInput}
-            placeholder={t('home.searchPlaceholder')}
-            placeholderTextColor={Colors.textTertiary}
-            value={search}
-            onChangeText={setSearch}
-            returnKeyType="done"
-            blurOnSubmit={true}
-            onSubmitEditing={() => Keyboard.dismiss()}
-          />
-        </View>
+          <Text style={styles.searchPlaceholder}>{t('home.searchPlaceholder')}</Text>
+        </TouchableOpacity>
 
         {/* ── 3. Promo banner ────────────────────────────────────────────── */}
         <View style={styles.bannerOuter}>
@@ -304,7 +294,7 @@ export default function HomeScreen({ navigation }: Props) {
             <ShopCardSkeleton />
             <ShopCardSkeleton />
           </View>
-        ) : filtered.length === 0 ? (
+        ) : shops.length === 0 ? (
           <View style={styles.empty}>
             <Text variant="hero" style={styles.emptyEmoji}>🏪</Text>
             <Text variant="h3" align="center" color={Colors.textPrimary}>
@@ -321,7 +311,7 @@ export default function HomeScreen({ navigation }: Props) {
           </View>
         ) : (
           <FlatList
-            data={filtered}
+            data={shops}
             keyExtractor={(item) => item.id}
             scrollEnabled={false}
             ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
@@ -429,11 +419,11 @@ const styles = StyleSheet.create({
     marginRight: Spacing.sm,
     color:       Colors.textTertiary,
   },
-  searchInput: {
-    flex:     1,
-    height:   SEARCH_HEIGHT,
-    fontSize: FontSize.md,
-    color:    Colors.textPrimary,
+  searchPlaceholder: {
+    flex:      1,
+    fontSize:  FontSize.md,
+    color:     Colors.textTertiary,
+    lineHeight: SEARCH_HEIGHT,
   },
 
   // 3. Banner
