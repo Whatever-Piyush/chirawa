@@ -359,16 +359,6 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
     void Linking.openURL(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`);
   }
 
-  const currentStep  = order ? (STATUS_STEP[order.status] ?? 0) : 0;
-  const isDelivered  = order?.status === OrderStatus.DELIVERED;
-  const isCancelled  = order?.status === OrderStatus.CANCELLED;
-  const raw          = (order ?? {}) as unknown as { totalAmount?: number; deliveryStreet?: string; deliveryLocality?: string; deliveryCity?: string };
-  const totalRupees  = Math.round((raw.totalAmount ?? 0) / 100);
-  const showRider    = !!order?.rider && (
-    order.status === OrderStatus.PICKED_UP ||
-    order.status === OrderStatus.OUT_FOR_DELIVERY
-  );
-
   if (loading) {
     return (
       <View style={styles.center}>
@@ -379,7 +369,19 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
 
   if (!order) return null;
 
-  const statusEmoji = STATUS_EMOJI[order.status] ?? '🎉';
+  // ── Order-derived values — order is non-null past this point ─────────────
+  // The API returns the raw Prisma object whose total field is `totalAmount`
+  // (not `total` as in the OrderDetailResponse DTO), so we cast narrowly.
+  const orderPrisma  = order as unknown as { totalAmount?: number; deliveryStreet?: string; deliveryLocality?: string; deliveryCity?: string };
+  const currentStep  = STATUS_STEP[order.status] ?? 0;
+  const isDelivered  = order.status === OrderStatus.DELIVERED;
+  const isCancelled  = order.status === OrderStatus.CANCELLED;
+  const totalRupees  = Math.round((orderPrisma.totalAmount ?? 0) / 100);
+  const showRider    = !!order.rider && (
+    order.status === OrderStatus.PICKED_UP ||
+    order.status === OrderStatus.OUT_FOR_DELIVERY
+  );
+  const statusEmoji  = STATUS_EMOJI[order.status] ?? '🎉';
   const riderInitial = (order.rider?.name?.[0] ?? 'R').toUpperCase();
 
   return (
@@ -447,9 +449,9 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
       {/* ── D. Delivery address ─────────────────────────────────────────── */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>{t('tracking.deliveryAddress')}</Text>
-        <Text style={styles.addressStreet}>{raw.deliveryStreet ?? 'Chirawa — 333026'}</Text>
+        <Text style={styles.addressStreet}>{orderPrisma.deliveryStreet ?? 'Chirawa — 333026'}</Text>
         <Text style={styles.addressArea}>
-          {raw.deliveryLocality ?? ''}{raw.deliveryCity ? `, ${raw.deliveryCity}` : ''}
+          {orderPrisma.deliveryLocality ?? ''}{orderPrisma.deliveryCity ? `, ${orderPrisma.deliveryCity}` : ''}
         </Text>
       </View>
 
