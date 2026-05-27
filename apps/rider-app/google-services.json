@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "559741289279",
+    "project_id": "bringly-b71c9",
+    "storage_bucket": "bringly-b71c9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:559741289279:android:96c24fc2ba4482a506898a",
+        "android_client_info": {
+          "package_name": "com.chirawa.customer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDAFIFBsP8m2S6Gs1nnxAb0FjzHDUAWODc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:559741289279:android:575c5eab4f8f34f506898a",
+        "android_client_info": {
+          "package_name": "com.chirawa.rider"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDAFIFBsP8m2S6Gs1nnxAb0FjzHDUAWODc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:559741289279:android:83b5ee41d1cb93ed06898a",
+        "android_client_info": {
+          "package_name": "com.chirawa.seller"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDAFIFBsP8m2S6Gs1nnxAb0FjzHDUAWODc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

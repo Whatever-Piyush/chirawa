@@ -1,4 +1,4 @@
-const DEV_HOST = '192.168.1.6'; // Update to your Mac's LAN IP
+const DEV_HOST = '192.168.1.4'; // Update to your Mac's LAN IP
 const BASE_URL = __DEV__
   ? `http://${DEV_HOST}:3000/api/v1`
   : 'https://api.chirawa.in/api/v1';
@@ -50,4 +50,7 @@ export const SellerApi = {
 
   updateStock: (productId: string, stockStatus: string, token: string) =>
     request('PATCH', `/catalog/products/${productId}/stock`, { stockStatus }, token),
+
+  registerDeviceToken: (fcmToken: string, token: string) =>
+    request('POST', '/notifications/register-token', { token: fcmToken, platform: 'android' }, token),
 };

@@ -273,6 +273,14 @@ export const translations = {
     open:           { en: 'Open',                               hi: 'खुला है' },
     closed:         { en: 'Closed',                             hi: 'बंद है' },
   },
+  notifications: {
+    permissionTitle: { en: 'Allow Notifications',          hi: 'नोटिफिकेशन की अनुमति दें' },
+    permissionBody:  { en: 'Get updates about your orders', hi: 'ऑर्डर की जानकारी पाने के लिए' },
+    newOrder:        { en: 'New Order!',                    hi: 'नया ऑर्डर!' },
+    confirmed:       { en: 'Order Confirmed',               hi: 'ऑर्डर कन्फर्म!' },
+    pickedUp:        { en: 'On the way!',                   hi: 'राइडर निकल पड़ा!' },
+    delivered:       { en: 'Order Delivered!',              hi: 'ऑर्डर पहुंच गया!' },
+  },
 } as const;
 
 export type Language = 'en' | 'hi';

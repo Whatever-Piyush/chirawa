@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
+import { navigationRef } from './ref';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Animated, StyleSheet } from 'react-native';
@@ -161,7 +162,7 @@ export default function AppNavigator() {
   if (state.isLoading) return <LoadingScreen />;
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator screenOptions={{
         headerShown:       false,
         headerStyle:       { backgroundColor: Colors.white },

@@ -17,11 +17,16 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#FF3E6C"
       },
-      "package": "com.bringly.customer"
+      "package": "com.bringly.customer",
+      "googleServicesFile": "./google-services.json"
     },
     "plugins": [
       "expo-secure-store",
-      "expo-font"
+      "expo-font",
+      ["expo-notifications", {
+        "color": "#FF3E6C",
+        "sounds": []
+      }]
     ]
   }
 }

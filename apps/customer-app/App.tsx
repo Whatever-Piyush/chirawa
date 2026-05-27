@@ -7,6 +7,7 @@ import { LanguageProvider } from '@chirawa/i18n';
 import { AuthProvider } from './src/context/AuthContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import ErrorBoundary from './src/components/ErrorBoundary';
+import NotificationsBootstrap from './src/components/NotificationsBootstrap';
 import { ToastProvider } from './src/components/ui';
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
             <LanguageProvider>
               <AuthProvider>
                 <StatusBar style="light" translucent backgroundColor="transparent" />
+                <NotificationsBootstrap />
                 <AppNavigator />
               </AuthProvider>
             </LanguageProvider>

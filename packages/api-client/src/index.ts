@@ -248,4 +248,21 @@ export class ChirawaApiClient {
       false, // public endpoint — no auth required
     );
   }
+
+  // ─── Notifications ───────────────────────────────────────────────────────
+
+  async registerDeviceToken(data: {
+    token:     string;
+    platform?: 'android' | 'ios';
+  }): Promise<void> {
+    await this.request<{ message: string }>(
+      'POST',
+      '/notifications/register-token',
+      { token: data.token, platform: data.platform ?? 'android' },
+    );
+  }
+
+  async unregisterDeviceToken(): Promise<void> {
+    await this.request<void>('DELETE', '/notifications/register-token');
+  }
 }
