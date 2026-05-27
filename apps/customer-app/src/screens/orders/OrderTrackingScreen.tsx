@@ -341,6 +341,8 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
     return () => {
       if (socketRef.current) {
         socketRef.current.emit('order:unsubscribe', orderId);
+        socketRef.current.off('order:status');
+        socketRef.current.off('order:location');
         socketRef.current.disconnect();
         socketRef.current = null;
       }

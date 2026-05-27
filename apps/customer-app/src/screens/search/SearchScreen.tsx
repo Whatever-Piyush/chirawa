@@ -180,19 +180,29 @@ export default function SearchScreen({ navigation }: Props) {
   // ── Load recent searches + current cart on mount ──────────────────────────
 
   useEffect(() => {
+    let alive = true;
+
     AsyncStorage.getItem(RECENT_KEY)
-      .then((raw) => { if (raw) setRecent(JSON.parse(raw) as string[]); })
+      .then((raw) => { if (alive && raw) setRecent(JSON.parse(raw) as string[]); })
       .catch(() => undefined);
 
     api.getCart()
       .then((data) => {
+        if (!alive) return;
         const map: Record<string, number> = {};
         for (const item of data.items) map[item.productId] = item.quantity;
         setCartMap(map);
       })
       .catch(() => undefined);
 
-    setTimeout(() => inputRef.current?.focus(), 80);
+    const focusTimer = setTimeout(() => {
+      if (alive) inputRef.current?.focus();
+    }, 80);
+
+    return () => {
+      alive = false;
+      clearTimeout(focusTimer);
+    };
   }, []);
 
   // ── Recent searches ────────────────────────────────────────────────────────

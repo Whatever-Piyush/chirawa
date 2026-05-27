@@ -66,22 +66,18 @@ export class ChirawaApiClient {
       }
     }
 
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    const init: RequestInit = { method, headers };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    const response = await fetch(`${this.baseUrl}${path}`, init);
 
     // Handle 401 — try refresh, then retry original request
     if (response.status === 401 && requiresAuth) {
       const newToken = await this.refreshAccessToken();
       if (newToken) {
         headers['Authorization'] = `Bearer ${newToken}`;
-        const retryResponse = await fetch(`${this.baseUrl}${path}`, {
-          method,
-          headers,
-          body: body !== undefined ? JSON.stringify(body) : undefined,
-        });
+        const retryInit: RequestInit = { method, headers };
+        if (body !== undefined) retryInit.body = JSON.stringify(body);
+        const retryResponse = await fetch(`${this.baseUrl}${path}`, retryInit);
         return this.parseResponse<T>(retryResponse);
       }
       // Refresh failed — clear tokens, let app handle redirect to login
