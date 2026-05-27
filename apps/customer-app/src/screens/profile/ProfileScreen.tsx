@@ -2,18 +2,22 @@ import React from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Linking,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, type CompositeNavigationProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing, Gradients } from '../../theme';
 import { useT, useLanguage } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
-import type { TabParamList } from '../../navigation/AppNavigator';
+import type { RootStackParamList, TabParamList } from '../../navigation/AppNavigator';
 import FauxGradient from '../../components/ui/FauxGradient';
 
 const WHATSAPP_NUMBER = '919999999999';
 
-type NavProp = BottomTabNavigationProp<TabParamList>;
+type NavProp = CompositeNavigationProp<
+  BottomTabNavigationProp<TabParamList>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
 interface MenuItemData {
   emoji:   string;
@@ -80,7 +84,7 @@ export default function ProfileScreen() {
 
   const accountItems: MenuItemData[] = [
     { emoji: '📦', label: t('profile.myOrders'),    onPress: () => navigation.navigate('OrderHistory') },
-    { emoji: '📍', label: t('profile.myAddresses'), onPress: () => Alert.alert('📍', t('profile.addressSoon')) },
+    { emoji: '📍', label: t('profile.myAddresses'), onPress: () => navigation.navigate('AddressList') },
   ];
 
   const settingsItems: MenuItemData[] = [

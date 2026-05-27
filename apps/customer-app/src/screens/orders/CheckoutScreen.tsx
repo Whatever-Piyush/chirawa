@@ -16,15 +16,24 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type {
+  AddressResponse,
   CartItem,
   CartResponse,
   PricingPreviewResponse,
 } from '@chirawa/types';
 import { PaymentMethod } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
+
+type LabelChoice = 'home' | 'work' | 'other';
+const LABEL_VALUE: Record<LabelChoice, string> = { home: 'घर', work: 'दुकान', other: 'अन्य' };
+function labelEmoji(label?: string | null): string {
+  if (label === 'घर')   return '🏠';
+  if (label === 'दुकान') return '🏪';
+  return '📍';
+}
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Checkout'> };
 
@@ -135,12 +144,19 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   const [street, setStreet]     = useState('');
   const [area,   setArea]       = useState('');
+  const [landmark, setLandmark] = useState('');
+  const [label,    setLabel]    = useState<LabelChoice>('home');
 
   const [streetFocused, setStreetFocused] = useState(false);
   const [areaFocused,   setAreaFocused]   = useState(false);
 
   const [addressId,  setAddressId]  = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+
+  // Saved-address picker (additive — does not replace the form flow)
+  const [addresses,         setAddresses]         = useState<AddressResponse[]>([]);
+  const [addressesLoading,  setAddressesLoading]  = useState(true);
+  const [showAddressForm,   setShowAddressForm]   = useState(false);
 
   const [pricing, setPricing] = useState<PricingPreviewResponse | null>(null);
 
@@ -180,13 +196,63 @@ export default function CheckoutScreen({ navigation }: Props) {
     setPricing(null);
   }, [street, area]);
 
+  // Load saved addresses on mount. If user has any, hide the form by default
+  // and auto-select the default. If they have none, fall through to the form.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const list = await api.getAddresses();
+        if (!alive) return;
+        setAddresses(list);
+        if (list.length === 0) {
+          setShowAddressForm(true);
+        } else {
+          const def = list.find((a) => a.isDefault) ?? list[0];
+          if (def) void handleSelectSavedAddress(def);
+        }
+      } catch {
+        if (alive) setShowAddressForm(true);
+      } finally {
+        if (alive) setAddressesLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+    // handleSelectSavedAddress is defined below — depend only on cart through that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Refresh pricing whenever the cart finishes loading after we already picked
+  // a saved address (initial picker race).
+  useEffect(() => {
+    if (!cart || !addressId) return;
+    if (pricing) return;
+    void (async () => {
+      try {
+        const preview = await api.getPricingPreview({ cartId: cart.cartId, addressId });
+        setPricing(preview);
+      } catch { /* tolerate */ }
+    })();
+  }, [cart, addressId, pricing]);
+
+  const handleSelectSavedAddress = useCallback(async (addr: AddressResponse) => {
+    setAddressId(addr.id);
+    setShowAddressForm(false);
+    if (!cart) return;
+    try {
+      const preview = await api.getPricingPreview({ cartId: cart.cartId, addressId: addr.id });
+      setPricing(preview);
+    } catch { /* tolerate */ }
+  }, [cart]);
+
   const handleConfirmAddress = useCallback(async () => {
     if (!street.trim() || !area.trim() || !cart) return;
     setConfirming(true);
     try {
       const addr = await api.createAddress({
+        label:    LABEL_VALUE[label],
         street:   street.trim(),
-        landmark: area.trim(),
+        landmark: landmark.trim() || area.trim(),
         locality: area.trim(),
         city:     'Chirawa',
         pincode:  CHIRAWA_PINCODE,
@@ -194,6 +260,8 @@ export default function CheckoutScreen({ navigation }: Props) {
         lng:      CHIRAWA_LNG,
       });
       setAddressId(addr.id);
+      // Optimistically include the newly saved address in the picker list
+      setAddresses((prev) => [addr, ...prev]);
       const preview = await api.getPricingPreview({ cartId: cart.cartId, addressId: addr.id });
       setPricing(preview);
     } catch {
@@ -201,7 +269,7 @@ export default function CheckoutScreen({ navigation }: Props) {
     } finally {
       setConfirming(false);
     }
-  }, [street, area, cart, t]);
+  }, [street, area, landmark, label, cart, t]);
 
   const pulseAndPlace = () => {
     Animated.sequence([
@@ -212,7 +280,9 @@ export default function CheckoutScreen({ navigation }: Props) {
   };
 
   const handlePlaceOrder = useCallback(async () => {
-    if (!cart || !street.trim()) return;
+    if (!cart) return;
+    // Need either a selected address or a filled-in form
+    if (!addressId && !street.trim()) return;
 
     if (paymentMethod !== PaymentMethod.COD) {
       Alert.alert('🚀', t('checkout.comingSoon'));
@@ -224,8 +294,9 @@ export default function CheckoutScreen({ navigation }: Props) {
       let addrId = addressId;
       if (!addrId) {
         const addr = await api.createAddress({
+          label:    LABEL_VALUE[label],
           street:   street.trim(),
-          landmark: area.trim() || street.trim(),
+          landmark: landmark.trim() || area.trim() || street.trim(),
           locality: area.trim() || 'Chirawa',
           city:     'Chirawa',
           pincode:  CHIRAWA_PINCODE,
@@ -248,13 +319,13 @@ export default function CheckoutScreen({ navigation }: Props) {
     } finally {
       setPlacing(false);
     }
-  }, [cart, street, area, addressId, paymentMethod, navigation, t]);
+  }, [cart, street, area, landmark, label, addressId, paymentMethod, navigation, t]);
 
   const subtotalRupees  = cart ? Math.round(cart.subtotal / 100) : 0;
   const deliveryRupees  = pricing ? Math.round(pricing.deliveryFee / 100) : null;
   const totalRupees     = pricing ? Math.round(pricing.total / 100) : subtotalRupees;
 
-  const canPlaceOrder   = !!street.trim() && !!area.trim() && !placing && !!cart;
+  const canPlaceOrder   = (!!addressId || (!!street.trim() && !!area.trim())) && !placing && !!cart;
   const canConfirm      = !!street.trim() && !!area.trim() && !confirming;
 
   const ListHeader = (
@@ -276,60 +347,145 @@ export default function CheckoutScreen({ navigation }: Props) {
           </View>
         </View>
 
-        <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>{t('checkout.streetLabel')}</Text>
-          <TextInput
-            style={[styles.textInput, streetFocused && styles.textInputFocused]}
-            value={street}
-            onChangeText={setStreet}
-            onFocus={() => setStreetFocused(true)}
-            onBlur={() => setStreetFocused(false)}
-            placeholder={t('checkout.streetPlaceholder')}
-            placeholderTextColor={Colors.textMuted}
-            returnKeyType="done"
-            autoCapitalize="words"
-            blurOnSubmit={true}
-            onSubmitEditing={() => Keyboard.dismiss()}
-          />
-        </View>
+        {/* Saved-address picker */}
+        {!addressesLoading && addresses.length > 0 && (
+          <View style={styles.addressList}>
+            {addresses.map((a) => {
+              const selected = addressId === a.id;
+              return (
+                <TouchableOpacity
+                  key={a.id}
+                  onPress={() => void handleSelectSavedAddress(a)}
+                  activeOpacity={0.85}
+                  style={[styles.addressCard, selected && styles.addressCardSelected]}
+                >
+                  <View style={styles.addressCardLeft}>
+                    <Text style={styles.addressLabel} numberOfLines={1}>
+                      {labelEmoji(a.label)} {a.label ?? 'पता'}
+                      {a.isDefault ? '  ·  ' : ''}
+                      {a.isDefault ? (
+                        <Text style={styles.addressDefaultInline}>
+                          {t('address.defaultBadge')}
+                        </Text>
+                      ) : null}
+                    </Text>
+                    <Text style={styles.addressStreet} numberOfLines={1}>{a.street}</Text>
+                    <Text style={styles.addressArea} numberOfLines={1}>
+                      {a.locality}{a.city ? `, ${a.city}` : ''} — {a.pincode}
+                    </Text>
+                    {a.landmark && a.landmark !== '—' ? (
+                      <Text style={styles.addressLandmark} numberOfLines={1}>📌 {a.landmark}</Text>
+                    ) : null}
+                  </View>
+                  {selected ? <Text style={styles.addressCheck}>✓</Text> : null}
+                </TouchableOpacity>
+              );
+            })}
 
-        <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>{t('checkout.areaLabel')}</Text>
-          <TextInput
-            style={[styles.textInput, areaFocused && styles.textInputFocused]}
-            value={area}
-            onChangeText={setArea}
-            onFocus={() => setAreaFocused(true)}
-            onBlur={() => setAreaFocused(false)}
-            placeholder={t('checkout.areaPlaceholder')}
-            placeholderTextColor={Colors.textMuted}
-            returnKeyType="done"
-            autoCapitalize="words"
-            blurOnSubmit={true}
-            onSubmitEditing={() => Keyboard.dismiss()}
-          />
-        </View>
+            {!showAddressForm && (
+              <TouchableOpacity
+                style={styles.addAddressBtn}
+                onPress={() => setShowAddressForm(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.addAddressBtnText}>{t('address.addNew')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
-        <TouchableOpacity
-          style={[
-            styles.confirmAddressBtn,
-            !canConfirm && styles.btnDisabled,
-            addressId && styles.btnConfirmed,
-          ]}
-          onPress={() => void handleConfirmAddress()}
-          disabled={!canConfirm}
-          activeOpacity={0.85}
-        >
-          {confirming ? (
-            <ActivityIndicator color={Colors.white} size="small" />
-          ) : (
-            <Text style={styles.confirmAddressBtnText}>
-              {addressId
-                ? `✓  ${t('checkout.addressConfirmed')}`
-                : t('checkout.confirmAddress')}
-            </Text>
-          )}
-        </TouchableOpacity>
+        {/* Address form (always for first-time users; toggleable otherwise) */}
+        {showAddressForm && (
+          <>
+            <View style={styles.chipRow}>
+              {(['home', 'work', 'other'] as const).map((k) => {
+                const active = label === k;
+                const txt = k === 'home' ? t('address.labelHome')
+                          : k === 'work' ? t('address.labelWork')
+                          : t('address.labelOther');
+                return (
+                  <TouchableOpacity
+                    key={k}
+                    onPress={() => setLabel(k)}
+                    activeOpacity={0.85}
+                    style={[styles.chip, active && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{txt}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>{t('checkout.streetLabel')}</Text>
+              <TextInput
+                style={[styles.textInput, streetFocused && styles.textInputFocused]}
+                value={street}
+                onChangeText={setStreet}
+                onFocus={() => setStreetFocused(true)}
+                onBlur={() => setStreetFocused(false)}
+                placeholder={t('checkout.streetPlaceholder')}
+                placeholderTextColor={Colors.textMuted}
+                returnKeyType="done"
+                autoCapitalize="words"
+                blurOnSubmit={true}
+                onSubmitEditing={() => Keyboard.dismiss()}
+              />
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>{t('checkout.areaLabel')}</Text>
+              <TextInput
+                style={[styles.textInput, areaFocused && styles.textInputFocused]}
+                value={area}
+                onChangeText={setArea}
+                onFocus={() => setAreaFocused(true)}
+                onBlur={() => setAreaFocused(false)}
+                placeholder={t('checkout.areaPlaceholder')}
+                placeholderTextColor={Colors.textMuted}
+                returnKeyType="done"
+                autoCapitalize="words"
+                blurOnSubmit={true}
+                onSubmitEditing={() => Keyboard.dismiss()}
+              />
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>{t('address.landmark')}</Text>
+              <TextInput
+                style={styles.textInput}
+                value={landmark}
+                onChangeText={setLandmark}
+                placeholder="मंदिर के पास"
+                placeholderTextColor={Colors.textMuted}
+                returnKeyType="done"
+                blurOnSubmit={true}
+                onSubmitEditing={() => Keyboard.dismiss()}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.confirmAddressBtn,
+                !canConfirm && styles.btnDisabled,
+                addressId && styles.btnConfirmed,
+              ]}
+              onPress={() => void handleConfirmAddress()}
+              disabled={!canConfirm}
+              activeOpacity={0.85}
+            >
+              {confirming ? (
+                <ActivityIndicator color={Colors.white} size="small" />
+              ) : (
+                <Text style={styles.confirmAddressBtnText}>
+                  {addressId
+                    ? `✓  ${t('checkout.addressConfirmed')}`
+                    : t('checkout.confirmAddress')}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </>
+        )}
       </View>
 
       {/* ── B. Order Summary header ──────────────────────────────────────── */}
@@ -497,6 +653,87 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pinEmoji: { fontSize: 24 },
+
+  // Saved-address picker
+  addressList: { gap: 10, marginTop: 2 },
+  addressCard: {
+    borderWidth:     1,
+    borderColor:     Colors.border,
+    borderRadius:    Radius.lg,
+    padding:         14,
+    backgroundColor: Colors.surface,
+    flexDirection:   'row',
+    alignItems:      'center',
+    gap:             Spacing.sm,
+  },
+  addressCardSelected: {
+    borderWidth:     2,
+    borderColor:     Colors.primary,
+    backgroundColor: Colors.primaryLight,
+  },
+  addressCardLeft: { flex: 1, gap: 2 },
+  addressLabel: {
+    fontSize:   FontSize.sm,
+    fontWeight: FontWeight.bold,
+    color:      Colors.textPrimary,
+    marginBottom: 2,
+  },
+  addressDefaultInline: {
+    fontSize:   FontSize.xs,
+    color:      Colors.success,
+    fontWeight: FontWeight.semibold,
+  },
+  addressStreet: {
+    fontSize:   FontSize.md,
+    fontWeight: FontWeight.semibold,
+    color:      Colors.textPrimary,
+  },
+  addressArea: {
+    fontSize: FontSize.sm,
+    color:    Colors.textSecondary,
+  },
+  addressLandmark: {
+    fontSize: FontSize.xs,
+    color:    Colors.textTertiary,
+    marginTop: 2,
+  },
+  addressCheck: {
+    fontSize:   FontSize.xl,
+    color:      Colors.primary,
+    fontWeight: FontWeight.bold,
+    marginLeft: 'auto',
+  },
+  addAddressBtn: {
+    borderWidth:    1.5,
+    borderColor:    Colors.primary,
+    borderStyle:    'dashed',
+    borderRadius:   Radius.lg,
+    padding:        14,
+    alignItems:     'center',
+    marginTop:      4,
+  },
+  addAddressBtnText: {
+    color:      Colors.primary,
+    fontWeight: FontWeight.semibold,
+    fontSize:   FontSize.md,
+  },
+
+  // Label chips
+  chipRow: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap', marginBottom: 2 },
+  chip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical:   8,
+    borderRadius:      Radius.full,
+    borderWidth:       1,
+    borderColor:       Colors.border,
+    backgroundColor:   Colors.surface,
+  },
+  chipActive: {
+    borderColor:     Colors.primary,
+    backgroundColor: Colors.primary,
+  },
+  chipText:       { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: FontWeight.semibold },
+  chipTextActive: { color: Colors.white },
 
   // Address form
   fieldGroup: { gap: Spacing.xs },

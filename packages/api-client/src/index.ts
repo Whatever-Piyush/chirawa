@@ -194,6 +194,14 @@ export class ChirawaApiClient {
     return this.request<AddressResponse[]>('GET', '/users/me/addresses');
   }
 
+  async deleteAddress(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/users/me/addresses/${id}`);
+  }
+
+  async setDefaultAddress(id: string): Promise<void> {
+    await this.request<{ message: string }>('PATCH', `/users/me/addresses/${id}/default`);
+  }
+
   // ─── Pricing ─────────────────────────────────────────────────────────────
 
   async getPricingPreview(data: PricingPreviewRequest): Promise<PricingPreviewResponse> {

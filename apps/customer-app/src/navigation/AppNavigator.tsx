@@ -23,6 +23,7 @@ import CheckoutScreen   from '../screens/orders/CheckoutScreen';
 import OrderTrackingScreen from '../screens/orders/OrderTrackingScreen';
 import OrderHistoryScreen  from '../screens/orders/OrderHistoryScreen';
 import ProfileScreen    from '../screens/profile/ProfileScreen';
+import AddressListScreen from '../screens/profile/AddressListScreen';
 import SearchScreen     from '../screens/search/SearchScreen';
 
 export type RootStackParamList = {
@@ -36,6 +37,7 @@ export type RootStackParamList = {
   Cart:       undefined;
   Checkout:   undefined;
   OrderTracking: { orderId: string };
+  AddressList: undefined;
 };
 
 export type TabParamList = {
@@ -179,6 +181,8 @@ export default function AppNavigator() {
               options={{ headerShown: true, headerTitle: 'Checkout', headerTintColor: Colors.primary }} />
             <Stack.Screen name="OrderTracking" component={OrderTrackingScreen}
               options={{ headerShown: true, headerTitle: 'Order Track', headerTintColor: Colors.primary }} />
+            <Stack.Screen name="AddressList"   component={AddressListScreen}
+              options={{ headerShown: true, headerTitle: 'My Addresses', headerTintColor: Colors.primary }} />
           </>
         ) : (
           <>
