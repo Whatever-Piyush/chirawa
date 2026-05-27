@@ -51,6 +51,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     phone:           null,
   });
 
+  // When the api-client gives up on a session (refresh failed / still 401 after
+  // retry) it calls onAuthFailure. Clear state so the navigator falls back to
+  // the auth stack — tokens have already been cleared inside the client.
+  useEffect(() => {
+    api.onAuthFailure = () => {
+      dispatch({ type: 'SIGN_OUT' });
+    };
+    return () => { api.onAuthFailure = null; };
+  }, []);
+
   // Restore session on app launch
   useEffect(() => {
     async function restoreSession() {

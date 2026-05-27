@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react';
 import { StorageService } from '../services/storage.service';
+import { setAuthFailureHandler, setTokenRefreshedHandler } from '../services/api.service';
 
 interface AuthState {
   isLoading: boolean; isAuthenticated: boolean;
@@ -9,18 +10,20 @@ interface AuthState {
 type AuthAction =
   | { type: 'RESTORE'; token: string; userId: string }
   | { type: 'SIGN_IN'; token: string; userId: string; requiresPin: boolean }
+  | { type: 'TOKEN_REFRESHED'; token: string }
   | { type: 'PIN_SET' }
   | { type: 'SIGN_OUT' }
   | { type: 'LOADED' };
 
 function reducer(state: AuthState, action: AuthAction): AuthState {
   switch (action.type) {
-    case 'RESTORE':   return { ...state, isLoading: false, isAuthenticated: true, token: action.token, userId: action.userId };
-    case 'SIGN_IN':   return { ...state, isLoading: false, isAuthenticated: true, token: action.token, userId: action.userId, requiresPin: action.requiresPin };
-    case 'PIN_SET':   return { ...state, requiresPin: false };
-    case 'SIGN_OUT':  return { ...state, isAuthenticated: false, token: null, userId: null, requiresPin: false };
-    case 'LOADED':    return { ...state, isLoading: false };
-    default:          return state;
+    case 'RESTORE':         return { ...state, isLoading: false, isAuthenticated: true, token: action.token, userId: action.userId };
+    case 'SIGN_IN':         return { ...state, isLoading: false, isAuthenticated: true, token: action.token, userId: action.userId, requiresPin: action.requiresPin };
+    case 'TOKEN_REFRESHED': return { ...state, token: action.token };
+    case 'PIN_SET':         return { ...state, requiresPin: false };
+    case 'SIGN_OUT':        return { ...state, isAuthenticated: false, token: null, userId: null, requiresPin: false };
+    case 'LOADED':          return { ...state, isLoading: false };
+    default:                return state;
   }
 }
 
@@ -53,6 +56,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'LOADED' });
       }
     })();
+  }, []);
+
+  // Wire api.service refresh callbacks → React state.
+  // - onTokenRefreshed: keep in-memory token in sync with SecureStore after a silent refresh
+  // - onAuthFailure:    refresh ultimately failed, drop the session so the navigator returns to login
+  useEffect(() => {
+    setTokenRefreshedHandler((accessToken) => {
+      dispatch({ type: 'TOKEN_REFRESHED', token: accessToken });
+    });
+    setAuthFailureHandler(() => {
+      dispatch({ type: 'SIGN_OUT' });
+    });
+    return () => {
+      setTokenRefreshedHandler(null);
+      setAuthFailureHandler(null);
+    };
   }, []);
 
   return (

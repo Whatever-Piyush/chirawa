@@ -42,6 +42,10 @@ export class ChirawaApiClient {
   private isRefreshing = false;
   private refreshSubscribers: Array<(token: string) => void> = [];
 
+  // Invoked once the session is unrecoverable (refresh failed / still 401 after retry).
+  // Apps wire this to signOut() so the navigator returns to the login screen.
+  public onAuthFailure: (() => void) | null = null;
+
   constructor(baseUrl: string, tokenStorage: TokenStorage) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.tokenStorage = tokenStorage;
@@ -78,10 +82,17 @@ export class ChirawaApiClient {
         const retryInit: RequestInit = { method, headers };
         if (body !== undefined) retryInit.body = JSON.stringify(body);
         const retryResponse = await fetch(`${this.baseUrl}${path}`, retryInit);
+        if (retryResponse.status === 401) {
+          // Retry with fresh token still rejected — treat as session expired
+          await this.tokenStorage.clearTokens();
+          this.onAuthFailure?.();
+          throw new ApiError(401, 'Session expired. Please login again.', 'SESSION_EXPIRED');
+        }
         return this.parseResponse<T>(retryResponse);
       }
-      // Refresh failed — clear tokens, let app handle redirect to login
+      // Refresh failed — clear tokens, signal the app, throw
       await this.tokenStorage.clearTokens();
+      this.onAuthFailure?.();
       throw new ApiError(401, 'Session expired. Please login again.', 'SESSION_EXPIRED');
     }
 

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react';
 import { StorageService } from '../services/storage.service';
+import { setAuthFailureHandler, setTokenRefreshedHandler } from '../services/api.service';
 
 interface AuthState {
   isLoading: boolean; isAuthenticated: boolean;
@@ -8,16 +9,18 @@ interface AuthState {
 type Action =
   | { type: 'RESTORE'; token: string; userId: string }
   | { type: 'SIGN_IN'; token: string; userId: string; requiresPin: boolean }
+  | { type: 'TOKEN_REFRESHED'; token: string }
   | { type: 'PIN_SET' } | { type: 'SIGN_OUT' } | { type: 'LOADED' };
 
 function reducer(s: AuthState, a: Action): AuthState {
   switch (a.type) {
-    case 'RESTORE':  return { ...s, isLoading: false, isAuthenticated: true, token: a.token, userId: a.userId };
-    case 'SIGN_IN':  return { ...s, isLoading: false, isAuthenticated: true, token: a.token, userId: a.userId, requiresPin: a.requiresPin };
-    case 'PIN_SET':  return { ...s, requiresPin: false };
-    case 'SIGN_OUT': return { ...s, isAuthenticated: false, token: null, userId: null };
-    case 'LOADED':   return { ...s, isLoading: false };
-    default:         return s;
+    case 'RESTORE':         return { ...s, isLoading: false, isAuthenticated: true, token: a.token, userId: a.userId };
+    case 'SIGN_IN':         return { ...s, isLoading: false, isAuthenticated: true, token: a.token, userId: a.userId, requiresPin: a.requiresPin };
+    case 'TOKEN_REFRESHED': return { ...s, token: a.token };
+    case 'PIN_SET':         return { ...s, requiresPin: false };
+    case 'SIGN_OUT':        return { ...s, isAuthenticated: false, token: null, userId: null };
+    case 'LOADED':          return { ...s, isLoading: false };
+    default:                return s;
   }
 }
 
@@ -43,6 +46,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else dispatch({ type: 'LOADED' });
       } catch { dispatch({ type: 'LOADED' }); }
     })();
+  }, []);
+
+  // Wire api.service refresh callbacks → React state
+  useEffect(() => {
+    setTokenRefreshedHandler((accessToken) => {
+      dispatch({ type: 'TOKEN_REFRESHED', token: accessToken });
+    });
+    setAuthFailureHandler(() => {
+      dispatch({ type: 'SIGN_OUT' });
+    });
+    return () => {
+      setTokenRefreshedHandler(null);
+      setAuthFailureHandler(null);
+    };
   }, []);
 
   return (
