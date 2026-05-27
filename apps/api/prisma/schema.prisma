@@ -794,3 +794,16 @@ model AppConfig {
 
   @@map("app_config")
 }
+
+// ─── Search ───────────────────────────────────────────────────────────────────
+
+model SearchAlias {
+  id        String   @id @default(uuid()) @db.Uuid
+  term      String   @unique
+  aliases   String[]
+  language  String   @default("any")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([term])
+  @@map("search_aliases")
+}

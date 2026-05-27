@@ -1,12 +1,15 @@
+import { Prisma } from '@prisma/client';
 import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import { NotFoundError } from '../../shared/errors/app-errors';
 
 const CACHE_TTL = { shopList: 600, shopDetail: 300 };
+const ALIAS_CACHE_TTL = 3600;
 
 const keys = {
-  shopList:   () => `catalog:shops:active`,
-  shopDetail: (shopId: string) => `catalog:shop:${shopId}:full`,
+  shopList:    ()           => `catalog:shops:active`,
+  shopDetail:  (shopId: string) => `catalog:shop:${shopId}:full`,
+  aliasExpand: (q: string)  => `search:aliases:expanded:${q.toLowerCase().trim()}`,
 };
 
 function computeIsOpen(shop: {
@@ -122,12 +125,58 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
     }));
   }
 
-  // pg_trgm-powered search returning grouped { products, shops, query }
+  // Expand a query using the search_aliases table; results are Redis-cached.
+  async function expandSearchTerms(query: string): Promise<string[]> {
+    const norm = query.toLowerCase().trim();
+    const cacheKey = keys.aliasExpand(norm);
+
+    const cached = await redis.get(cacheKey).catch(() => null);
+    if (cached) return JSON.parse(cached) as string[];
+
+    const terms = new Set<string>([norm]);
+
+    const matches = await prisma.searchAlias.findMany({
+      where: {
+        OR: [
+          { term: { contains: query, mode: 'insensitive' } },
+          { aliases: { has: query.toLowerCase() } },
+          { aliases: { has: query } },
+        ],
+      },
+    });
+
+    for (const match of matches) {
+      terms.add(match.term.toLowerCase());
+      match.aliases.forEach((a: string) => terms.add(a.toLowerCase()));
+    }
+
+    const result = Array.from(terms);
+    await redis.setex(cacheKey, ALIAS_CACHE_TTL, JSON.stringify(result)).catch(() => {});
+    return result;
+  }
+
+  // pg_trgm-powered search with alias expansion; returns grouped { products, shops, query }
   async function searchCatalog(rawQuery: string) {
     const q = rawQuery.trim();
     if (q.length < 2) return { products: [], shops: [], query: q };
 
     const like = `%${q}%`;
+
+    // Expand the query via alias table (Redis-backed, 1 hour TTL)
+    const expandedTerms = await expandSearchTerms(q);
+
+    // Build GREATEST(…) score across original + all alias expansions
+    const scoreFragments = [
+      Prisma.sql`word_similarity(${q}, p.name)`,
+      Prisma.sql`similarity(p.name, ${q})`,
+      Prisma.sql`similarity(s.name, ${q})`,
+      ...expandedTerms.map((t) => Prisma.sql`word_similarity(${t}, p.name)`),
+    ];
+    const scoreExpr = Prisma.sql`GREATEST(${Prisma.join(scoreFragments, ', ')})`;
+
+    // ILIKE match on any expanded term (exact alias hit)
+    const likeParts = expandedTerms.map((t) => Prisma.sql`p.name ILIKE ${'%' + t + '%'}`);
+    const aliasFilter = Prisma.join(likeParts, ' OR ');
 
     type ProductRow = {
       id: string; name: string; pricePaise: number | bigint;
@@ -139,7 +188,6 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
     };
 
     const [productRows, shopRows] = await Promise.all([
-      // Products: fuzzy match on name + shop name; only available stock
       prisma.$queryRaw<ProductRow[]>`
         SELECT id, name, "pricePaise", "shopId", "shopName", "imageUrl", "inStock"
         FROM (
@@ -151,11 +199,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
             s.name             AS "shopName",
             pi.url             AS "imageUrl",
             (p.stock_status = 'available') AS "inStock",
-            GREATEST(
-              word_similarity(${q}, p.name),
-              similarity(p.name, ${q}),
-              similarity(s.name, ${q})
-            ) AS score
+            ${scoreExpr}       AS score
           FROM products p
           JOIN shops s ON s.id = p.shop_id
           LEFT JOIN LATERAL (
@@ -165,21 +209,21 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
             LIMIT 1
           ) pi ON true
           WHERE
-            p.is_active      = true
+            p.is_active       = true
             AND p.stock_status = 'available'
-            AND s.is_active   = true
+            AND s.is_active    = true
             AND (
-              p.name ILIKE ${like}
+              ${aliasFilter}
               OR word_similarity(${q}, p.name) > 0.2
-              OR similarity(p.name, ${q})       > 0.15
-              OR similarity(s.name, ${q})       > 0.2
+              OR similarity(p.name, ${q})      > 0.15
+              OR similarity(s.name, ${q})      > 0.2
             )
         ) sub
         ORDER BY score DESC
         LIMIT 20
       `,
 
-      // Shops: fuzzy match on name; only active shops
+      // Shops: fuzzy match on name only (shop names are in English)
       prisma.$queryRaw<ShopRow[]>`
         SELECT
           id::text,

@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { seedSearchAliases } from './seeds/search-aliases';
 
 const prisma = new PrismaClient();
 
@@ -107,6 +108,9 @@ async function main(): Promise<void> {
     });
   }
   console.log('  ✅ App config seeded (14 keys)');
+
+  // ── Search Aliases ─────────────────────────────────────────────────────────
+  await seedSearchAliases(prisma);
 
   console.log('\n✅ Database seeded successfully!\n');
 }
