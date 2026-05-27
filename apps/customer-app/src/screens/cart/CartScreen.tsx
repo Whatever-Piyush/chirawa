@@ -411,8 +411,9 @@ const styles = StyleSheet.create({
   emptyContainer: {
     flex: 1, justifyContent: 'center', alignItems: 'center',
     gap: Spacing.md, paddingHorizontal: Spacing.xxl,
+    overflow: 'visible',
   },
-  emptyEmoji: { fontSize: 80 },
+  emptyEmoji: { fontSize: 80, lineHeight: 112, includeFontPadding: false, textAlignVertical: 'center' },
   emptyTitle: { fontSize: FontSize.xl, fontWeight: '700', color: Colors.text, textAlign: 'center' },
   emptyHint:  { fontSize: FontSize.md, color: Colors.textLight, textAlign: 'center' },
   shopNowBtn: {

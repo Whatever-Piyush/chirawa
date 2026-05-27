@@ -220,6 +220,22 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
       </View>
 
+      {/* ── 2. Search bar — lives OUTSIDE the ScrollView so it is never
+               clipped by the scroll container's top edge.
+               marginTop: -20 on the wrapper pulls it 20 px up into the
+               header's paddingBottom zone; the bar itself is fully visible
+               and tappable because it is a normal-flow sibling view. ────── */}
+      <View style={styles.searchContainer}>
+        <TouchableOpacity
+          style={styles.searchWrap}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('Search')}
+        >
+          <Text variant="body" style={styles.searchIcon}>🔍</Text>
+          <Text style={styles.searchPlaceholder}>{t('home.searchPlaceholder')}</Text>
+        </TouchableOpacity>
+      </View>
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -238,16 +254,6 @@ export default function HomeScreen({ navigation }: Props) {
           />
         }
       >
-        {/* ── 2. Search bar (tap → SearchScreen) ─────────────────────────── */}
-        <TouchableOpacity
-          style={styles.searchWrap}
-          activeOpacity={0.8}
-          onPress={() => navigation.navigate('Search')}
-        >
-          <Text variant="body" style={styles.searchIcon}>🔍</Text>
-          <Text style={styles.searchPlaceholder}>{t('home.searchPlaceholder')}</Text>
-        </TouchableOpacity>
-
         {/* ── 3. Promo banner ────────────────────────────────────────────── */}
         <View style={styles.bannerOuter}>
           <FauxGradient
@@ -268,8 +274,11 @@ export default function HomeScreen({ navigation }: Props) {
                 {t('home.quickCommerceSub')}
               </Text>
             </View>
-            <Text variant="body" style={styles.bannerEmoji}>🛵</Text>
+            <View style={{ width: 64 }} />
           </FauxGradient>
+          <View pointerEvents="none" style={styles.bannerEmojiWrap}>
+            <Text style={styles.bannerEmoji}>🛵</Text>
+          </View>
           <View style={styles.dotsRow}>
             <View style={[styles.dot, styles.dotActive]} />
           </View>
@@ -339,7 +348,7 @@ export default function HomeScreen({ navigation }: Props) {
   );
 }
 
-const HEADER_BLEED = 36;
+const HEADER_BLEED = 28;
 const SEARCH_HEIGHT = 48;
 
 const styles = StyleSheet.create({
@@ -403,12 +412,14 @@ const styles = StyleSheet.create({
   },
 
   // 2. Search
+  searchContainer: {
+    marginTop: -20,
+  },
   searchWrap: {
     flexDirection:    'row',
     alignItems:       'center',
     backgroundColor:  Colors.surface,
     marginHorizontal: Spacing.lg,
-    marginTop:        -20,
     height:           SEARCH_HEIGHT,
     borderRadius:     Radius.xl,
     paddingHorizontal: Spacing.lg,
@@ -429,6 +440,7 @@ const styles = StyleSheet.create({
   // 3. Banner
   bannerOuter: {
     marginTop: Spacing.lg,
+    overflow: 'visible',
   },
   banner: {
     flexDirection:    'row',
@@ -442,7 +454,13 @@ const styles = StyleSheet.create({
   },
   bannerTitle: { lineHeight: 24 },
   bannerSub:   { marginTop: 4, opacity: 0.94 },
-  bannerEmoji: { fontSize: 56 },
+  bannerEmojiWrap: {
+    position: 'absolute',
+    right: Spacing.xl,
+    bottom: 24,
+    overflow: 'visible',
+  },
+  bannerEmoji: { fontSize: 56, lineHeight: 78, includeFontPadding: false },
   dotsRow: {
     flexDirection:  'row',
     justifyContent: 'center',

@@ -520,6 +520,9 @@ const styles = StyleSheet.create({
   // Status emoji
   statusEmoji: {
     fontSize: 64,
+    lineHeight: 90,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
     textAlign: 'center',
     marginBottom: Spacing.sm,
   },
@@ -540,7 +543,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primaryLight,
     justifyContent: 'center', alignItems: 'center',
   },
-  riderAvatarText: { fontSize: 30 },
+  riderAvatarText: { fontSize: 30, lineHeight: 42, includeFontPadding: false },
   riderName: { fontSize: FontSize.lg, fontWeight: '800', color: Colors.text },
   riderStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
   greenDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.accent },
@@ -553,7 +556,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...Shadow.strong,
   },
-  deliveredEmoji: { fontSize: 72 },
+  deliveredEmoji: { fontSize: 72, lineHeight: 101, includeFontPadding: false },
   deliveredTitle: {
     fontSize: FontSize.xxl, fontWeight: '900', color: Colors.white, textAlign: 'center',
   },
