@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { createOrdersService } from './orders.service';
 import { createPaymentsService } from '../payments/payments.service';
-import { placeOrderSchema, type PlaceOrderInput } from './orders.schema';
+import { placeOrderSchema, rateOrderSchema, type PlaceOrderInput, type RateOrderInput } from './orders.schema';
 import { authenticate, requireRole } from '../../shared/middleware/auth.middleware';
 import { ValidationError } from '../../shared/errors/app-errors';
 
@@ -88,6 +88,26 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
     async (request: FastifyRequest<{ Params: { id: string }; Body: { amountPaise: number } }>, reply) => {
       const { amountPaise } = request.body as { amountPaise: number };
       const result = await ordersService.codCollected(request.params.id, request.auth!.userId, amountPaise);
+      return reply.send(result);
+    },
+  );
+
+  // ── Customer post-delivery rating ─────────────────────────────────────────
+
+  // POST /api/v1/orders/:id/rating
+  app.post('/:id/rating',
+    { preHandler: [requireRole('customer')] },
+    async (request: FastifyRequest<{ Params: { id: string }; Body: RateOrderInput }>, reply) => {
+      const parsed = rateOrderSchema.safeParse(request.body);
+      if (!parsed.success) {
+        throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid rating');
+      }
+      const result = await ordersService.rateOrder(
+        request.params.id,
+        request.auth!.userId,
+        parsed.data.rating,
+        parsed.data.comment,
+      );
       return reply.send(result);
     },
   );

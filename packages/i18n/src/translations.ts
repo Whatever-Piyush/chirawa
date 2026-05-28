@@ -281,6 +281,20 @@ export const translations = {
     pickedUp:        { en: 'On the way!',                   hi: 'राइडर निकल पड़ा!' },
     delivered:       { en: 'Order Delivered!',              hi: 'ऑर्डर पहुंच गया!' },
   },
+  rating: {
+    title:        { en: 'How was your experience?',        hi: 'अनुभव कैसा रहा?' },
+    submit:       { en: 'Submit Rating',                    hi: 'रेटिंग दें' },
+    submitting:   { en: 'Submitting…',                      hi: 'भेज रहे हैं…' },
+    thankYou:     { en: 'Thanks for your rating! 🙏',       hi: 'धन्यवाद! आपकी रेटिंग मिल गई 🙏' },
+    placeholder:  { en: 'Any suggestions? (optional)',      hi: 'कोई सुझाव? (वैकल्पिक)' },
+    giveRating:   { en: 'Rate ›',                           hi: 'रेटिंग दें ›' },
+    error:        { en: "Couldn't submit rating, please retry", hi: 'रेटिंग नहीं दे सके, दोबारा कोशिश करें' },
+    label1:       { en: '😞 Very Bad',                      hi: '😞 बहुत खराब' },
+    label2:       { en: '😕 Bad',                           hi: '😕 खराब' },
+    label3:       { en: '😐 Okay',                          hi: '😐 ठीक है' },
+    label4:       { en: '😊 Good',                          hi: '😊 अच्छा' },
+    label5:       { en: '🤩 Excellent!',                    hi: '🤩 बहुत बढ़िया!' },
+  },
 } as const;
 
 export type Language = 'en' | 'hi';

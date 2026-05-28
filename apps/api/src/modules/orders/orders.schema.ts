@@ -17,3 +17,10 @@ export const verifyPaymentSchema = z.object({
 });
 
 export type VerifyPaymentInput = z.infer<typeof verifyPaymentSchema>;
+
+export const rateOrderSchema = z.object({
+  rating:  z.number().int().min(1).max(5),
+  comment: z.string().trim().max(500).optional(),
+});
+
+export type RateOrderInput = z.infer<typeof rateOrderSchema>;

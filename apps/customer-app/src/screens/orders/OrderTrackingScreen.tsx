@@ -12,6 +12,7 @@ import {
   Dimensions,
   Easing,
   Modal,
+  TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { io, type Socket } from 'socket.io-client';
@@ -242,7 +243,6 @@ function Confetti() {
 function DeliveredBanner({ t }: { t: (key: string) => string }) {
   const scale   = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(0)).current;
-  const [selectedRating, setSelectedRating] = useState(0);
 
   useEffect(() => {
     Animated.parallel([
@@ -259,25 +259,128 @@ function DeliveredBanner({ t }: { t: (key: string) => string }) {
       </Animated.Text>
       <Text style={styles.deliveredTitle}>{t('tracking.orderDelivered')}</Text>
       <Text style={styles.deliveredSub}>{t('tracking.thankYou')}</Text>
+    </Animated.View>
+  );
+}
 
-      <Text style={styles.rateHow}>{t('tracking.rateHow')}</Text>
+// ─── Animated 5-star rater + comment + submit ─────────────────────────────────
+
+function RatingCard({
+  t,
+  orderId,
+  initialRating,
+  initialComment,
+  showToast,
+}: {
+  t: (key: string) => string;
+  orderId: string;
+  initialRating: number | null;
+  initialComment: string | null;
+  showToast: (msg: string, type: 'success' | 'error') => void;
+}) {
+  const [selectedRating, setSelectedRating] = useState(initialRating ?? 0);
+  const [comment, setComment]               = useState(initialComment ?? '');
+  const [submitting, setSubmitting]         = useState(false);
+  const [rated, setRated]                   = useState(initialRating != null && initialRating > 0);
+
+  // One animated scale per star — tapping animates 1 → 1.4 → 1
+  const starScales = useRef([1, 2, 3, 4, 5].map(() => new Animated.Value(1))).current;
+
+  function handleStarTap(starIndex: number) {
+    if (submitting || rated) return;
+    setSelectedRating(starIndex);
+    Animated.sequence([
+      Animated.spring(starScales[starIndex - 1], {
+        toValue: 1.4, friction: 4, tension: 200, useNativeDriver: true,
+      }),
+      Animated.spring(starScales[starIndex - 1], {
+        toValue: 1.0, friction: 4, tension: 200, useNativeDriver: true,
+      }),
+    ]).start();
+  }
+
+  async function handleSubmit() {
+    if (selectedRating === 0 || submitting) return;
+    setSubmitting(true);
+    try {
+      await api.rateOrder(orderId, selectedRating, comment.trim() || undefined);
+      setRated(true);
+      showToast(t('rating.thankYou'), 'success');
+    } catch (err: unknown) {
+      const msg = err instanceof Error && err.message ? err.message : t('rating.error');
+      showToast(msg, 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (rated) {
+    return (
+      <View style={styles.ratingCard}>
+        <Text style={styles.ratingThanksStars}>
+          {'⭐'.repeat(Math.max(1, selectedRating))}
+        </Text>
+        <Text style={styles.ratingThanksText}>{t('rating.thankYou')}</Text>
+      </View>
+    );
+  }
+
+  const labelKey = selectedRating > 0 ? `rating.label${selectedRating}` : null;
+
+  return (
+    <View style={styles.ratingCard}>
+      <Text style={styles.ratingTitle}>{t('rating.title')}</Text>
+
       <View style={styles.starRow}>
         {[1, 2, 3, 4, 5].map((n) => (
           <TouchableOpacity
             key={n}
-            onPress={() => setSelectedRating(n)}
+            onPress={() => handleStarTap(n)}
+            style={styles.starTap}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             activeOpacity={0.7}
-            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
           >
-            <Text style={styles.star}>{n <= selectedRating ? '⭐' : '☆'}</Text>
+            <Animated.Text
+              style={[styles.star, { transform: [{ scale: starScales[n - 1] }] }]}
+            >
+              {n <= selectedRating ? '⭐' : '☆'}
+            </Animated.Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <TouchableOpacity style={styles.rateBtn} activeOpacity={0.85}>
-        <Text style={styles.rateBtnText}>{t('tracking.rateExperience')}</Text>
-      </TouchableOpacity>
-    </Animated.View>
+      {labelKey && (
+        <Text style={styles.ratingLabel}>{t(labelKey)}</Text>
+      )}
+
+      {selectedRating > 0 && (
+        <>
+          <TextInput
+            value={comment}
+            onChangeText={setComment}
+            placeholder={t('rating.placeholder')}
+            placeholderTextColor={Colors.textMuted}
+            multiline
+            numberOfLines={3}
+            maxLength={200}
+            editable={!submitting}
+            style={styles.ratingInput}
+          />
+
+          <TouchableOpacity
+            style={[styles.ratingSubmitBtn, submitting && styles.ratingSubmitBtnDisabled]}
+            onPress={() => void handleSubmit()}
+            disabled={submitting}
+            activeOpacity={0.85}
+          >
+            {submitting
+              ? <ActivityIndicator color={Colors.white} />
+              : <Text style={styles.ratingSubmitText}>{t('rating.submit')}</Text>
+            }
+          </TouchableOpacity>
+        </>
+      )}
+    </View>
   );
 }
 
@@ -413,7 +516,15 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
   // ── Order-derived values — order is non-null past this point ─────────────
   // The API returns the raw Prisma object whose total field is `totalAmount`
   // (not `total` as in the OrderDetailResponse DTO), so we cast narrowly.
-  const orderPrisma  = order as unknown as { totalAmount?: number; deliveryStreet?: string; deliveryLocality?: string; deliveryCity?: string; paymentMethod?: string };
+  const orderPrisma  = order as unknown as {
+    totalAmount?: number;
+    deliveryStreet?: string;
+    deliveryLocality?: string;
+    deliveryCity?: string;
+    paymentMethod?: string;
+    rating?: number | null;
+    ratingComment?: string | null;
+  };
   const currentStep  = STATUS_STEP[order.status] ?? 0;
   const isDelivered  = order.status === OrderStatus.DELIVERED;
   const isCancelled  = order.status === OrderStatus.CANCELLED;
@@ -454,6 +565,17 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
 
       {/* ── Delivered banner ────────────────────────────────────────────── */}
       {isDelivered && <DeliveredBanner t={t} />}
+
+      {/* ── Post-delivery rating ────────────────────────────────────────── */}
+      {isDelivered && (
+        <RatingCard
+          t={t}
+          orderId={orderId}
+          initialRating={orderPrisma.rating ?? null}
+          initialComment={orderPrisma.ratingComment ?? null}
+          showToast={(msg, type) => toast.show(msg, type)}
+        />
+      )}
 
       {/* ── B. Status message with emoji ────────────────────────────────── */}
       {!isDelivered && (
@@ -698,20 +820,81 @@ const styles = StyleSheet.create({
   deliveredSub: {
     fontSize: FontSize.md, color: 'rgba(255,255,255,0.92)', textAlign: 'center',
   },
-  rateHow: {
+  // Rating card — distinct white card rendered below the delivered celebration
+  ratingCard: {
+    backgroundColor: Colors.card,
+    borderRadius: Radius.xl,
+    padding: 20,
+    gap: Spacing.sm,
+    alignItems: 'center',
+    ...Shadow.sm,
+  },
+  ratingTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  starRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  starTap: { padding: 8 },
+  star: {
+    fontSize: 36,
+    lineHeight: 44,
+    includeFontPadding: false,
+  },
+  ratingLabel: {
+    fontSize: FontSize.md,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  ratingInput: {
+    width: '100%',
+    minHeight: 80,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    padding: 12,
+    marginTop: 12,
+    backgroundColor: Colors.surface,
+    color: Colors.textPrimary,
+    fontSize: FontSize.md,
+    textAlignVertical: 'top',
+  },
+  ratingSubmitBtn: {
+    width: '100%',
+    height: MIN_TAP,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    ...Shadow.primary,
+  },
+  ratingSubmitBtnDisabled: {
+    opacity: 0.6,
+  },
+  ratingSubmitText: {
     color: Colors.white,
     fontSize: FontSize.md,
-    fontWeight: '700',
-    marginTop: Spacing.md,
+    fontWeight: FontWeight.bold,
   },
-  starRow: { flexDirection: 'row', gap: 6 },
-  star:    { fontSize: 32, includeFontPadding: false },
-  rateBtn: {
-    marginTop: Spacing.sm, backgroundColor: Colors.white,
-    borderRadius: Radius.full, paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.md, minHeight: MIN_TAP, justifyContent: 'center',
+  ratingThanksStars: {
+    fontSize: 36,
+    lineHeight: 44,
+    includeFontPadding: false,
   },
-  rateBtnText: { fontSize: FontSize.md, fontWeight: '900', color: Colors.primary },
+  ratingThanksText: {
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+    color: Colors.success,
+    textAlign: 'center',
+  },
 
   // Confetti
   confetti: {

@@ -391,6 +391,12 @@ model Order {
   deliveredAt  DateTime? @map("delivered_at")
   cancelledAt  DateTime? @map("cancelled_at")
   cancelReason String?   @map("cancel_reason") @db.VarChar(255)
+
+  // Customer rating (post-delivery)
+  rating        Int?      @map("rating")
+  ratingComment String?   @map("rating_comment") @db.VarChar(500)
+  ratedAt       DateTime? @map("rated_at")
+
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 

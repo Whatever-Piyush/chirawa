@@ -249,6 +249,14 @@ export class ChirawaApiClient {
     return this.request<OrderDetailResponse[]>('GET', path);
   }
 
+  async rateOrder(orderId: string, rating: number, comment?: string): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/orders/${orderId}/rating`,
+      comment && comment.length > 0 ? { rating, comment } : { rating },
+    );
+  }
+
   // ─── Search ──────────────────────────────────────────────────────────────
 
   async search(query: string): Promise<SearchResponse> {

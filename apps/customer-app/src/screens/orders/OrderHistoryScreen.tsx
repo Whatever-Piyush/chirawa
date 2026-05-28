@@ -31,6 +31,9 @@ interface OrderListItem {
   total:     number; // paise
   createdAt: string;
   items: { productName: string; quantity: number; unitPrice: number }[];
+  rating?:        number | null;
+  ratingComment?: string | null;
+  ratedAt?:       string | null;
 }
 
 interface ShopLite {
@@ -241,6 +244,22 @@ export default function OrderHistoryScreen({ navigation }: Props) {
           {itemCount} {t('history.items')}  ·  <Text style={styles.totalText}>₹{totalRupees}</Text>
         </Text>
 
+        {/* Rating row — only on delivered orders */}
+        {item.status === 'delivered' && (
+          item.rating && item.rating > 0 ? (
+            <Text style={styles.ratingStars}>{'⭐'.repeat(item.rating)}</Text>
+          ) : (
+            <TouchableOpacity
+              onPress={() => navigation.navigate('OrderTracking', { orderId: item.id })}
+              activeOpacity={0.7}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              style={styles.rateLink}
+            >
+              <Text style={styles.rateLinkText}>{t('rating.giveRating')}</Text>
+            </TouchableOpacity>
+          )
+        )}
+
         {/* Buttons */}
         <View style={styles.btnRow}>
           {trackable && (
@@ -382,6 +401,11 @@ const styles = StyleSheet.create({
   },
   btnSecondaryText:  { color: Colors.primary, fontSize: FontSize.md, fontWeight: '700' },
   btnDisabled:       { backgroundColor: Colors.disabled },
+
+  // Rating row (delivered orders)
+  ratingStars: { fontSize: 14, marginTop: 2 },
+  rateLink:    { alignSelf: 'flex-start', marginTop: 2 },
+  rateLinkText:{ fontSize: FontSize.sm, color: Colors.primary, fontWeight: '700' },
 
   // Footer loader
   footerLoader: { paddingVertical: Spacing.lg, alignItems: 'center' },

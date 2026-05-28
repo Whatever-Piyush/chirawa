@@ -341,10 +341,37 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     return { message: 'Cash collection confirm ho gaya' };
   }
 
+  // ── Customer rating ──────────────────────────────────────────────────────
+
+  async function rateOrder(
+    orderId: string,
+    customerUserId: string,
+    rating: number,
+    comment?: string,
+  ) {
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundError('Order');
+    if (order.customerId !== customerUserId) throw new ForbiddenError('Not your order');
+    if (order.status !== 'delivered') {
+      throw new BusinessRuleError('Order delivered hone ke baad hi rate kar sakte hain');
+    }
+    if (order.ratedAt) {
+      throw new BusinessRuleError('Order pehle hi rate kiya ja chuka hai');
+    }
+    return prisma.order.update({
+      where: { id: orderId },
+      data:  {
+        rating,
+        ratingComment: comment && comment.length > 0 ? comment : null,
+        ratedAt:       new Date(),
+      },
+    });
+  }
+
   return {
     placeOrder, getOrder, getMyOrders, updateOrderStatus,
     sellerAcceptOrder, sellerRejectOrder, sellerMarkPreparing, sellerMarkReady,
-    cancelOrder, codCollected,
+    cancelOrder, codCollected, rateOrder,
   };
 }
 
