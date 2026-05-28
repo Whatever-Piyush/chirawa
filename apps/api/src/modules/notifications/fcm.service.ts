@@ -68,7 +68,7 @@ export async function sendPush(payload: FcmPayload): Promise<void> {
     const admin = await import('firebase-admin');
     const msg   = (admin.messaging as () => { send: (m: object) => Promise<string> })();
 
-    await msg.send({
+    const messageId = await msg.send({
       token:        payload.token,
       notification: { title: payload.title, body: payload.body },
       data:         payload.data ?? {},
@@ -89,15 +89,16 @@ export async function sendPush(payload: FcmPayload): Promise<void> {
         },
       },
     });
+    console.log(`✅ FCM sent  "${payload.title}"  → ${payload.token.slice(0, 16)}…  (msg ${messageId.split('/').pop()})`);
   } catch (err: unknown) {
     const error = err as { code?: string; message?: string };
     // Token invalid/expired — log but don't crash
     if (error.code === 'messaging/invalid-registration-token' ||
         error.code === 'messaging/registration-token-not-registered') {
-      console.warn(`FCM token invalid for payload: ${payload.title}`);
+      console.warn(`⚠️  FCM token invalid (${error.code}) — token will need re-registration. Payload: ${payload.title}`);
       return;
     }
-    console.error('FCM send failed:', error.message);
+    console.error(`❌ FCM send failed  code=${error.code ?? 'unknown'}  msg=${error.message ?? '(no message)'}  title="${payload.title}"`);
   }
 }
 

@@ -228,6 +228,12 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     if (!['paid', 'confirmed'].includes(order.status)) {
       throw new BusinessRuleError('Order accept nahi ho sakta');
     }
+    // Mark explicit seller acceptance so cold-start UI can tell "fresh order" from "seller already advanced past Accept".
+    // updateOrderStatus follows so status reaches 'confirmed' for online (paid → confirmed) and stays 'confirmed' for COD.
+    await prisma.order.update({
+      where: { id: orderId },
+      data:  { sellerAcceptedAt: new Date() },
+    });
     await updateOrderStatus(orderId, 'confirmed', 'seller', sellerUserId);
     return { message: 'Order accept ho gaya' };
   }

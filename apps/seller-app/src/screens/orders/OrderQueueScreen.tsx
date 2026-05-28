@@ -10,7 +10,7 @@ import { SellerApi } from '../../services/api.service';
 import { StorageService } from '../../services/storage.service';
 import { useAuth } from '../../context/AuthContext';
 
-const DEV_HOST = '192.168.1.6'; // Update to your Mac's LAN IP
+const DEV_HOST = '192.168.1.4'; // Update to your Mac's LAN IP
 const SOCKET_URL = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chirawa.in';
 
 const REJECT_REASONS = [
@@ -29,6 +29,7 @@ interface ActiveOrder {
   id: string; status: string; items: OrderItem[];
   totalAmount: number; paymentMethod: string; deliveryLocality: string;
   createdAt: string;
+  sellerAcceptedAt: string | null;
 }
 
 export default function OrderQueueScreen() {
@@ -37,7 +38,7 @@ export default function OrderQueueScreen() {
   const [newOrder,   setNewOrder]   = useState<IncomingOrder | null>(null);
   const [loading,    setLoading]    = useState(true);
   const [actionLoad, setActionLoad] = useState(false);
-  const [showReject, setShowReject] = useState(false);
+  const [rejectingOrderId, setRejectingOrderId] = useState<string | null>(null);
   const socketRef   = useRef<Socket | null>(null);
   const soundRef    = useRef<Audio.Sound | null>(null);
   const vibInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -128,13 +129,13 @@ export default function OrderQueueScreen() {
   }
 
   // ── Accept order ──────────────────────────────────────────────────────────
-  async function handleAccept() {
-    if (!newOrder || !state.token) return;
+  async function handleAccept(orderId: string) {
+    if (!state.token) return;
     setActionLoad(true);
     try {
-      await SellerApi.acceptOrder(newOrder.orderId, state.token);
+      await SellerApi.acceptOrder(orderId, state.token);
       await stopAlarm();
-      setNewOrder(null);
+      setNewOrder((cur) => (cur?.orderId === orderId ? null : cur));
       await loadOrders();
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Accept nahi hua');
@@ -144,14 +145,15 @@ export default function OrderQueueScreen() {
   }
 
   // ── Reject order ──────────────────────────────────────────────────────────
-  async function handleReject(reason: string) {
-    if (!newOrder || !state.token) return;
+  async function handleReject(orderId: string, reason: string) {
+    if (!state.token) return;
     setActionLoad(true);
     try {
-      await SellerApi.rejectOrder(newOrder.orderId, reason, state.token);
+      await SellerApi.rejectOrder(orderId, reason, state.token);
       await stopAlarm();
-      setNewOrder(null);
-      setShowReject(false);
+      setNewOrder((cur) => (cur?.orderId === orderId ? null : cur));
+      setRejectingOrderId(null);
+      await loadOrders();
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Reject nahi hua');
     } finally {
@@ -216,7 +218,25 @@ export default function OrderQueueScreen() {
                   ₹{Math.round(item.totalAmount / 100)} • {item.paymentMethod.toUpperCase()} • {item.deliveryLocality}
                 </Text>
                 <View style={styles.actionRow}>
-                  {item.status === 'confirmed' &&
+                  {/* Fresh order (paid or confirmed) that seller hasn't accepted yet → must explicitly accept/reject,
+                      even if the live modal was missed because the app was closed when the order arrived. */}
+                  {!item.sellerAcceptedAt && (item.status === 'paid' || item.status === 'confirmed') && <>
+                    <TouchableOpacity
+                      style={styles.acceptInlineBtn}
+                      onPress={() => void handleAccept(item.id)}
+                      disabled={actionLoad}
+                    >
+                      <Text style={styles.acceptInlineText}>✅ Accept</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.rejectInlineBtn}
+                      onPress={() => setRejectingOrderId(item.id)}
+                      disabled={actionLoad}
+                    >
+                      <Text style={styles.rejectInlineText}>❌ Reject</Text>
+                    </TouchableOpacity>
+                  </>}
+                  {item.sellerAcceptedAt && item.status === 'confirmed' &&
                     <TouchableOpacity style={styles.prepBtn} onPress={() => void updateStatus(item.id, 'preparing')}>
                       <Text style={styles.prepBtnText}>🍳 Taiyar Karna Shuru</Text>
                     </TouchableOpacity>
@@ -252,7 +272,7 @@ export default function OrderQueueScreen() {
 
           <TouchableOpacity
             style={styles.acceptBtn}
-            onPress={handleAccept}
+            onPress={() => newOrder && void handleAccept(newOrder.orderId)}
             disabled={actionLoad}
           >
             {actionLoad
@@ -263,7 +283,7 @@ export default function OrderQueueScreen() {
 
           <TouchableOpacity
             style={styles.rejectBtn}
-            onPress={() => setShowReject(true)}
+            onPress={() => newOrder && setRejectingOrderId(newOrder.orderId)}
             disabled={actionLoad}
           >
             <Text style={styles.rejectBtnText}>❌ Reject Karein</Text>
@@ -272,7 +292,7 @@ export default function OrderQueueScreen() {
       </Modal>
 
       {/* Reject reason sheet */}
-      <Modal visible={showReject} transparent animationType="slide">
+      <Modal visible={rejectingOrderId !== null} transparent animationType="slide">
         <View style={styles.reasonOverlay}>
           <View style={styles.reasonSheet}>
             <Text style={styles.reasonTitle}>Reject Kyun?</Text>
@@ -280,12 +300,12 @@ export default function OrderQueueScreen() {
               <TouchableOpacity
                 key={reason}
                 style={styles.reasonBtn}
-                onPress={() => void handleReject(reason)}
+                onPress={() => rejectingOrderId && void handleReject(rejectingOrderId, reason)}
               >
                 <Text style={styles.reasonText}>{reason}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity onPress={() => setShowReject(false)} style={styles.reasonCancel}>
+            <TouchableOpacity onPress={() => setRejectingOrderId(null)} style={styles.reasonCancel}>
               <Text style={styles.reasonCancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
@@ -322,6 +342,10 @@ const styles = StyleSheet.create({
   prepBtnText: { color: Colors.white, fontWeight: '700' },
   readyBtn: { flex: 1, backgroundColor: Colors.success, borderRadius: Radius.md, padding: Spacing.md, alignItems: 'center' },
   readyBtnText: { color: Colors.white, fontWeight: '700' },
+  acceptInlineBtn:  { flex: 1, backgroundColor: Colors.success, borderRadius: Radius.md, padding: Spacing.md, alignItems: 'center' },
+  acceptInlineText: { color: Colors.white, fontWeight: '700' },
+  rejectInlineBtn:  { flex: 1, backgroundColor: Colors.error, borderRadius: Radius.md, padding: Spacing.md, alignItems: 'center' },
+  rejectInlineText: { color: Colors.white, fontWeight: '700' },
 
   // New order modal
   modalContainer: {

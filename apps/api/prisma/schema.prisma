@@ -385,8 +385,9 @@ model Order {
   addressId   String? @map("address_id") @db.Uuid
 
   // Timestamps
-  confirmedAt  DateTime? @map("confirmed_at")
-  pickedUpAt   DateTime? @map("picked_up_at")
+  confirmedAt      DateTime? @map("confirmed_at")
+  sellerAcceptedAt DateTime? @map("seller_accepted_at")
+  pickedUpAt       DateTime? @map("picked_up_at")
   deliveredAt  DateTime? @map("delivered_at")
   cancelledAt  DateTime? @map("cancelled_at")
   cancelReason String?   @map("cancel_reason") @db.VarChar(255)
