@@ -12,9 +12,10 @@ import {
 } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
+import { useToast } from '../../components/ui';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 
@@ -44,6 +45,9 @@ interface FullOrderItem {
 
 // Statuses that should NOT show the Track button
 const FINAL_STATUSES = new Set(['delivered', 'cancelled']);
+
+// Statuses where the customer can still cancel (must match backend)
+const CANCELLABLE_STATUSES = new Set(['pending_payment', 'paid']);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -115,6 +119,7 @@ function EmptyState({ onShopNow, t }: { onShopNow: () => void; t: (k: string) =>
 
 export default function OrderHistoryScreen({ navigation }: Props) {
   const t = useT();
+  const toast = useToast();
 
   const [orders,      setOrders]      = useState<OrderListItem[]>([]);
   const [shopMap,     setShopMap]     = useState<Map<string, string>>(new Map());
@@ -123,6 +128,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
   const [error,       setError]       = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [reorderingId, setReorderingId] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   // ─── Header ────────────────────────────────────────────────────────────────
 
