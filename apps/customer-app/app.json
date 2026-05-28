@@ -5,6 +5,7 @@
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
+    "platforms": ["android"],
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
@@ -17,16 +18,25 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#FF3E6C"
       },
-      "package": "com.bringly.customer",
+      "package": "com.chirawa.customer",
+      "versionCode": 1,
       "googleServicesFile": "./google-services.json"
     },
     "plugins": [
       "expo-secure-store",
       "expo-font",
-      ["expo-notifications", {
-        "color": "#FF3E6C",
-        "sounds": []
-      }]
-    ]
+      [
+        "expo-notifications",
+        {
+          "color": "#FF3E6C",
+          "sounds": []
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "db00e0a8-c8c7-4d48-9e59-b032891ce81b"
+      }
+    }
   }
 }

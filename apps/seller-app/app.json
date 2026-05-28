@@ -17,15 +17,27 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#1A1A1A"
       },
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "plugins": [
       "expo-secure-store",
       "expo-av",
-      ["expo-notifications", {
-        "color": "#FF3E6C",
-        "sounds": []
-      }]
-    ]
+      [
+        "expo-notifications",
+        {
+          "color": "#FF3E6C",
+          "sounds": []
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "af29f665-a0e7-4f50-912f-ac041760145b"
+      }
+    }
   }
 }
