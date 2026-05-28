@@ -3,7 +3,6 @@ import {
   View, FlatList, StyleSheet,
   RefreshControl, TouchableOpacity, ScrollView, Animated,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +16,7 @@ import {
   PressableScale,
   FauxGradient,
 } from '../../components/ui';
+import Header from './Header';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 
@@ -147,9 +147,10 @@ export default function HomeScreen({ navigation }: Props) {
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error,      setError]      = useState(false);
-  const [cartCount,  setCartCount]  = useState(0);
 
-  // ── 5A. Screen entrance animations (run once on mount) ───────────────────
+  // ── Screen entrance animations (run once on mount) ───────────────────────
+  // headerOpacity drives the new <Header /> fade-in; search and banner each
+  // get an opacity + translateY pair so they slide in just after the header.
   const headerOpacity   = useRef(new Animated.Value(0)).current;
   const searchTranslate = useRef(new Animated.Value(20)).current;
   const searchOpacity   = useRef(new Animated.Value(0)).current;
@@ -191,50 +192,6 @@ export default function HomeScreen({ navigation }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── 5B. Cart badge animation (springs on count change) ───────────────────
-  const badgeScale = useRef(new Animated.Value(cartCount > 0 ? 1 : 0)).current;
-  const prevCartCount = useRef<number>(cartCount);
-
-  useEffect(() => {
-    const prev = prevCartCount.current;
-    const curr = cartCount;
-    if (prev === curr) return;
-
-    if (prev === 0 && curr > 0) {
-      // First item: scale 0 → 1 with bouncy spring
-      Animated.spring(badgeScale, {
-        toValue:         1,
-        friction:        5,
-        tension:         200,
-        useNativeDriver: true,
-      }).start();
-    } else if (curr > prev) {
-      // Increase: 1 → 1.6 → 1 bounce
-      Animated.sequence([
-        Animated.spring(badgeScale, {
-          toValue:         1.6,
-          friction:        4,
-          tension:         300,
-          useNativeDriver: true,
-        }),
-        Animated.spring(badgeScale, {
-          toValue:         1,
-          friction:        4,
-          tension:         300,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    } else if (curr === 0) {
-      // Last item removed: scale 1 → 0
-      Animated.timing(badgeScale, {
-        toValue:         0,
-        duration:        150,
-        useNativeDriver: true,
-      }).start();
-    }
-    prevCartCount.current = curr;
-  }, [cartCount, badgeScale]);
-
   const loadShops = useCallback(async () => {
     setError(false);
     try {
@@ -254,69 +211,15 @@ export default function HomeScreen({ navigation }: Props) {
     void loadShops();
   }, [loadShops]);
 
-  const loadCartCount = useCallback(async () => {
-    try {
-      const c = await api.getCart();
-      setCartCount(c.items.reduce((s, i) => s + i.quantity, 0));
-    } catch {
-      setCartCount(0);
-    }
-  }, []);
-
   useEffect(() => { void loadShops(); }, [loadShops]);
-  useFocusEffect(useCallback(() => { void loadCartCount(); }, [loadCartCount]));
 
   return (
     <View style={styles.container}>
-      {/* ── 1. Header ─────────────────────────────────────────────────────── */}
-      <Animated.View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + Spacing.md, opacity: headerOpacity },
-        ]}
-      >
-        <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <View style={styles.locationRow}>
-              <Text variant="body" style={styles.locationPin}>📍</Text>
-              <Text
-                variant="h3"
-                color={Colors.white}
-                numberOfLines={1}
-              >
-                {t('home.location')}
-              </Text>
-            </View>
-            <Text
-              variant="bodySmall"
-              color={Colors.white}
-              style={styles.deliverySub}
-            >
-              {t('home.deliveryIn30')} ⚡
-            </Text>
-          </View>
-
-          <PressableScale
-            onPress={() => navigation.navigate('Cart')}
-            scaleTo={0.9}
-            style={styles.cartBtn}
-            accessibilityLabel="Cart"
-          >
-            <Text variant="body" style={styles.cartEmoji}>🛒</Text>
-            <Animated.View
-              style={[styles.cartBadge, { transform: [{ scale: badgeScale }] }]}
-              pointerEvents="none"
-            >
-              <Text
-                color={Colors.white}
-                style={styles.cartBadgeText}
-              >
-                {cartCount}
-              </Text>
-            </Animated.View>
-          </PressableScale>
-        </View>
-      </Animated.View>
+      {/* ── 1. Header — Bringly + cycling tagline + profile icon ─────────── */}
+      <Header
+        entranceOpacity={headerOpacity}
+        onProfilePress={() => navigation.navigate('MainTabs', { screen: 'Profile' })}
+      />
 
       {/* ── 2. Search bar — lives OUTSIDE the ScrollView so it is never
                clipped by the scroll container's top edge.
@@ -352,7 +255,6 @@ export default function HomeScreen({ navigation }: Props) {
             onRefresh={() => {
               setRefreshing(true);
               void loadShops();
-              void loadCartCount();
             }}
             colors={[Colors.primary]}
             tintColor={Colors.primary}
@@ -475,63 +377,10 @@ export default function HomeScreen({ navigation }: Props) {
   );
 }
 
-const HEADER_BLEED = 28;
 const SEARCH_HEIGHT = 48;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-
-  // 1. Header
-  header: {
-    backgroundColor:        Colors.primary,
-    paddingHorizontal:      Spacing.lg,
-    paddingBottom:          HEADER_BLEED,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           Spacing.md,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           Spacing.xs,
-  },
-  locationPin: {
-    fontSize: 18,
-  },
-  deliverySub: {
-    marginTop: 2,
-    opacity:   0.92,
-  },
-  cartBtn: {
-    width:           44,
-    height:          44,
-    borderRadius:    Radius.full,
-    backgroundColor: Colors.white,
-    justifyContent:  'center',
-    alignItems:      'center',
-  },
-  cartEmoji: { fontSize: 22 },
-  cartBadge: {
-    position:        'absolute',
-    top:             -4,
-    right:           -4,
-    minWidth:        20,
-    height:          20,
-    borderRadius:    10,
-    backgroundColor: Colors.error,
-    paddingHorizontal: 4,
-    justifyContent:  'center',
-    alignItems:      'center',
-    borderWidth:     2,
-    borderColor:     Colors.white,
-  },
-  cartBadgeText: {
-    fontSize:   FontSize.xxs,
-    fontWeight: FontWeight.black,
-    lineHeight: 12,
-  },
 
   // Scroll
   scrollContent: {
