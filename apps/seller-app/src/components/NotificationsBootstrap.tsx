@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import * as Notifications from 'expo-notifications';
 import { useAuth } from '../context/AuthContext';
 import { SellerApi } from '../services/api.service';
 import {
@@ -7,8 +8,38 @@ import {
 } from '../services/notifications';
 import { navigationRef } from '../navigation/ref';
 
+type NotificationData = { orderId?: string; screen?: string; type?: string } | undefined;
+
+function handleNotificationTap(data: NotificationData): void {
+  if (!data || !navigationRef.isReady()) return;
+
+  // Delivered → seller's earnings/settlement view.
+  if (data.screen === 'Settlement') {
+    navigationRef.navigate('MainTabs', { screen: 'Settlement' });
+    return;
+  }
+  // New order, paid, cancelled, etc. → orders queue (default).
+  navigationRef.navigate('MainTabs', { screen: 'Orders' });
+}
+
+function dispatchWhenReady(data: NotificationData, isCancelled: () => boolean): void {
+  if (navigationRef.isReady()) {
+    handleNotificationTap(data);
+    return;
+  }
+  const intervalId = setInterval(() => {
+    if (isCancelled()) { clearInterval(intervalId); return; }
+    if (navigationRef.isReady()) {
+      clearInterval(intervalId);
+      handleNotificationTap(data);
+    }
+  }, 50);
+  setTimeout(() => clearInterval(intervalId), 8000);
+}
+
 export default function NotificationsBootstrap() {
-  const { state } = useAuth();
+  const { state }              = useAuth();
+  const coldStartConsumedRef   = useRef(false);
 
   useEffect(() => {
     if (!state.isAuthenticated || !state.token || state.requiresPin) return;
@@ -28,19 +59,31 @@ export default function NotificationsBootstrap() {
     return () => { cancelled = true; };
   }, [state.isAuthenticated, state.token, state.requiresPin]);
 
+  // Foreground / background tap
   useEffect(() => {
     return setupNotificationListeners(
       undefined,
       (response) => {
-        const data = response.notification.request.content.data as
-          | { orderId?: string; screen?: string; type?: string }
-          | undefined;
-        if (!data || !navigationRef.isReady()) return;
-        // Bring seller into the orders queue on any order-related tap
-        navigationRef.navigate('MainTabs');
+        const data = response.notification.request.content.data as NotificationData;
+        handleNotificationTap(data);
       },
     );
   }, []);
+
+  // Cold-start tap — flush once the seller is past the auth+PIN gate.
+  useEffect(() => {
+    if (!state.isAuthenticated || state.requiresPin || coldStartConsumedRef.current) return;
+    let cancelled = false;
+
+    void Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (cancelled || !response) return;
+      coldStartConsumedRef.current = true;
+      const data = response.notification.request.content.data as NotificationData;
+      dispatchWhenReady(data, () => cancelled);
+    });
+
+    return () => { cancelled = true; };
+  }, [state.isAuthenticated, state.requiresPin]);
 
   return null;
 }

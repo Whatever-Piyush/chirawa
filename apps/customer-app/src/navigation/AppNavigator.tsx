@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, type NavigatorScreenParams } from '@react-navigation/native';
 import { navigationRef } from './ref';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -32,7 +32,7 @@ export type RootStackParamList = {
   OtpLogin:   undefined;
   VerifyOtp:  { phone: string };
   // Main
-  MainTabs:   undefined;
+  MainTabs:   NavigatorScreenParams<TabParamList> | undefined;
   Search:     undefined;
   ShopDetail: { shopId: string; shopName: string };
   Cart:       undefined;
