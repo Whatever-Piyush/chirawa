@@ -5,10 +5,12 @@ import {
 } from 'react-native';
 import { io, type Socket } from 'socket.io-client';
 import { Audio } from 'expo-av';
+import { useRoute, type RouteProp } from '@react-navigation/native';
 import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
 import { SellerApi } from '../../services/api.service';
 import { StorageService } from '../../services/storage.service';
 import { useAuth } from '../../context/AuthContext';
+import type { TabParamList } from '../../navigation/AppNavigator';
 
 const DEV_HOST = '192.168.1.4'; // Update to your Mac's LAN IP
 const SOCKET_URL = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chirawa.in';
@@ -34,6 +36,7 @@ interface ActiveOrder {
 
 export default function OrderQueueScreen() {
   const { state }                   = useAuth();
+  const route                       = useRoute<RouteProp<TabParamList, 'Orders'>>();
   const [orders,     setOrders]     = useState<ActiveOrder[]>([]);
   const [newOrder,   setNewOrder]   = useState<IncomingOrder | null>(null);
   const [loading,    setLoading]    = useState(true);
@@ -42,6 +45,9 @@ export default function OrderQueueScreen() {
   const socketRef   = useRef<Socket | null>(null);
   const soundRef    = useRef<Audio.Sound | null>(null);
   const vibInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Tracks which orderIds we've already auto-popped via notification tap so a
+  // re-render doesn't reopen the modal the seller already dismissed.
+  const consumedDeepLinks = useRef<Set<string>>(new Set());
 
   // ── Load existing orders ──────────────────────────────────────────────────
   const loadOrders = useCallback(async () => {
@@ -57,6 +63,31 @@ export default function OrderQueueScreen() {
   }, [state.token]);
 
   useEffect(() => { void loadOrders(); }, [loadOrders]);
+
+  // ── Notification-tap deep link ───────────────────────────────────────────
+  // NotificationsBootstrap navigates here with route.params.orderId when the
+  // seller taps a new-order push (from tray or cold-start). Once loadOrders
+  // populates the queue, surface the same Accept/Reject modal the live socket
+  // would have shown. The consumed-set prevents re-popping after dismissal.
+  useEffect(() => {
+    const target = route.params?.orderId;
+    if (!target || loading || consumedDeepLinks.current.has(target)) return;
+
+    const found = orders.find((o) => o.id === target);
+    if (!found) return; // not in active queue (delivered/cancelled, or not loaded yet)
+
+    consumedDeepLinks.current.add(target);
+    if (found.sellerAcceptedAt) return; // already accepted elsewhere — no modal
+
+    setNewOrder({
+      orderId:          found.id,
+      items:            found.items,
+      totalAmount:      found.totalAmount,
+      paymentMethod:    found.paymentMethod,
+      deliveryLocality: found.deliveryLocality,
+    });
+    void startAlarm();
+  }, [route.params?.orderId, orders, loading]);
 
   // ── Socket.io connection ──────────────────────────────────────────────────
   useEffect(() => {

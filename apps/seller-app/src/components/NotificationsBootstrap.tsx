@@ -18,8 +18,13 @@ function handleNotificationTap(data: NotificationData): void {
     navigationRef.navigate('MainTabs', { screen: 'Settlement' });
     return;
   }
-  // New order, paid, cancelled, etc. → orders queue (default).
-  navigationRef.navigate('MainTabs', { screen: 'Orders' });
+  // New order, paid, cancelled, etc. → orders queue. If the notification carries
+  // an orderId (it always does for order-related pushes), pass it through so the
+  // queue can pop the Accept/Reject modal for that specific order on arrival.
+  navigationRef.navigate('MainTabs', {
+    screen: 'Orders',
+    params: data.orderId ? { orderId: data.orderId } : undefined,
+  });
 }
 
 function dispatchWhenReady(data: NotificationData, isCancelled: () => boolean): void {

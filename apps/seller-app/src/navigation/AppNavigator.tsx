@@ -25,7 +25,7 @@ export type RootStackParamList = {
 };
 
 export type TabParamList = {
-  Orders:     undefined;
+  Orders:     { orderId?: string } | undefined;
   Stock:      undefined;
   Settlement: undefined;
   Profile:    undefined;
