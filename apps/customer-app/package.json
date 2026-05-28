@@ -14,6 +14,7 @@
     "@chirawa/api-client": "workspace:*",
     "@chirawa/i18n": "workspace:*",
     "@chirawa/types": "workspace:*",
+    "@expo-google-fonts/poppins": "^0.4.1",
     "@react-native-async-storage/async-storage": "^2.0.0",
     "@react-navigation/bottom-tabs": "^6.6.1",
     "@react-navigation/native": "^6.1.18",

@@ -1,5 +1,10 @@
 export { default as Text }           from './Text';
+// Alias for callers who reach for the spec's "AppText" name — same Poppins-backed
+// component, no behavior difference.
+export { default as AppText }        from './Text';
 export type { TextVariant }           from './Text';
+
+export { default as SectionContainer } from './SectionContainer';
 
 export { default as Card }            from './Card';
 export type { CardShadow }            from './Card';

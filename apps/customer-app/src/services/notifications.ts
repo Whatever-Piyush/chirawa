@@ -45,13 +45,16 @@ export async function registerForPushNotifications(): Promise<string | null> {
     return null;
   }
 
-  const existing = await Notifications.getPermissionsAsync();
-  let status     = existing.status;
-  if (status !== 'granted') {
-    const requested = await Notifications.requestPermissionsAsync();
-    status = requested.status;
+  // .granted is the boolean from the inherited PermissionResponse, but in some
+  // expo-modules-core type-resolution setups the inheritance doesn't propagate
+  // to NotificationPermissionsStatus — so we narrow via cast. Runtime value is
+  // unchanged.
+  type Perm = { granted: boolean };
+  let granted = ((await Notifications.getPermissionsAsync()) as unknown as Perm).granted;
+  if (!granted) {
+    granted = ((await Notifications.requestPermissionsAsync()) as unknown as Perm).granted;
   }
-  if (status !== 'granted') {
+  if (!granted) {
     console.warn('[FCM] Notification permission not granted');
     return null;
   }

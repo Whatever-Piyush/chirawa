@@ -2,22 +2,22 @@
 // Single source of truth. No hardcoded hex/sizes anywhere in screens.
 
 export const Colors = {
-  // Brand
-  primary:       '#FF3E6C',
-  primaryDark:   '#E0325A',
-  primaryLight:  '#FFF0F3',
-  primaryMid:    '#FFD6DF',
+  // Brand — Chirawa Orange (rebrand from pink Phase 6)
+  primary:       '#FF6B35',   // brand orange
+  primaryDark:   '#E85520',   // pressed
+  primaryLight:  '#FFF0E9',   // tinted chip bg / soft hero washes
+  primaryMid:    '#FFD0B8',
 
-  // Neutrals
+  // Neutrals — warm cream surfaces (food/grocery feel, not clinical white)
   black:         '#0D0D0D',
   white:         '#FFFFFF',
-  background:    '#F7F8FA',
+  background:    '#FFF5EE',   // page bg (warm cream)
   surface:       '#FFFFFF',
   surfaceAlt:    '#F2F3F5',
 
   // Text
   textPrimary:   '#1A1A2E',
-  textSecondary: '#4A5568',
+  textSecondary: '#6B7280',   // slightly cooler grey reads premium on cream
   textTertiary:  '#9AA5B4',
   textInverse:   '#FFFFFF',
 
@@ -32,20 +32,37 @@ export const Colors = {
   infoLight:     '#E6F0FF',
 
   // UI
-  border:        '#EAECF0',
-  borderFocus:   '#FF3E6C',
+  border:        '#F0E0D6',   // warm-toned border to harmonise with cream bg
+  borderFocus:   '#FF6B35',
   divider:       '#F2F3F5',
   overlay:       'rgba(0,0,0,0.45)',
   overlayLight:  'rgba(0,0,0,0.06)',
   shimmer:       '#EBEBEB',
   shimmerHigh:   '#F5F5F5',
 
+  // Category-chip tints (used by CategoryTabs + Bestsellers)
+  chipGrocery:   '#FFF0E9',
+  chipSnacks:    '#FFF8E1',
+  chipDairy:     '#E8F5E9',
+  chipBeauty:    '#FDF2F8',
+  chipActive:    '#FF6B35',
+
+  // Chirawa's Special — signature local-shops treatment
+  special:        '#FFF3E0',   // section bg tint
+  specialBorder:  '#FFCC80',   // card border
+  specialAccent:  '#C4383A',   // deep red — Special button + section header
+
+  // Bottom nav
+  footerBg:      '#FFFFFF',
+  footerBorder:  '#F0E0D6',
+
   // Legacy aliases — kept so existing screens compile while we migrate
   text:          '#1A1A2E',
-  textLight:     '#4A5568',
+  textLight:     '#6B7280',
   textMuted:     '#9AA5B4',
   card:          '#FFFFFF',
-  accent:        '#00C48C',
+  accent:        '#00C48C',   // NOTE: legacy green alias for `success` (riders/badges). The
+                              // spec's "accent" red lives at `specialAccent` so this stays.
   secondary:     '#2D3436',
   disabled:      '#C8B8A8',
   shimmer1:      '#EBEBEB',
@@ -126,11 +143,18 @@ export const Shadow = {
     elevation: 8,
   },
   primary: {
-    shadowColor: '#FF3E6C',
+    shadowColor: '#FF6B35',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.30,
     shadowRadius: 12,
     elevation: 8,
+  },
+  special: {
+    shadowColor: '#C4383A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 6,
   },
 
   // Legacy aliases — kept so existing screens compile while we migrate
@@ -142,7 +166,7 @@ export const Shadow = {
     elevation: 2,
   },
   strong: {
-    shadowColor: '#FF3E6C',
+    shadowColor: '#FF6B35',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.30,
     shadowRadius: 12,
@@ -155,7 +179,28 @@ export const HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
 
 // Gradient pairs — used by FauxGradient overlapping View pattern
 export const Gradients = {
-  primary: ['#FF3E6C', '#FF6B9D'] as const,
-  warm:    ['#FF3E6C', '#FF8C42'] as const,
+  primary: ['#FF6B35', '#FF9A5C'] as const,
+  warm:    ['#FF6B35', '#FFB07A'] as const,
   success: ['#00C48C', '#00E0A4'] as const,
 };
+
+// Poppins font-family mapping — kept beside FontWeight so theme + typography
+// stay in sync. Falls back to System if Poppins isn't loaded yet.
+// 800/900 don't have dedicated Poppins weights here so they share Bold.
+export function poppinsFamily(weight: keyof typeof FontWeight | string | undefined): string {
+  switch (weight) {
+    case 'regular':
+    case '400': return 'Poppins_400Regular';
+    case 'medium':
+    case '500': return 'Poppins_500Medium';
+    case 'semibold':
+    case '600': return 'Poppins_600SemiBold';
+    case 'bold':
+    case '700':
+    case 'black':
+    case '800':
+    case 'heavy':
+    case '900': return 'Poppins_700Bold';
+    default:    return 'Poppins_400Regular';
+  }
+}
