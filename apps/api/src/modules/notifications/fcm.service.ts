@@ -77,7 +77,12 @@ export async function sendPush(payload: FcmPayload): Promise<void> {
         notification: {
           sound:     'default',
           channelId: payload.channel ?? 'chirawa_orders',
-          clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+          // No clickAction — letting Android use the default launcher Intent
+          // is what expo-notifications' native module is registered to handle,
+          // so the tap launches the app and the JS response listener fires.
+          // FLUTTER_NOTIFICATION_CLICK (the old value here) is Flutter-only and
+          // matches no intent-filter in our Expo Manifest, so Android was just
+          // dismissing the notification on tap with no app launch.
         },
       },
       apns: {
