@@ -8,7 +8,7 @@ import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
 import { RiderApi } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
 
-const DEV_HOST  = '192.168.1.6';
+const DEV_HOST  = '192.168.1.4';
 const SOCKET_URL = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chirawa.in';
 const COD_CAP   = 200000; // ₹2000 in paise
 

@@ -31,7 +31,7 @@ type Props = {
   route:      RouteProp<RootStackParamList, 'OrderTracking'>;
 };
 
-const DEV_HOST        = '192.168.1.6';
+const DEV_HOST        = '192.168.1.4';
 const SOCKET_URL      = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chirawa.in';
 const WHATSAPP_NUMBER = '919999999999';
 const POLL_MS         = 15_000;
