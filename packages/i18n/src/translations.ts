@@ -41,6 +41,17 @@ export const translations = {
     catDairy:          { en: 'Dairy',                                hi: 'डेयरी' },
     catHousehold:      { en: 'Household',                            hi: 'घर का सामान' },
     catMedicines:      { en: 'Medicines',                            hi: 'दवाई' },
+    // ── HomeScreen redesign — Chunk 3 (SearchBar + CategoryTabs) ──────
+    catAll:            { en: 'All',                                  hi: 'सभी' },
+    catBeauty:         { en: 'Beauty',                               hi: 'ब्यूटी' },
+    catGrocery:        { en: 'Grocery',                              hi: 'किराना' },
+    catSnacks:         { en: 'Snacks',                               hi: 'स्नैक्स' },
+    searchRotate1:     { en: 'Search for atta, dal, ghee...',        hi: 'आटा, दाल, घी ढूंढो...' },
+    searchRotate2:     { en: 'Search for biscuits, chips...',        hi: 'बिस्किट, चिप्स ढूंढो...' },
+    searchRotate3:     { en: 'Search for soaps, shampoo...',         hi: 'साबुन, शैंपू ढूंढो...' },
+    searchRotate4:     { en: 'Search for sweets, peda...',           hi: 'मिठाई, पेड़ा ढूंढो...' },
+    searchRotate5:     { en: 'Search for masala, spices...',         hi: 'मसाले ढूंढो...' },
+    voiceSoon:         { en: 'Voice search coming soon',             hi: 'वॉइस सर्च जल्द आएगी' },
   },
   shop: {
     openNow:    { en: 'Open Now',                                                                hi: 'अभी खुला है' },

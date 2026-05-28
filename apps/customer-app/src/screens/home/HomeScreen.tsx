@@ -17,6 +17,8 @@ import {
   FauxGradient,
 } from '../../components/ui';
 import Header from './Header';
+import SearchBar from './SearchBar';
+import CategoryTabs from './CategoryTabs';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 
@@ -222,28 +224,16 @@ export default function HomeScreen({ navigation }: Props) {
       />
 
       {/* ── 2. Search bar — lives OUTSIDE the ScrollView so it is never
-               clipped by the scroll container's top edge.
-               marginTop: -20 on the wrapper pulls it 20 px up into the
-               header's paddingBottom zone; the bar itself is fully visible
-               and tappable because it is a normal-flow sibling view. ────── */}
-      <Animated.View
-        style={[
-          styles.searchContainer,
-          {
-            opacity:   searchOpacity,
-            transform: [{ translateY: searchTranslate }],
-          },
-        ]}
-      >
-        <TouchableOpacity
-          style={styles.searchWrap}
-          activeOpacity={0.8}
+               clipped by the scroll container's top edge. The wrapper's
+               marginTop: -20 pulls it up into the header's paddingBottom
+               zone for the half-on-orange / half-on-cream overlap. */}
+      <View style={styles.searchOverlap}>
+        <SearchBar
+          entranceOpacity={searchOpacity}
+          entranceTranslate={searchTranslate}
           onPress={() => navigation.navigate('Search')}
-        >
-          <Text variant="body" style={styles.searchIcon}>🔍</Text>
-          <Text style={styles.searchPlaceholder}>{t('home.searchPlaceholder')}</Text>
-        </TouchableOpacity>
-      </Animated.View>
+        />
+      </View>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -262,7 +252,10 @@ export default function HomeScreen({ navigation }: Props) {
           />
         }
       >
-        {/* ── 3. Promo banner ────────────────────────────────────────────── */}
+        {/* ── 3. Category chips ──────────────────────────────────────────── */}
+        <CategoryTabs />
+
+        {/* ── 4. Promo banner ────────────────────────────────────────────── */}
         <Animated.View
           style={[
             styles.bannerOuter,
@@ -377,8 +370,6 @@ export default function HomeScreen({ navigation }: Props) {
   );
 }
 
-const SEARCH_HEIGHT = 48;
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
 
@@ -387,30 +378,10 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.xxxl,
   },
 
-  // 2. Search
-  searchContainer: {
+  // 2. Search overlap — pulls the SearchBar up into the orange header's
+  // bottom padding zone so the bar straddles the orange/cream boundary.
+  searchOverlap: {
     marginTop: -20,
-  },
-  searchWrap: {
-    flexDirection:    'row',
-    alignItems:       'center',
-    backgroundColor:  Colors.surface,
-    marginHorizontal: Spacing.lg,
-    height:           SEARCH_HEIGHT,
-    borderRadius:     Radius.xl,
-    paddingHorizontal: Spacing.lg,
-    ...Shadow.md,
-  },
-  searchIcon: {
-    fontSize:    16,
-    marginRight: Spacing.sm,
-    color:       Colors.textTertiary,
-  },
-  searchPlaceholder: {
-    flex:      1,
-    fontSize:  FontSize.md,
-    color:     Colors.textTertiary,
-    lineHeight: SEARCH_HEIGHT,
   },
 
   // 3. Banner
