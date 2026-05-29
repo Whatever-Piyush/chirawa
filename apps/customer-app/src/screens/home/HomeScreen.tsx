@@ -14,11 +14,11 @@ import {
   Badge,
   Shimmer,
   PressableScale,
-  FauxGradient,
 } from '../../components/ui';
 import Header from './Header';
 import SearchBar from './SearchBar';
 import CategoryTabs from './CategoryTabs';
+import FeaturedBanner from './FeaturedBanner';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 
@@ -255,43 +255,11 @@ export default function HomeScreen({ navigation }: Props) {
         {/* ── 3. Category chips ──────────────────────────────────────────── */}
         <CategoryTabs />
 
-        {/* ── 4. Promo banner ────────────────────────────────────────────── */}
-        <Animated.View
-          style={[
-            styles.bannerOuter,
-            {
-              opacity:   bannerOpacity,
-              transform: [{ translateY: bannerTranslate }],
-            },
-          ]}
-        >
-          <FauxGradient
-            from="#FF3E6C"
-            to="#FF8C42"
-            style={styles.banner}
-            steps={10}
-          >
-            <View style={{ flex: 1 }}>
-              <Text variant="h3" color={Colors.white} style={styles.bannerTitle}>
-                🚀 {t('home.quickCommerce')}
-              </Text>
-              <Text
-                variant="bodySmall"
-                color={Colors.white}
-                style={styles.bannerSub}
-              >
-                {t('home.quickCommerceSub')}
-              </Text>
-            </View>
-            <View style={{ width: 64 }} />
-          </FauxGradient>
-          <View pointerEvents="none" style={styles.bannerEmojiWrap}>
-            <Text style={styles.bannerEmoji}>🛵</Text>
-          </View>
-          <View style={styles.dotsRow}>
-            <View style={[styles.dot, styles.dotActive]} />
-          </View>
-        </Animated.View>
+        {/* ── 4. Featured banner — delivery promise ──────────────────────── */}
+        <FeaturedBanner
+          entranceOpacity={bannerOpacity}
+          entranceTranslate={bannerTranslate}
+        />
 
         {/* ── 4. Section header ──────────────────────────────────────────── */}
         <View style={styles.sectionHeader}>
@@ -382,47 +350,6 @@ const styles = StyleSheet.create({
   // bottom padding zone so the bar straddles the orange/cream boundary.
   searchOverlap: {
     marginTop: -20,
-  },
-
-  // 3. Banner
-  bannerOuter: {
-    marginTop: Spacing.lg,
-    overflow: 'visible',
-  },
-  banner: {
-    flexDirection:    'row',
-    alignItems:       'center',
-    padding:          Spacing.xl,
-    marginHorizontal: Spacing.lg,
-    borderRadius:     Radius.xl,
-    gap:              Spacing.md,
-    overflow:         'hidden',
-    ...Shadow.md,
-  },
-  bannerTitle: { lineHeight: 24 },
-  bannerSub:   { marginTop: 4, opacity: 0.94 },
-  bannerEmojiWrap: {
-    position: 'absolute',
-    right: Spacing.xl,
-    bottom: 24,
-    overflow: 'visible',
-  },
-  bannerEmoji: { fontSize: 56, lineHeight: 78, includeFontPadding: false },
-  dotsRow: {
-    flexDirection:  'row',
-    justifyContent: 'center',
-    gap:            Spacing.xs,
-    marginTop:      Spacing.md,
-  },
-  dot: {
-    width:           6,
-    height:          6,
-    borderRadius:    3,
-    backgroundColor: Colors.border,
-  },
-  dotActive: {
-    width:           18,
-    backgroundColor: Colors.primary,
   },
 
   // 4. Section header

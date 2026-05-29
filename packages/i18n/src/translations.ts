@@ -52,6 +52,9 @@ export const translations = {
     searchRotate4:     { en: 'Search for sweets, peda...',           hi: 'मिठाई, पेड़ा ढूंढो...' },
     searchRotate5:     { en: 'Search for masala, spices...',         hi: 'मसाले ढूंढो...' },
     voiceSoon:         { en: 'Voice search coming soon',             hi: 'वॉइस सर्च जल्द आएगी' },
+    // ── HomeScreen redesign — Chunk 4 (Featured Banner: delivery promise) ─
+    bannerTitle:       { en: '🛵 Delivered in 30 minutes',           hi: '🛵 30 मिनट में घर तक' },
+    bannerSub:         { en: 'Fresh, straight from the shop',        hi: 'ताज़ा सामान, सीधे दुकान से' },
   },
   shop: {
     openNow:    { en: 'Open Now',                                                                hi: 'अभी खुला है' },
