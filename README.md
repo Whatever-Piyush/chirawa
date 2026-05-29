@@ -94,17 +94,56 @@ pnpm start                   # from apps/customer-app
 ```
 
 > **These are dev-client builds, not Expo Go** (they use native modules — Firebase,
-> secure-store). To open one:
-> - Easiest: install the team's **EAS dev-client APK** on an Android phone, open it,
->   and enter `http://<your-mac-ip>:8081`.
-> - Or build your own: `eas build --profile development --platform android`
->   (needs an Expo account added to the EAS project).
->
-> `google-services.json` is already committed for all three apps — no Firebase file setup needed.
+> secure-store), so Expo Go cannot run them. You need the dev-client APK installed once;
+> after that, `pnpm start` + the dev client is your daily loop. See **Dev builds** below.
 
 Run the other apps the same way (`apps/seller-app`, `apps/rider-app`). Run **one Metro per
 app** — if a port is taken Expo offers the next (8082, 8083); make sure each device connects
 to the matching port.
+
+---
+
+## Dev builds (the custom dev client)
+
+Each app has an EAS `development` profile (`apps/<app>/eas.json`) that produces an
+installable **Android APK dev client**. `google-services.json` is committed for all three
+apps, so there's no Firebase file setup.
+
+### A. Install the team's existing dev build (fastest)
+The quickest path for a new teammate — no build needed:
+1. Owner gets a shareable link to the latest dev APK:
+   ```bash
+   cd apps/customer-app
+   eas build:list --platform android --profile development --limit 1
+   ```
+   Open that build in the EAS dashboard (or `eas build:view <id>`) and copy the **install URL**
+   (or just re-run a build, below — EAS prints a QR + URL at the end).
+2. Send the teammate the URL. On their Android phone: open it, download, allow
+   "install unknown apps", install.
+3. Open the installed **dev client**, then connect to Metro: scan the QR from `pnpm start`,
+   or tap "Enter URL manually" → `http://<your-mac-ip>:8081`.
+
+### B. Build your own dev client
+Needs an Expo account that's a member of the EAS project (ask the owner to add you, or run
+`eas init` if the app isn't linked yet — it sets `extra.eas.projectId` in `app.json`).
+```bash
+npx expo login                 # once
+cd apps/customer-app
+eas build --profile development --platform android
+```
+EAS runs the build in the cloud (~10–15 min) and prints a QR + install URL at the end —
+install it like in (A). Repeat per app you need (`seller-app`, `rider-app`).
+
+### C. iOS (optional, for simulator work)
+```bash
+cd apps/customer-app
+eas build --profile development --platform ios   # add --local to build on your Mac
+```
+For a **physical iPhone** you must register it first: `eas device:create`. The Android flow
+above is the primary/dev-tested path.
+
+> Rebuild the dev client only when **native** deps change (new Expo module, Firebase, etc.).
+> Pure JS/TS changes just need `pnpm start` + reload — no rebuild.
 
 ---
 
