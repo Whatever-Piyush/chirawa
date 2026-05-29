@@ -82,6 +82,14 @@ export const translations = {
     sdInstant:         { en: 'Instant Food',                         hi: 'इंस्टेंट फूड' },
     sdSauces:          { en: 'Sauces & Spreads',                     hi: 'सॉस और स्प्रेड' },
     sdIceCream:        { en: 'Ice Creams & More',                    hi: 'आइसक्रीम और बहुत कुछ' },
+    // ── HomeScreen redesign — Chunk 7 (Chirawa's Special) ────────────
+    specialTitle:      { en: "Chirawa's Special ✨",                 hi: 'चिरावा का खास ✨' },
+    specialSubtitle:   { en: 'The legendary tastes of our town',     hi: 'हमारे शहर के मशहूर ज़ायके' },
+    specialFamousFor:  { en: 'Famous for:',                          hi: 'मशहूर:' },
+    specialOrderNow:   { en: 'Order Now →',                          hi: 'अभी ऑर्डर करें →' },
+    specialBadgeLegend:{ en: 'Local Legend',                         hi: 'लोकल लेजेंड' },
+    addShopName:       { en: 'Add your local shop',                  hi: 'अपनी दुकान जोड़ें' },
+    addShopDesc:       { en: 'Your specialty here',                  hi: 'आपकी खासियत यहाँ' },
   },
   shop: {
     openNow:    { en: 'Open Now',                                                                hi: 'अभी खुला है' },

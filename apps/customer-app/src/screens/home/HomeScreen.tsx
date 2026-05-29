@@ -21,6 +21,7 @@ import CategoryTabs from './CategoryTabs';
 import FeaturedBanner from './FeaturedBanner';
 import BestsellersSection from './BestsellersSection';
 import CategoryGrid, { GROCERY_KITCHEN, SNACKS_DRINKS } from './CategoryGrid';
+import ChirawaSpecialSection from './ChirawaSpecialSection';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 
@@ -271,6 +272,9 @@ export default function HomeScreen({ navigation }: Props) {
 
         {/* ── 7. Snacks & Drinks — 4-column icon tiles ───────────────────── */}
         <CategoryGrid title={t('home.snacksDrinks')} items={SNACKS_DRINKS} />
+
+        {/* ── 8. Chirawa's Special — local-shops carousel (signature) ─────── */}
+        <ChirawaSpecialSection />
 
         {/* ── 4. Section header ──────────────────────────────────────────── */}
         <View style={styles.sectionHeader}>
