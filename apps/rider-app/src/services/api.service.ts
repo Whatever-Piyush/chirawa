@@ -1,6 +1,6 @@
 import { StorageService } from './storage.service';
+import { DEV_HOST } from '../config/devHost';
 
-const DEV_HOST = '192.168.1.4'; // Update to your Mac's LAN IP
 const BASE_URL = __DEV__
   ? `http://${DEV_HOST}:3000/api/v1`
   : 'https://api.chirawa.in/api/v1';

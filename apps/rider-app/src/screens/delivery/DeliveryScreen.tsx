@@ -8,8 +8,8 @@ import { io, type Socket } from 'socket.io-client';
 import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
 import { RiderApi } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
+import { DEV_HOST } from '../../config/devHost';
 
-const DEV_HOST   = '192.168.1.4';
 const SOCKET_URL = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chirawa.in';
 
 interface ActiveOrder {

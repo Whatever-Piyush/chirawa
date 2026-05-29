@@ -11,8 +11,8 @@ import { SellerApi } from '../../services/api.service';
 import { StorageService } from '../../services/storage.service';
 import { useAuth } from '../../context/AuthContext';
 import type { TabParamList } from '../../navigation/AppNavigator';
+import { DEV_HOST } from '../../config/devHost';
 
-const DEV_HOST = '192.168.1.4'; // Update to your Mac's LAN IP
 const SOCKET_URL = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chirawa.in';
 
 const REJECT_REASONS = [

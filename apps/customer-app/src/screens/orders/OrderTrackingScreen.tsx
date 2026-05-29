@@ -26,15 +26,14 @@ import { api } from '../../services/api.service';
 import { StorageService } from '../../services/storage.service';
 import { useT } from '@chirawa/i18n';
 import { useToast } from '../../components/ui';
+import { DEV_HOST } from '../../config/devHost';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'OrderTracking'>;
   route:      RouteProp<RootStackParamList, 'OrderTracking'>;
 };
-
-const DEV_HOST        = '192.168.1.4';
 const SOCKET_URL      = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chirawa.in';
-const WHATSAPP_NUMBER = '919999999999';
+const WHATSAPP_NUMBER = '916350076685';
 const POLL_MS         = 15_000;
 
 const STATUS_STEP: Partial<Record<OrderStatus, number>> = {
