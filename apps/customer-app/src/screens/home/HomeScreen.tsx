@@ -20,6 +20,7 @@ import SearchBar from './SearchBar';
 import CategoryTabs from './CategoryTabs';
 import FeaturedBanner from './FeaturedBanner';
 import BestsellersSection from './BestsellersSection';
+import CategoryGrid, { GROCERY_KITCHEN, SNACKS_DRINKS } from './CategoryGrid';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 
@@ -264,6 +265,12 @@ export default function HomeScreen({ navigation }: Props) {
 
         {/* ── 5. Bestsellers — 3-column colored category cards ──────────── */}
         <BestsellersSection />
+
+        {/* ── 6. Grocery & Kitchen — 4-column icon tiles ─────────────────── */}
+        <CategoryGrid title={t('home.groceryKitchen')} items={GROCERY_KITCHEN} />
+
+        {/* ── 7. Snacks & Drinks — 4-column icon tiles ───────────────────── */}
+        <CategoryGrid title={t('home.snacksDrinks')} items={SNACKS_DRINKS} />
 
         {/* ── 4. Section header ──────────────────────────────────────────── */}
         <View style={styles.sectionHeader}>

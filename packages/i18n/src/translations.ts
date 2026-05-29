@@ -64,6 +64,24 @@ export const translations = {
     bsGrocery:         { en: 'Grocery Staples',                      hi: 'किराना सामान' },
     bsInstant:         { en: 'Instant Foods & Sauces',               hi: 'इंस्टेंट फूड और सॉस' },
     bsVegetables:      { en: 'Fruits & Vegetables',                  hi: 'फल और सब्ज़ी' },
+    // ── HomeScreen redesign — Chunk 6 (Grocery & Kitchen, Snacks & Drinks) ─
+    groceryKitchen:    { en: 'Grocery & Kitchen',                    hi: 'किराना और किचन' },
+    snacksDrinks:      { en: 'Snacks & Drinks',                      hi: 'स्नैक्स और ड्रिंक्स' },
+    // Grocery & Kitchen tiles
+    gkVegFruits:       { en: 'Vegetables & Fruits',                  hi: 'सब्ज़ी और फल' },
+    gkAtta:            { en: 'Atta, Rice & Dal',                     hi: 'आटा, चावल और दाल' },
+    gkOil:             { en: 'Oil, Ghee & Masala',                   hi: 'तेल, घी और मसाला' },
+    gkDairyBread:      { en: 'Dairy, Bread & Eggs',                  hi: 'डेयरी, ब्रेड और अंडे' },
+    gkBakery:          { en: 'Bakery & Biscuits',                    hi: 'बेकरी और बिस्किट' },
+    gkDryFruits:       { en: 'Dry Fruits & Cereals',                 hi: 'ड्राई फ्रूट्स और सीरियल' },
+    // Snacks & Drinks tiles
+    sdChips:           { en: 'Chips & Namkeen',                      hi: 'चिप्स और नमकीन' },
+    sdSweets:          { en: 'Sweets & Chocolates',                  hi: 'मिठाई और चॉकलेट' },
+    sdDrinks:          { en: 'Drinks & Juices',                      hi: 'ड्रिंक्स और जूस' },
+    sdTea:             { en: 'Tea, Coffee & Milk Drinks',            hi: 'चाय, कॉफ़ी और मिल्क ड्रिंक्स' },
+    sdInstant:         { en: 'Instant Food',                         hi: 'इंस्टेंट फूड' },
+    sdSauces:          { en: 'Sauces & Spreads',                     hi: 'सॉस और स्प्रेड' },
+    sdIceCream:        { en: 'Ice Creams & More',                    hi: 'आइसक्रीम और बहुत कुछ' },
   },
   shop: {
     openNow:    { en: 'Open Now',                                                                hi: 'अभी खुला है' },
