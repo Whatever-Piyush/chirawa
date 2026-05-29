@@ -10,6 +10,8 @@ import { Colors, Spacing } from '../theme';
 import { Text, DotsLoader } from '../components/ui';
 import LanguagePickerScreen from '../screens/LanguagePickerScreen';
 import CustomTabBar from './CustomTabBar';
+import { CartProvider } from '../context/CartContext';
+import CartDockPill from '../components/CartDockPill';
 
 // Auth Screens
 import OtpLoginScreen   from '../screens/auth/OtpLoginScreen';
@@ -60,17 +62,23 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab   = createBottomTabNavigator<TabParamList>();
 
 function MainTabs() {
+  // The cart pill is a sibling of the Tab.Navigator so it floats above every
+  // tab. pointerEvents on its wrapper let touches pass through everywhere
+  // except the pill itself.
   return (
-    <Tab.Navigator
-      screenOptions={{ headerShown: false }}
-      tabBar={(props) => <CustomTabBar {...props} />}
-    >
-      <Tab.Screen name="Home"         component={HomeScreen} />
-      <Tab.Screen name="OrderHistory" component={OrderHistoryScreen} />
-      <Tab.Screen name="Categories"   component={CategoriesScreen} />
-      <Tab.Screen name="Special"      component={ChirawaSpecialScreen} />
-      <Tab.Screen name="Profile"      component={ProfileScreen} />
-    </Tab.Navigator>
+    <View style={{ flex: 1 }}>
+      <Tab.Navigator
+        screenOptions={{ headerShown: false }}
+        tabBar={(props) => <CustomTabBar {...props} />}
+      >
+        <Tab.Screen name="Home"         component={HomeScreen} />
+        <Tab.Screen name="OrderHistory" component={OrderHistoryScreen} />
+        <Tab.Screen name="Categories"   component={CategoriesScreen} />
+        <Tab.Screen name="Special"      component={ChirawaSpecialScreen} />
+        <Tab.Screen name="Profile"      component={ProfileScreen} />
+      </Tab.Navigator>
+      <CartDockPill />
+    </View>
   );
 }
 
@@ -99,6 +107,7 @@ export default function AppNavigator() {
 
   return (
     <NavigationContainer ref={navigationRef}>
+      <CartProvider>
       <Stack.Navigator screenOptions={{
         headerShown:       false,
         headerStyle:       { backgroundColor: Colors.white },
@@ -128,6 +137,7 @@ export default function AppNavigator() {
           </>
         )}
       </Stack.Navigator>
+      </CartProvider>
     </NavigationContainer>
   );
 }

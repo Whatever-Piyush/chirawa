@@ -129,6 +129,9 @@ export const translations = {
     freeDeliveryNote: { en: 'FREE delivery on this order',      hi: 'इस ऑर्डर पर FREE डिलीवरी' },
     swipeHint:        { en: 'Swipe ← to remove',                hi: 'हटाने के लिए ← स्वाइप करें' },
     addedToCart:      { en: 'Added to cart',                    hi: 'कार्ट में जोड़ा गया' },
+    viewCart:         { en: 'View Cart',                        hi: 'कार्ट देखें' },
+    itemOne:          { en: 'item',                             hi: 'आइटम' },
+    itemMany:         { en: 'items',                            hi: 'आइटम' },
   },
   checkout: {
     title:             { en: 'Checkout',                             hi: 'चेकआउट' },
