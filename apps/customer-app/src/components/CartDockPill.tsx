@@ -11,20 +11,19 @@ import { useCart } from '../context/CartContext';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
 const TAB_BAR_BASE = 64;   // matches CustomTabBar height (excl. safe-area)
-const GAP_ABOVE_BAR = 8;
+const GAP_ABOVE_BAR = 10;
 
-// Floating cart capsule (v2 §Feature 4A) — deep navy pill that hovers above
-// the bottom nav whenever the cart has items. Slides up on first add, slides
-// down when emptied, and "bumps" on count change. Shows the last-added
-// product thumbnail. Reads the server-backed CartContext.
+// Floating cart capsule — Blinkit-style content-hugging pill, centered above
+// the bottom nav. Brand orange (matches the header / banner) with a left
+// product thumbnail, "View cart" + summary, and a circular chevron.
 export default function CartDockPill() {
   const insets = useSafeAreaInsets();
   const t = useT();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { count, subtotalPaise, lastAddedItem } = useCart();
 
-  const anim  = useRef(new Animated.Value(count > 0 ? 1 : 0)).current; // 0 hidden → 1 shown
-  const scale = useRef(new Animated.Value(1)).current;                 // count-change bump
+  const anim  = useRef(new Animated.Value(count > 0 ? 1 : 0)).current;
+  const scale = useRef(new Animated.Value(1)).current;
   const prevCount = useRef(count);
   const [rendered, setRendered] = useState(count > 0);
 
@@ -34,20 +33,16 @@ export default function CartDockPill() {
 
     if (count > 0) {
       if (!rendered) setRendered(true);
-      Animated.spring(anim, {
-        toValue: 1, tension: 200, friction: 18, useNativeDriver: true,
-      }).start();
-      // bump when the count changes while already visible
+      Animated.spring(anim, { toValue: 1, tension: 200, friction: 18, useNativeDriver: true }).start();
       if (prev > 0 && prev !== count) {
         Animated.sequence([
-          Animated.timing(scale, { toValue: 1.04, duration: 60, useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 1.05, duration: 60, useNativeDriver: true }),
           Animated.spring(scale, { toValue: 1, tension: 300, friction: 10, useNativeDriver: true }),
         ]).start();
       }
     } else if (rendered) {
-      Animated.parallel([
-        Animated.timing(anim, { toValue: 0, duration: 200, useNativeDriver: true }),
-      ]).start(({ finished }) => { if (finished) setRendered(false); });
+      Animated.timing(anim, { toValue: 0, duration: 200, useNativeDriver: true })
+        .start(({ finished }) => { if (finished) setRendered(false); });
     }
   }, [count, rendered, anim, scale]);
 
@@ -62,11 +57,7 @@ export default function CartDockPill() {
       pointerEvents="box-none"
       style={[
         styles.wrap,
-        {
-          bottom:    insets.bottom + TAB_BAR_BASE + GAP_ABOVE_BAR,
-          opacity:   anim,
-          transform: [{ translateY }, { scale }],
-        },
+        { bottom: insets.bottom + TAB_BAR_BASE + GAP_ABOVE_BAR, opacity: anim, transform: [{ translateY }, { scale }] },
       ]}
     >
       <TouchableOpacity
@@ -76,33 +67,28 @@ export default function CartDockPill() {
         accessibilityRole="button"
         accessibilityLabel={t('cart.viewCart')}
       >
-        {/* Left — last-added product thumbnail with count badge */}
+        {/* Left — last-added product thumbnail */}
         <View style={styles.thumb}>
           {lastAddedItem?.imageUrl ? (
             <Image source={{ uri: lastAddedItem.imageUrl }} style={styles.thumbImg} resizeMode="cover" />
           ) : (
-            <View style={[styles.thumbImg, { backgroundColor: lastAddedItem?.imageColor ?? '#2A2A3E' }]} />
-          )}
-          {count > 1 && (
-            <View style={styles.countDot}>
-              <Text weight="bold" color={Colors.white} style={styles.countDotText}>{count}</Text>
-            </View>
+            <View style={[styles.thumbImg, { backgroundColor: lastAddedItem?.imageColor ?? 'rgba(255,255,255,0.25)' }]} />
           )}
         </View>
 
         {/* Center — view cart + summary */}
         <View style={styles.center}>
-          <Text weight="semibold" color={Colors.white} style={styles.title}>
+          <Text weight="bold" color={Colors.white} style={styles.title}>
             {t('cart.viewCart')}
           </Text>
-          <Text weight="regular" style={styles.summary}>
+          <Text weight="medium" style={styles.summary}>
             {count} {itemsWord}  ·  ₹{rupees}
           </Text>
         </View>
 
-        {/* Right — arrow */}
-        <View style={styles.arrow}>
-          <Ionicons name="arrow-forward" size={20} color={Colors.white} />
+        {/* Right — circular chevron */}
+        <View style={styles.chevron}>
+          <Ionicons name="chevron-forward" size={20} color={Colors.primary} />
         </View>
       </TouchableOpacity>
     </Animated.View>
@@ -111,47 +97,38 @@ export default function CartDockPill() {
 
 const styles = StyleSheet.create({
   wrap: {
-    position: 'absolute',
-    left:     Spacing.lg,
-    right:    Spacing.lg,
+    position:   'absolute',
+    left:       Spacing.lg,
+    right:      Spacing.lg,
+    alignItems: 'center',     // centre the content-hugging pill
   },
   pill: {
     flexDirection:   'row',
     alignItems:      'center',
-    height:          56,
-    borderRadius:    28,
-    backgroundColor: '#1A1A2E',   // deep navy — premium dark contrast (spec)
-    paddingHorizontal: 8,
-    // heavy float shadow
-    shadowColor:   '#000',
-    shadowOpacity: 0.18,
-    shadowRadius:  12,
-    shadowOffset:  { width: 0, height: 4 },
+    alignSelf:       'center',
+    minWidth:        240,
+    height:          58,
+    borderRadius:    29,
+    backgroundColor: Colors.primary,   // brand orange — matches header/banner
+    paddingLeft:     8,
+    paddingRight:    8,
+    shadowColor:   Colors.primary,
+    shadowOpacity: 0.40,
+    shadowRadius:  14,
+    shadowOffset:  { width: 0, height: 6 },
     elevation:     12,
   },
-  thumb: {
-    width: 40, height: 40,
-  },
+  thumb: { width: 42, height: 42 },
   thumbImg: {
-    width: 40, height: 40, borderRadius: 10,
-    backgroundColor: '#2A2A3E',
+    width: 42, height: 42, borderRadius: 12,
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.5)',
   },
-  countDot: {
-    position: 'absolute', top: -4, right: -4,
-    minWidth: 16, height: 16, borderRadius: 8,
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 3,
+  center: { flex: 1, marginLeft: Spacing.md, marginRight: Spacing.md },
+  title:   { fontSize: 16, lineHeight: 20 },
+  summary: { fontSize: 12, lineHeight: 16, color: 'rgba(255,255,255,0.9)', marginTop: 1 },
+  chevron: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: Colors.white,
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1.5, borderColor: '#1A1A2E',
-  },
-  countDotText: { fontSize: 9, lineHeight: 11 },
-  center: {
-    flex: 1,
-    marginLeft: Spacing.md,
-  },
-  title:   { fontSize: 15, lineHeight: 19 },
-  summary: { fontSize: 12, lineHeight: 16, color: 'rgba(255,255,255,0.65)', marginTop: 1 },
-  arrow: {
-    width: 40, alignItems: 'center', justifyContent: 'center', paddingRight: 8,
   },
 });

@@ -56,6 +56,8 @@ function RegularTab({
   };
 
   const tint = focused ? def.activeIconColor : INACTIVE;
+  // Active icon lifts gently into the blob for a premium, tactile feel.
+  const lift = pill.interpolate({ inputRange: [0, 1], outputRange: [1, -3] });
 
   return (
     <TouchableOpacity
@@ -76,18 +78,20 @@ function RegularTab({
               {
                 backgroundColor: def.pillColor,
                 opacity: pill,
-                transform: [{ scaleX: pill.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }],
+                transform: [{ scaleX: pill.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1] }) }],
               },
             ]}
           />
-          <MaterialCommunityIcons
-            name={focused ? def.iconActive : def.iconInactive}
-            size={24}
-            color={tint}
-          />
+          <Animated.View style={{ transform: [{ translateY: lift }] }}>
+            <MaterialCommunityIcons
+              name={focused ? def.iconActive : def.iconInactive}
+              size={24}
+              color={tint}
+            />
+          </Animated.View>
         </View>
       </Animated.View>
-      <Text weight="medium" color={tint} style={styles.label}>
+      <Text weight={focused ? 'bold' : 'medium'} color={tint} style={styles.label}>
         {t(def.labelKey)}
       </Text>
     </TouchableOpacity>
@@ -194,16 +198,16 @@ const styles = StyleSheet.create({
     gap:            2,
   },
   iconBox: {
-    width:          48,
-    height:         28,
+    width:          52,
+    height:         32,
     alignItems:     'center',
     justifyContent: 'center',
   },
   pill: {
     position:     'absolute',
-    width:        48,
-    height:       28,
-    borderRadius: 14,
+    width:        52,
+    height:       32,
+    borderRadius: 16,
   },
   label: {
     fontSize:   10,
