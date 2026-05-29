@@ -19,6 +19,7 @@ import Header from './Header';
 import SearchBar from './SearchBar';
 import CategoryTabs from './CategoryTabs';
 import FeaturedBanner from './FeaturedBanner';
+import BestsellersSection from './BestsellersSection';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 
@@ -260,6 +261,9 @@ export default function HomeScreen({ navigation }: Props) {
           entranceOpacity={bannerOpacity}
           entranceTranslate={bannerTranslate}
         />
+
+        {/* ── 5. Bestsellers — 3-column colored category cards ──────────── */}
+        <BestsellersSection />
 
         {/* ── 4. Section header ──────────────────────────────────────────── */}
         <View style={styles.sectionHeader}>

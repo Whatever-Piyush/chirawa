@@ -55,6 +55,14 @@ export const translations = {
     // ── HomeScreen redesign — Chunk 4 (Featured Banner: delivery promise) ─
     bannerTitle:       { en: '🛵 Delivered in 30 minutes',           hi: '🛵 30 मिनट में घर तक' },
     bannerSub:         { en: 'Fresh, straight from the shop',        hi: 'ताज़ा सामान, सीधे दुकान से' },
+    // ── HomeScreen redesign — Chunk 5 (Bestsellers) ──────────────────
+    bestsellers:       { en: 'Bestsellers',                          hi: 'बेस्टसेलर्स' },
+    bsMore:            { en: 'more',                                 hi: 'और' },
+    bsMunchies:        { en: 'Munchies & Drinks',                    hi: 'स्नैक्स और ड्रिंक्स' },
+    bsIceCream:        { en: 'Ice Creams & Chocolates',              hi: 'आइसक्रीम और चॉकलेट' },
+    bsDairy:           { en: 'Dairy & Breakfast',                    hi: 'डेयरी और नाश्ता' },
+    bsGrocery:         { en: 'Grocery Staples',                      hi: 'किराना सामान' },
+    bsInstant:         { en: 'Instant Foods & Sauces',               hi: 'इंस्टेंट फूड और सॉस' },
   },
   shop: {
     openNow:    { en: 'Open Now',                                                                hi: 'अभी खुला है' },
