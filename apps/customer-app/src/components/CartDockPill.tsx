@@ -1,41 +1,57 @@
-import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, Image, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useT } from '@chirawa/i18n';
 import { Text } from './ui';
-import { Colors, Radius, Shadow, Spacing } from '../theme';
+import { Colors, Spacing } from '../theme';
 import { useCart } from '../context/CartContext';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
-const TAB_BAR_BASE = 60;   // matches CustomTabBar height (excl. safe-area)
-const GAP_ABOVE_BAR = 10;
+const TAB_BAR_BASE = 64;   // matches CustomTabBar height (excl. safe-area)
+const GAP_ABOVE_BAR = 8;
 
-// Floating "View cart" pill — hovers above the bottom tab bar on the main
-// tab surfaces. Appears (slide + fade up) when the cart has items and
-// unmounts when empty. Tapping opens the Cart screen.
+// Floating cart capsule (v2 §Feature 4A) — deep navy pill that hovers above
+// the bottom nav whenever the cart has items. Slides up on first add, slides
+// down when emptied, and "bumps" on count change. Shows the last-added
+// product thumbnail. Reads the server-backed CartContext.
 export default function CartDockPill() {
   const insets = useSafeAreaInsets();
   const t = useT();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { count, subtotalPaise } = useCart();
+  const { count, subtotalPaise, lastAddedItem } = useCart();
 
-  const anim = useRef(new Animated.Value(0)).current; // 0 hidden → 1 shown
-  const visible = count > 0;
+  const anim  = useRef(new Animated.Value(count > 0 ? 1 : 0)).current; // 0 hidden → 1 shown
+  const scale = useRef(new Animated.Value(1)).current;                 // count-change bump
+  const prevCount = useRef(count);
+  const [rendered, setRendered] = useState(count > 0);
 
   useEffect(() => {
-    Animated.spring(anim, {
-      toValue:         visible ? 1 : 0,
-      friction:        7,
-      tension:         120,
-      useNativeDriver: true,
-    }).start();
-  }, [visible, anim]);
+    const prev = prevCount.current;
+    prevCount.current = count;
 
-  // Fully unmount when hidden so it never intercepts touches near the tab bar.
-  if (!visible) return null;
+    if (count > 0) {
+      if (!rendered) setRendered(true);
+      Animated.spring(anim, {
+        toValue: 1, tension: 200, friction: 18, useNativeDriver: true,
+      }).start();
+      // bump when the count changes while already visible
+      if (prev > 0 && prev !== count) {
+        Animated.sequence([
+          Animated.timing(scale, { toValue: 1.04, duration: 60, useNativeDriver: true }),
+          Animated.spring(scale, { toValue: 1, tension: 300, friction: 10, useNativeDriver: true }),
+        ]).start();
+      }
+    } else if (rendered) {
+      Animated.parallel([
+        Animated.timing(anim, { toValue: 0, duration: 200, useNativeDriver: true }),
+      ]).start(({ finished }) => { if (finished) setRendered(false); });
+    }
+  }, [count, rendered, anim, scale]);
+
+  if (!rendered) return null;
 
   const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [90, 0] });
   const rupees     = Math.round(subtotalPaise / 100);
@@ -46,7 +62,11 @@ export default function CartDockPill() {
       pointerEvents="box-none"
       style={[
         styles.wrap,
-        { bottom: insets.bottom + TAB_BAR_BASE + GAP_ABOVE_BAR, opacity: anim, transform: [{ translateY }] },
+        {
+          bottom:    insets.bottom + TAB_BAR_BASE + GAP_ABOVE_BAR,
+          opacity:   anim,
+          transform: [{ translateY }, { scale }],
+        },
       ]}
     >
       <TouchableOpacity
@@ -56,24 +76,33 @@ export default function CartDockPill() {
         accessibilityRole="button"
         accessibilityLabel={t('cart.viewCart')}
       >
-        <View style={styles.iconWrap}>
-          <Ionicons name="cart" size={22} color={Colors.white} />
+        {/* Left — last-added product thumbnail with count badge */}
+        <View style={styles.thumb}>
+          {lastAddedItem?.imageUrl ? (
+            <Image source={{ uri: lastAddedItem.imageUrl }} style={styles.thumbImg} resizeMode="cover" />
+          ) : (
+            <View style={[styles.thumbImg, { backgroundColor: lastAddedItem?.imageColor ?? '#2A2A3E' }]} />
+          )}
+          {count > 1 && (
+            <View style={styles.countDot}>
+              <Text weight="bold" color={Colors.white} style={styles.countDotText}>{count}</Text>
+            </View>
+          )}
         </View>
 
-        <View style={styles.middle}>
-          <Text color={Colors.white} style={styles.countLine}>
-            {count} {itemsWord}
-          </Text>
-          <Text weight="bold" color={Colors.white} style={styles.totalLine}>
-            ₹{rupees}
-          </Text>
-        </View>
-
-        <View style={styles.cta}>
-          <Text weight="bold" color={Colors.white} style={styles.ctaText}>
+        {/* Center — view cart + summary */}
+        <View style={styles.center}>
+          <Text weight="semibold" color={Colors.white} style={styles.title}>
             {t('cart.viewCart')}
           </Text>
-          <Ionicons name="chevron-forward" size={18} color={Colors.white} />
+          <Text weight="regular" style={styles.summary}>
+            {count} {itemsWord}  ·  ₹{rupees}
+          </Text>
+        </View>
+
+        {/* Right — arrow */}
+        <View style={styles.arrow}>
+          <Ionicons name="arrow-forward" size={20} color={Colors.white} />
         </View>
       </TouchableOpacity>
     </Animated.View>
@@ -87,42 +116,42 @@ const styles = StyleSheet.create({
     right:    Spacing.lg,
   },
   pill: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    backgroundColor:   Colors.primary,
-    borderRadius:      Radius.lg,
-    height:            58,
-    paddingHorizontal: Spacing.lg,
-    ...Shadow.primary,
-  },
-  iconWrap: {
-    width:           34,
-    height:          34,
-    borderRadius:    17,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent:  'center',
+    flexDirection:   'row',
     alignItems:      'center',
+    height:          56,
+    borderRadius:    28,
+    backgroundColor: '#1A1A2E',   // deep navy — premium dark contrast (spec)
+    paddingHorizontal: 8,
+    // heavy float shadow
+    shadowColor:   '#000',
+    shadowOpacity: 0.18,
+    shadowRadius:  12,
+    shadowOffset:  { width: 0, height: 4 },
+    elevation:     12,
   },
-  middle: {
-    flex:       1,
+  thumb: {
+    width: 40, height: 40,
+  },
+  thumbImg: {
+    width: 40, height: 40, borderRadius: 10,
+    backgroundColor: '#2A2A3E',
+  },
+  countDot: {
+    position: 'absolute', top: -4, right: -4,
+    minWidth: 16, height: 16, borderRadius: 8,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 3,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1.5, borderColor: '#1A1A2E',
+  },
+  countDotText: { fontSize: 9, lineHeight: 11 },
+  center: {
+    flex: 1,
     marginLeft: Spacing.md,
   },
-  countLine: {
-    fontSize:   12,
-    lineHeight: 15,
-    opacity:    0.9,
-  },
-  totalLine: {
-    fontSize:   16,
-    lineHeight: 20,
-  },
-  cta: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           2,
-  },
-  ctaText: {
-    fontSize:   15,
-    lineHeight: 19,
+  title:   { fontSize: 15, lineHeight: 19 },
+  summary: { fontSize: 12, lineHeight: 16, color: 'rgba(255,255,255,0.65)', marginTop: 1 },
+  arrow: {
+    width: 40, alignItems: 'center', justifyContent: 'center', paddingRight: 8,
   },
 });
