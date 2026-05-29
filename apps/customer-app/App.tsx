@@ -17,6 +17,7 @@ import AppNavigator from './src/navigation/AppNavigator';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import NotificationsBootstrap from './src/components/NotificationsBootstrap';
 import { ToastProvider } from './src/components/ui';
+import { FlyToCartProvider } from './src/components/cart/FlyToCart';
 import { Colors } from './src/theme';
 
 export default function App() {
@@ -44,9 +45,11 @@ export default function App() {
           <ToastProvider>
             <LanguageProvider>
               <AuthProvider>
-                <StatusBar style="light" translucent backgroundColor="transparent" />
-                <NotificationsBootstrap />
-                <AppNavigator />
+                <FlyToCartProvider>
+                  <StatusBar style="light" translucent backgroundColor="transparent" />
+                  <NotificationsBootstrap />
+                  <AppNavigator />
+                </FlyToCartProvider>
               </AuthProvider>
             </LanguageProvider>
           </ToastProvider>

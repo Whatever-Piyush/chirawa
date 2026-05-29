@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../ui';
 import { Colors, Radius, Shadow } from '../../theme';
 import { useCart } from '../../context/CartContext';
+import { useFlyToCart } from '../cart/FlyToCart';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -29,6 +30,8 @@ const STEPPER_W  = 104;
 
 export default function ProductCard({ product }: { product: ProductCardData }) {
   const { quantities, addItem, setQuantity } = useCart();
+  const fly = useFlyToCart();
+  const imageRef = useRef<View>(null);
   const qty = quantities[product.productId] ?? 0;
   const inCart = qty > 0;
 
@@ -48,7 +51,13 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
   const rupees   = Math.round(product.pricePaise / 100);
   const hasMrp   = product.mrpPaise != null && product.mrpPaise > product.pricePaise;
 
-  const onAdd = () => { void addItem(product); };
+  const onAdd = () => {
+    // Fly a copy of the product image to the cart capsule, then add.
+    imageRef.current?.measureInWindow((x, y, w, h) => {
+      fly.trigger({ x: x + w / 2, y: y + h / 2, color: product.imageColor ?? '#FFE0CC' });
+    });
+    void addItem(product);
+  };
   const onInc = () => { void setQuantity(product.productId, qty + 1); };
   const onDec = () => { void setQuantity(product.productId, qty - 1); };
 
@@ -60,7 +69,7 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
       </View>
 
       {/* image area */}
-      <View style={styles.imageArea}>
+      <View ref={imageRef} collapsable={false} style={styles.imageArea}>
         {product.imageUrl ? (
           <Image source={{ uri: product.imageUrl }} style={styles.image} resizeMode="contain" />
         ) : (
