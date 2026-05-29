@@ -1,29 +1,30 @@
 import React, { useEffect, useRef } from 'react';
 import { View, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useT } from '@chirawa/i18n';
 import { Text } from '../components/ui';
 import { Colors } from '../theme';
 
-type MciName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
 interface TabDef {
   routeName:       string;
   labelKey:        string;
-  iconActive:      MciName;
-  iconInactive:    MciName;
+  iconActive:      IconName;
+  iconInactive:    IconName;
   pillColor:       string;
   activeIconColor: string;
 }
 
-// Premium pill-indicator nav. Internal route names are unchanged (so deep
-// links / Profile nav keep working); only presentation is redesigned.
+// Premium pill-indicator nav with clean Ionicons (iOS-style, crisp). Internal
+// route names are unchanged (so deep links / Profile nav keep working); only
+// presentation is redesigned.
 const TABS: ReadonlyArray<TabDef> = [
-  { routeName: 'Home',         labelKey: 'home.tabHome',       iconActive: 'home',          iconInactive: 'home-outline',       pillColor: '#FFF0E9', activeIconColor: Colors.primary },
-  { routeName: 'OrderHistory', labelKey: 'home.tabOrderAgain', iconActive: 'refresh-circle', iconInactive: 'refresh',           pillColor: '#E8F5E9', activeIconColor: '#2E7D32' },
-  { routeName: 'Categories',   labelKey: 'home.tabCategories', iconActive: 'view-grid',      iconInactive: 'view-grid-outline', pillColor: '#EDE7F6', activeIconColor: '#5E35B1' },
+  { routeName: 'Home',         labelKey: 'home.tabHome',       iconActive: 'home',         iconInactive: 'home-outline',        pillColor: '#FFF0E9', activeIconColor: Colors.primary },
+  { routeName: 'OrderHistory', labelKey: 'home.tabOrderAgain', iconActive: 'bag-handle',   iconInactive: 'bag-handle-outline',  pillColor: '#E8F5E9', activeIconColor: '#2E7D32' },
+  { routeName: 'Categories',   labelKey: 'home.tabCategories', iconActive: 'grid',         iconInactive: 'grid-outline',        pillColor: '#EDE7F6', activeIconColor: '#5E35B1' },
 ];
 
 const INACTIVE = '#9CA3AF';
@@ -83,9 +84,9 @@ function RegularTab({
             ]}
           />
           <Animated.View style={{ transform: [{ translateY: lift }] }}>
-            <MaterialCommunityIcons
+            <Ionicons
               name={focused ? def.iconActive : def.iconInactive}
-              size={24}
+              size={23}
               color={tint}
             />
           </Animated.View>
@@ -125,9 +126,9 @@ function SpecialTab({ focused, onPress }: { focused: boolean; onPress: () => voi
             focused && styles.specialActive,
           ]}
         >
-          <MaterialCommunityIcons
-            name={focused ? 'star-four-points' : 'star-four-points-outline'}
-            size={20}
+          <Ionicons
+            name={focused ? 'sparkles' : 'sparkles-outline'}
+            size={19}
             color={Colors.white}
           />
           <Text weight="bold" color={Colors.white} style={styles.specialLabel}>
