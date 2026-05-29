@@ -1,114 +1,175 @@
-import React from 'react';
-import { View, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useT } from '@chirawa/i18n';
 import { Text } from '../components/ui';
 import { Colors } from '../theme';
 
-type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+type MciName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
-// Route → presentation. The internal route name stays "OrderHistory" (so the
-// notification deep-links and Profile→orders navigation keep working) while
-// the visible label/icon are the redesigned "Order Again".
-const LABEL_KEY: Record<string, string> = {
-  Home:         'home.tabHome',
-  OrderHistory: 'home.tabOrderAgain',
-  Categories:   'home.tabCategories',
-  Special:      'home.tabSpecial',
-};
+interface TabDef {
+  routeName:       string;
+  labelKey:        string;
+  iconActive:      MciName;
+  iconInactive:    MciName;
+  pillColor:       string;
+  activeIconColor: string;
+}
 
-const ICON: Record<string, { on: IoniconName; off: IoniconName }> = {
-  Home:         { on: 'home',    off: 'home-outline'    },
-  OrderHistory: { on: 'refresh', off: 'refresh-outline' },
-  Categories:   { on: 'grid',    off: 'grid-outline'    },
-  Special:      { on: 'star',    off: 'star-outline'    },
-};
+// Premium pill-indicator nav. Internal route names are unchanged (so deep
+// links / Profile nav keep working); only presentation is redesigned.
+const TABS: ReadonlyArray<TabDef> = [
+  { routeName: 'Home',         labelKey: 'home.tabHome',       iconActive: 'home',          iconInactive: 'home-outline',       pillColor: '#FFF0E9', activeIconColor: Colors.primary },
+  { routeName: 'OrderHistory', labelKey: 'home.tabOrderAgain', iconActive: 'refresh-circle', iconInactive: 'refresh',           pillColor: '#E8F5E9', activeIconColor: '#2E7D32' },
+  { routeName: 'Categories',   labelKey: 'home.tabCategories', iconActive: 'view-grid',      iconInactive: 'view-grid-outline', pillColor: '#EDE7F6', activeIconColor: '#5E35B1' },
+];
 
-// Routes that exist in the navigator but are NOT drawn in the bar. Profile is
-// reached from the Home header avatar; keeping it as a (hidden) tab means all
-// existing navigate('MainTabs', { screen: 'Profile' }) calls keep working.
-const HIDDEN = new Set(['Profile']);
+const INACTIVE = '#9CA3AF';
+// NOTE: the navigator also has a "Profile" route — it's deliberately never
+// rendered here (reached from the Home header avatar). We render only the
+// explicit TABS list + the Special button, so Profile simply isn't drawn.
+
+// ── Regular tab (Home / Order Again / Categories) ────────────────────────────
+function RegularTab({
+  def, focused, onPress,
+}: { def: TabDef; focused: boolean; onPress: () => void }) {
+  const t = useT();
+  const pill  = useRef(new Animated.Value(focused ? 1 : 0)).current;  // pill reveal
+  const scale = useRef(new Animated.Value(1)).current;                // press bounce
+
+  useEffect(() => {
+    Animated.spring(pill, {
+      toValue: focused ? 1 : 0,
+      tension: 300, friction: 20,
+      useNativeDriver: true,
+    }).start();
+  }, [focused, pill]);
+
+  const handlePress = () => {
+    Animated.sequence([
+      Animated.timing(scale, { toValue: 0.85, duration: 80, useNativeDriver: true }),
+      Animated.timing(scale, { toValue: 1, duration: 120, useNativeDriver: true }),
+    ]).start();
+    onPress();
+  };
+
+  const tint = focused ? def.activeIconColor : INACTIVE;
+
+  return (
+    <TouchableOpacity
+      style={styles.tab}
+      onPress={handlePress}
+      activeOpacity={0.8}
+      accessibilityRole="button"
+      accessibilityState={focused ? { selected: true } : {}}
+      accessibilityLabel={t(def.labelKey)}
+    >
+      <Animated.View style={{ transform: [{ scale }] }}>
+        <View style={styles.iconBox}>
+          {/* Soft colored pill/blob behind the icon — reveals on activate. */}
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.pill,
+              {
+                backgroundColor: def.pillColor,
+                opacity: pill,
+                transform: [{ scaleX: pill.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }],
+              },
+            ]}
+          />
+          <MaterialCommunityIcons
+            name={focused ? def.iconActive : def.iconInactive}
+            size={24}
+            color={tint}
+          />
+        </View>
+      </Animated.View>
+      <Text weight="medium" color={tint} style={styles.label}>
+        {t(def.labelKey)}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+// ── Raised maroon "Special" button ───────────────────────────────────────────
+function SpecialTab({ focused, onPress }: { focused: boolean; onPress: () => void }) {
+  const t = useT();
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const handlePress = () => {
+    Animated.sequence([
+      Animated.timing(scale, { toValue: 0.85, duration: 80, useNativeDriver: true }),
+      Animated.timing(scale, { toValue: 1, duration: 120, useNativeDriver: true }),
+    ]).start();
+    onPress();
+  };
+
+  return (
+    <View style={styles.tab}>
+      <Animated.View style={{ transform: [{ scale }] }}>
+        <TouchableOpacity
+          onPress={handlePress}
+          activeOpacity={0.9}
+          accessibilityRole="button"
+          accessibilityState={focused ? { selected: true } : {}}
+          accessibilityLabel={t('home.tabSpecial')}
+          style={[
+            styles.special,
+            focused && styles.specialActive,
+          ]}
+        >
+          <MaterialCommunityIcons
+            name={focused ? 'star-four-points' : 'star-four-points-outline'}
+            size={20}
+            color={Colors.white}
+          />
+          <Text weight="bold" color={Colors.white} style={styles.specialLabel}>
+            {t('home.tabSpecial')}
+          </Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
+  );
+}
 
 export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const t = useT();
+
+  const navigateTo = (routeName: string, key: string, isFocused: boolean) => () => {
+    const event = navigation.emit({ type: 'tabPress', target: key, canPreventDefault: true });
+    if (!isFocused && !event.defaultPrevented) navigation.navigate(routeName);
+  };
+
+  // Index lookup so focus state survives the route-name → presentation mapping.
+  const indexOf = (name: string) => state.routes.findIndex((r) => r.name === name);
+  const specialRoute = state.routes.find((r) => r.name === 'Special');
 
   return (
-    <View
-      style={[
-        styles.bar,
-        { height: 60 + insets.bottom, paddingBottom: insets.bottom },
-      ]}
-    >
-      {state.routes.map((route, index) => {
-        if (HIDDEN.has(route.name)) return null;
-
-        const isFocused = state.index === index;
-
-        const onPress = () => {
-          const event = navigation.emit({
-            type: 'tabPress',
-            target: route.key,
-            canPreventDefault: true,
-          });
-          if (!isFocused && !event.defaultPrevented) {
-            navigation.navigate(route.name);
-          }
-        };
-
-        const label = t(LABEL_KEY[route.name] ?? 'home.tabHome');
-        const icons = ICON[route.name] ?? ICON.Home;
-
-        // ── Raised red "Special" pill ──────────────────────────────────────
-        if (route.name === 'Special') {
-          return (
-            <View key={route.key} style={styles.slot}>
-              <TouchableOpacity
-                onPress={onPress}
-                activeOpacity={0.85}
-                style={styles.specialPill}
-                accessibilityRole="button"
-                accessibilityState={isFocused ? { selected: true } : {}}
-                accessibilityLabel={label}
-              >
-                <Ionicons
-                  name={isFocused ? icons.on : icons.off}
-                  size={18}
-                  color={Colors.white}
-                />
-                <Text weight="bold" color={Colors.white} style={styles.specialLabel}>
-                  {label}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          );
-        }
-
-        // ── Normal tab ──────────────────────────────────────────────────────
-        const tint = isFocused ? Colors.primary : Colors.textSecondary;
+    <View style={[styles.bar, { height: 64 + insets.bottom, paddingBottom: insets.bottom }]}>
+      {TABS.map((def) => {
+        const idx = indexOf(def.routeName);
+        if (idx < 0) return null;
+        const route = state.routes[idx];
+        const focused = state.index === idx;
         return (
-          <TouchableOpacity
+          <RegularTab
             key={route.key}
-            onPress={onPress}
-            activeOpacity={0.7}
-            style={styles.slot}
-            accessibilityRole="button"
-            accessibilityState={isFocused ? { selected: true } : {}}
-            accessibilityLabel={label}
-          >
-            <Ionicons
-              name={isFocused ? icons.on : icons.off}
-              size={isFocused ? 26 : 24}
-              color={tint}
-            />
-            <Text weight="medium" color={tint} style={styles.label}>
-              {label}
-            </Text>
-          </TouchableOpacity>
+            def={def}
+            focused={focused}
+            onPress={navigateTo(def.routeName, route.key, focused)}
+          />
         );
       })}
+
+      {specialRoute && (
+        <SpecialTab
+          focused={state.index === indexOf('Special')}
+          onPress={navigateTo('Special', specialRoute.key, state.index === indexOf('Special'))}
+        />
+      )}
     </View>
   );
 }
@@ -119,43 +180,57 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.footerBg,
     borderTopWidth:  0.5,
     borderTopColor:  Colors.footerBorder,
-    paddingTop:      6,
-    // top shadow
+    paddingTop:      8,
     shadowColor:   '#000',
-    shadowOpacity: 0.06,
-    shadowRadius:  8,
+    shadowOpacity: 0.08,
+    shadowRadius:  12,
     shadowOffset:  { width: 0, height: -2 },
-    elevation:     8,
+    elevation:     12,
   },
-  slot: {
+  tab: {
     flex:           1,
     alignItems:     'center',
     justifyContent: 'center',
     gap:            2,
   },
+  iconBox: {
+    width:          48,
+    height:         28,
+    alignItems:     'center',
+    justifyContent: 'center',
+  },
+  pill: {
+    position:     'absolute',
+    width:        48,
+    height:       28,
+    borderRadius: 14,
+  },
   label: {
     fontSize:   10,
     lineHeight: 13,
   },
-  specialPill: {
-    flexDirection:   'row',
+  special: {
+    width:           86,
+    height:          46,
+    borderRadius:    14,
+    backgroundColor: Colors.specialAccent,
     alignItems:      'center',
     justifyContent:  'center',
-    gap:             5,
-    backgroundColor: Colors.specialAccent,
-    borderRadius:    14,
-    width:           90,
-    height:          44,
-    marginTop:       -8,   // lift above the bar baseline
-    // red glow
+    marginTop:       -10,
+    gap:             1,
     shadowColor:   '#C4383A',
-    shadowOpacity: 0.35,
-    shadowRadius:  6,
-    shadowOffset:  { width: 0, height: 3 },
-    elevation:     6,
+    shadowOpacity: 0.4,
+    shadowRadius:  8,
+    shadowOffset:  { width: 0, height: -2 },
+    elevation:     8,
+  },
+  specialActive: {
+    backgroundColor: '#D4424A',
+    borderWidth:     2,
+    borderColor:     'rgba(255,255,255,0.4)',
   },
   specialLabel: {
-    fontSize:   11,
-    lineHeight: 14,
+    fontSize:   10,
+    lineHeight: 12,
   },
 });
