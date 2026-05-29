@@ -1,16 +1,15 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { NavigationContainer, type NavigatorScreenParams } from '@react-navigation/native';
 import { navigationRef } from './ref';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Animated, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { View, StyleSheet } from 'react-native';
 import { useAuth } from '../context/AuthContext';
-import { useLanguage, useT } from '@chirawa/i18n';
-import { Colors, FontSize, Spacing } from '../theme';
+import { useLanguage } from '@chirawa/i18n';
+import { Colors, Spacing } from '../theme';
 import { Text, DotsLoader } from '../components/ui';
 import LanguagePickerScreen from '../screens/LanguagePickerScreen';
-import AnimatedTabButton from './AnimatedTabButton';
+import CustomTabBar from './CustomTabBar';
 
 // Auth Screens
 import OtpLoginScreen   from '../screens/auth/OtpLoginScreen';
@@ -21,8 +20,10 @@ import HomeScreen       from '../screens/home/HomeScreen';
 import ShopDetailScreen from '../screens/shop/ShopDetailScreen';
 import CartScreen       from '../screens/cart/CartScreen';
 import CheckoutScreen   from '../screens/orders/CheckoutScreen';
-import OrderTrackingScreen from '../screens/orders/OrderTrackingScreen';
-import OrderHistoryScreen  from '../screens/orders/OrderHistoryScreen';
+import OrderTrackingScreen  from '../screens/orders/OrderTrackingScreen';
+import OrderHistoryScreen   from '../screens/orders/OrderHistoryScreen';
+import CategoriesScreen     from '../screens/categories/CategoriesScreen';
+import ChirawaSpecialScreen from '../screens/categories/ChirawaSpecialScreen';
 import ProfileScreen    from '../screens/profile/ProfileScreen';
 import AddressListScreen from '../screens/profile/AddressListScreen';
 import SearchScreen     from '../screens/search/SearchScreen';
@@ -41,98 +42,33 @@ export type RootStackParamList = {
   AddressList: undefined;
 };
 
+// Visible tabs: Home · Order Again · Categories · Special. Profile is a real
+// tab too (so navigate('MainTabs', { screen: 'Profile' }) from the header keeps
+// working) but CustomTabBar hides it from the bar — it's reached via the Home
+// header avatar. The "OrderHistory" route name is kept (vs renaming to
+// "OrderAgain") so notification deep-links and Profile→orders nav stay intact;
+// only its label/icon read "Order Again".
 export type TabParamList = {
   Home:         undefined;
   OrderHistory: undefined;
+  Categories:   undefined;
+  Special:      undefined;
   Profile:      undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab   = createBottomTabNavigator<TabParamList>();
 
-const TAB_ICONS: Record<keyof TabParamList, string> = {
-  Home:         '🏠',
-  OrderHistory: '📦',
-  Profile:      '👤',
-};
-
-function TabIcon({ name, focused }: { name: keyof TabParamList; focused: boolean }) {
-  const scale = useRef(new Animated.Value(focused ? 1.1 : 1)).current;
-
-  useEffect(() => {
-    Animated.spring(scale, {
-      toValue:         focused ? 1.1 : 1,
-      friction:        6,
-      tension:         180,
-      useNativeDriver: true,
-    }).start();
-  }, [focused, scale]);
-
-  return (
-    <Animated.View style={{ transform: [{ scale }] }}>
-      <Text
-        variant="body"
-        style={{ fontSize: 22, lineHeight: 26, opacity: focused ? 1 : 0.55 }}
-      >
-        {TAB_ICONS[name]}
-      </Text>
-    </Animated.View>
-  );
-}
-
-function TabLabel({ label, focused }: { label: string; focused: boolean }) {
-  return (
-    <Text
-      variant="caption"
-      color={focused ? Colors.primary : Colors.textTertiary}
-      weight={focused ? 'bold' : 'regular'}
-      style={{ fontSize: FontSize.xs, marginTop: 2 }}
-    >
-      {label}
-    </Text>
-  );
-}
-
 function MainTabs() {
-  const insets = useSafeAreaInsets();
-  const t = useT();
-
-  const tabLabels: Record<keyof TabParamList, string> = {
-    Home:         t('home.tabHome'),
-    OrderHistory: t('home.tabOrders'),
-    Profile:      t('home.tabProfile'),
-  };
-
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarShowLabel: true,
-        tabBarButton: (props) => <AnimatedTabButton {...props} />,
-        tabBarIcon:  ({ focused }) => (
-          <TabIcon name={route.name as keyof TabParamList} focused={focused} />
-        ),
-        tabBarLabel: ({ focused }) => (
-          <TabLabel label={tabLabels[route.name as keyof TabParamList]} focused={focused} />
-        ),
-        tabBarActiveTintColor:   Colors.primary,
-        tabBarInactiveTintColor: Colors.textTertiary,
-        tabBarStyle: {
-          backgroundColor: Colors.white,
-          borderTopWidth:  0,
-          height:          56 + insets.bottom,
-          paddingBottom:   insets.bottom,
-          paddingTop:      Spacing.xs,
-          shadowColor:     '#000',
-          shadowOpacity:   0.08,
-          shadowOffset:    { width: 0, height: -3 },
-          shadowRadius:    10,
-          elevation:       16,
-        },
-      })}
+      screenOptions={{ headerShown: false }}
+      tabBar={(props) => <CustomTabBar {...props} />}
     >
       <Tab.Screen name="Home"         component={HomeScreen} />
       <Tab.Screen name="OrderHistory" component={OrderHistoryScreen} />
+      <Tab.Screen name="Categories"   component={CategoriesScreen} />
+      <Tab.Screen name="Special"      component={ChirawaSpecialScreen} />
       <Tab.Screen name="Profile"      component={ProfileScreen} />
     </Tab.Navigator>
   );

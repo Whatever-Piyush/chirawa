@@ -34,6 +34,10 @@ export const translations = {
     tabHome:           { en: 'Home',                                 hi: 'होम' },
     tabOrders:         { en: 'Orders',                               hi: 'ऑर्डर' },
     tabProfile:        { en: 'Profile',                              hi: 'प्रोफाइल' },
+    // ── HomeScreen redesign — Chunk 8 (bottom nav: 4 tabs) ───────────
+    tabOrderAgain:     { en: 'Order Again',                          hi: 'फिर ऑर्डर' },
+    tabCategories:     { en: 'Categories',                           hi: 'श्रेणियाँ' },
+    tabSpecial:        { en: 'Special',                              hi: 'खास' },
     quickCommerce:     { en: "Chirawa's first Quick Commerce",       hi: 'Chirawa का पहला Quick Commerce' },
     quickCommerceSub:  { en: 'Right to your door in 30 min',         hi: '30 मिनट में घर तक' },
     catVegetables:     { en: 'Vegetables',                           hi: 'सब्जी' },
