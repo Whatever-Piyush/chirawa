@@ -184,7 +184,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       where,
       orderBy: { createdAt: 'desc' },
       take:    50,
-      include: { items: { select: { productName: true, quantity: true, unitPrice: true } } },
+      include: { items: { select: { productId: true, productName: true, quantity: true, unitPrice: true } } },
     });
   }
 

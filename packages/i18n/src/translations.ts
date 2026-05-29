@@ -205,6 +205,12 @@ export const translations = {
     statusCancelled:{ en: 'Cancelled',                          hi: 'रद्द' },
     statusActive:   { en: 'Active',                             hi: 'चालू' },
     shop:           { en: 'Shop',                               hi: 'दुकान' },
+    // ── Order Again — v2 §Feature 1 ──────────────────────────────────
+    orderAgain:     { en: 'Order Again',                        hi: 'फिर से ऑर्डर' },
+    pastOrders:     { en: 'Your past orders',                   hi: 'आपके पिछले ऑर्डर' },
+    reorderEmptyTitle: { en: 'Reordering will be easy',         hi: 'फिर से ऑर्डर करना आसान होगा' },
+    reorderEmptySub:   { en: 'Items you order will show up here\nso you can buy them again easily', hi: 'आपके ऑर्डर किए सामान यहाँ दिखेंगे\nताकि आप उन्हें आसानी से दोबारा खरीद सकें' },
+    browseProducts:    { en: 'Browse products  →',              hi: 'प्रोडक्ट देखें  →' },
   },
   rider: {
     goOnline:      { en: 'GO ONLINE',                          hi: 'ऑनलाइन हो जाएं' },

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,12 +10,17 @@ import {
   ActivityIndicator,
   Animated,
 } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import { useToast } from '../../components/ui';
+import ProductCard, { PRODUCT_CARD_WIDTH, type ProductCardData } from '../../components/product/ProductCard';
+
+// Rotating pastel placeholders for re-order product thumbnails (no images yet).
+const REORDER_TILE_COLORS = ['#FFF0E9', '#E8F5E9', '#FFF0F5', '#EDE7F6', '#FFF8E1', '#E6F7F4'];
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 
@@ -30,7 +35,7 @@ interface OrderListItem {
   status:    string; // OrderStatus enum value as string
   total:     number; // paise
   createdAt: string;
-  items: { productName: string; quantity: number; unitPrice: number }[];
+  items: { productId: string; productName: string; quantity: number; unitPrice: number }[];
   rating?:        number | null;
   ratingComment?: string | null;
   ratedAt?:       string | null;
@@ -103,16 +108,18 @@ function SkeletonCard() {
   );
 }
 
-// ─── Empty state ──────────────────────────────────────────────────────────────
+// ─── Empty state (v2 §Feature 1) ───────────────────────────────────────────────
 
-function EmptyState({ onShopNow, t }: { onShopNow: () => void; t: (k: string) => string }) {
+function EmptyState({ onBrowse, t }: { onBrowse: () => void; t: (k: string) => string }) {
   return (
     <View style={styles.emptyContainer}>
-      <Text style={styles.emptyEmoji}>🛍️</Text>
-      <Text style={styles.emptyTitle}>{t('history.empty')}</Text>
-      <Text style={styles.emptyHint}>{t('history.emptyHint')}</Text>
-      <TouchableOpacity style={styles.shopNowBtn} onPress={onShopNow} activeOpacity={0.8}>
-        <Text style={styles.shopNowText}>{t('cart.shopNow')}</Text>
+      <View style={styles.emptyIllustration}>
+        <MaterialCommunityIcons name="shopping-outline" size={80} color={Colors.primary} />
+      </View>
+      <Text style={styles.emptyTitle}>{t('history.reorderEmptyTitle')}</Text>
+      <Text style={styles.emptySub}>{t('history.reorderEmptySub')}</Text>
+      <TouchableOpacity style={styles.browseBtn} onPress={onBrowse} activeOpacity={0.85}>
+        <Text style={styles.browseText}>{t('history.browseProducts')}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -159,6 +166,26 @@ export default function OrderHistoryScreen({ navigation }: Props) {
   }, []);
 
   useEffect(() => { void loadData(); }, [loadData]);
+
+  // ─── "Order Again" products — dedup items across orders (newest first) ───────
+  const reorderProducts = useMemo<ProductCardData[]>(() => {
+    const seen = new Set<string>();
+    const out: ProductCardData[] = [];
+    for (const order of orders) {
+      for (const it of order.items) {
+        if (!it.productId || seen.has(it.productId)) continue;
+        seen.add(it.productId);
+        out.push({
+          productId:  it.productId,
+          name:       it.productName,
+          pricePaise: it.unitPrice,
+          imageColor: REORDER_TILE_COLORS[out.length % REORDER_TILE_COLORS.length],
+        });
+        if (out.length >= 10) return out;   // keep the strip focused
+      }
+    }
+    return out;
+  }, [orders]);
 
   const handleRetry = useCallback(() => {
     setError(false);
@@ -324,7 +351,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
   if (orders.length === 0) {
     return (
       <View style={styles.container}>
-        <EmptyState onShopNow={() => navigation.navigate('MainTabs')} t={t} />
+        <EmptyState onBrowse={() => navigation.navigate('MainTabs', { screen: 'Categories' })} t={t} />
       </View>
     );
   }
@@ -339,6 +366,9 @@ export default function OrderHistoryScreen({ navigation }: Props) {
       data={visibleOrders}
       keyExtractor={(item) => item.id}
       renderItem={renderOrder}
+      ListHeaderComponent={
+        <OrderAgainHeader products={reorderProducts} t={t} hasOrders={orders.length > 0} />
+      }
       contentContainerStyle={styles.listContent}
       style={styles.container}
       refreshControl={
@@ -358,6 +388,28 @@ export default function OrderHistoryScreen({ navigation }: Props) {
       ) : null}
       showsVerticalScrollIndicator={false}
     />
+  );
+}
+
+// ─── Order Again grid (header above the past-orders list) ──────────────────────
+
+function OrderAgainHeader({
+  products, t, hasOrders,
+}: { products: ProductCardData[]; t: (k: string) => string; hasOrders: boolean }) {
+  return (
+    <View>
+      {products.length > 0 && (
+        <>
+          <Text style={styles.sectionHeading}>{t('history.orderAgain')}</Text>
+          <View style={styles.grid}>
+            {products.map((p) => (
+              <ProductCard key={p.productId} product={p} />
+            ))}
+          </View>
+        </>
+      )}
+      {hasOrders && <Text style={styles.sectionHeading}>{t('history.pastOrders')}</Text>}
+    </View>
   );
 }
 
@@ -413,20 +465,34 @@ const styles = StyleSheet.create({
   // Skeleton
   skeletonLine: { height: 14, backgroundColor: Colors.border, borderRadius: Radius.sm },
 
-  // Empty state
+  // Order Again grid + section headings
+  sectionHeading: {
+    fontSize: 20, fontWeight: '700', color: Colors.textPrimary,
+    marginTop: Spacing.sm, marginBottom: Spacing.md,
+  },
+  grid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: Spacing.lg,
+  },
+
+  // Empty state (v2 §Feature 1)
   emptyContainer: {
     flex: 1, justifyContent: 'center', alignItems: 'center',
-    gap: Spacing.md, paddingHorizontal: Spacing.xxl,
+    gap: Spacing.sm, paddingHorizontal: Spacing.xxl,
   },
-  emptyEmoji: { fontSize: 80 },
-  emptyTitle: { fontSize: FontSize.xl, fontWeight: '700', color: Colors.text, textAlign: 'center' },
-  emptyHint:  { fontSize: FontSize.md, color: Colors.textLight, textAlign: 'center' },
-  shopNowBtn: {
-    marginTop: Spacing.md, backgroundColor: Colors.primary, borderRadius: Radius.full,
-    paddingHorizontal: Spacing.xxl, paddingVertical: Spacing.md,
+  emptyIllustration: {
+    width: 200, height: 200, borderRadius: 20,
+    backgroundColor: '#FFF0E9',
+    justifyContent: 'center', alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  emptyTitle: { fontSize: 20, fontWeight: '600', color: Colors.textPrimary, textAlign: 'center' },
+  emptySub:   { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', lineHeight: 22 },
+  browseBtn: {
+    marginTop: Spacing.lg, backgroundColor: Colors.primary, borderRadius: 24,
+    paddingHorizontal: 28, paddingVertical: 12,
     minHeight: MIN_TAP, justifyContent: 'center', alignItems: 'center',
   },
-  shopNowText: { color: Colors.white, fontSize: FontSize.md, fontWeight: '700' },
+  browseText: { color: Colors.white, fontSize: 14, fontWeight: '600' },
 
   // Error state
   errorContainer: {
