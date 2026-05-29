@@ -20,22 +20,28 @@ interface BestsellerCategory {
   overflow:  number;
 }
 
+// Six categories → two clean rows of three (no orphan row). Fruits &
+// Vegetables rounds out the grid in the 6th slot.
 const CATEGORIES: ReadonlyArray<BestsellerCategory> = [
-  { id: 'munchies', labelKey: 'home.bsMunchies', bg: '#FFF8E1', tone: '#F5E5A8', overflow: 1171 },
-  { id: 'icecream', labelKey: 'home.bsIceCream', bg: '#FFF0F5', tone: '#FAD4E0', overflow: 412  },
-  { id: 'dairy',    labelKey: 'home.bsDairy',    bg: '#E8F5E9', tone: '#C5E0C7', overflow: 214  },
-  { id: 'grocery',  labelKey: 'home.bsGrocery',  bg: '#FFF5EE', tone: '#F5DCC4', overflow: 386  },
-  { id: 'instant',  labelKey: 'home.bsInstant',  bg: '#F3F0FF', tone: '#DAD0F0', overflow: 168  },
+  { id: 'munchies', labelKey: 'home.bsMunchies',   bg: '#FFF8E1', tone: '#F5E5A8', overflow: 1171 },
+  { id: 'icecream', labelKey: 'home.bsIceCream',   bg: '#FFF0F5', tone: '#FAD4E0', overflow: 412  },
+  { id: 'dairy',    labelKey: 'home.bsDairy',      bg: '#E8F5E9', tone: '#C5E0C7', overflow: 214  },
+  { id: 'grocery',  labelKey: 'home.bsGrocery',    bg: '#FFF5EE', tone: '#F5DCC4', overflow: 386  },
+  { id: 'instant',  labelKey: 'home.bsInstant',    bg: '#F3F0FF', tone: '#DAD0F0', overflow: 168  },
+  { id: 'veggies',  labelKey: 'home.bsVegetables', bg: '#E6F7F4', tone: '#BFE6DD', overflow: 263  },
 ];
 
-// Geometry derived from the spec: 3 columns inside the section's 16-px
-// horizontal padding, with 2 inter-column gaps. Cards are slightly taller
-// than wide (≈1:1.1) — the inner grid + label fit comfortably.
+// Geometry: 3 columns inside the section's 16-px horizontal padding, with
+// 2 inter-column gaps. Card height is NOT a fixed ratio — it's content-driven
+// with a reserved 2-line label box, so single- and double-line labels produce
+// identical heights and the two rows stay aligned. (The old fixed-ratio height
+// clipped 2-line names like "Munchies & Drinks".)
 const SECTION_HPAD = 16;
 const CARD_GAP     = 8;
 const CARD_WIDTH   = Math.floor((SCREEN_WIDTH - SECTION_HPAD * 2 - CARD_GAP * 2) / 3);
-const CARD_HEIGHT  = Math.round(CARD_WIDTH * 1.1);
-const TILE_SIZE    = 32;   // 36 in the spec; we trim a touch so 2×2 + gap fits the smaller column widths
+const TILE_SIZE    = 32;
+const LABEL_LINE   = 16;            // label line-height
+const LABEL_HEIGHT = LABEL_LINE * 2; // always reserve 2 lines so rows align
 
 interface CardProps {
   category: BestsellerCategory;
@@ -129,18 +135,20 @@ const styles = StyleSheet.create({
   },
   card: {
     width:        CARD_WIDTH,
-    height:       CARD_HEIGHT,
     borderRadius: 14,
     borderWidth:  1,
     paddingHorizontal: 10,
-    paddingVertical:   10,
-    justifyContent:    'space-between',
+    paddingVertical:   12,
+    // Content-driven height (tiles + more + 2-line label box). overflow:hidden
+    // is a belt-and-braces guard so text can never spill past the corners.
+    overflow:     'hidden',
   },
   tilesGrid: {
     flexDirection: 'row',
     flexWrap:      'wrap',
     width:         TILE_SIZE * 2 + 4,
     gap:           4,
+    marginBottom:  8,
   },
   tile: {
     width:        TILE_SIZE,
@@ -148,10 +156,13 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   moreText: {
-    fontSize: 10,
+    fontSize:     10,
+    lineHeight:   13,
+    marginBottom: 6,
   },
   label: {
     fontSize:   12,
-    lineHeight: 15,
+    lineHeight: LABEL_LINE,
+    height:     LABEL_HEIGHT,   // reserve 2 lines so every card is equal height
   },
 });

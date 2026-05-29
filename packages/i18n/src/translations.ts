@@ -63,6 +63,7 @@ export const translations = {
     bsDairy:           { en: 'Dairy & Breakfast',                    hi: 'डेयरी और नाश्ता' },
     bsGrocery:         { en: 'Grocery Staples',                      hi: 'किराना सामान' },
     bsInstant:         { en: 'Instant Foods & Sauces',               hi: 'इंस्टेंट फूड और सॉस' },
+    bsVegetables:      { en: 'Fruits & Vegetables',                  hi: 'फल और सब्ज़ी' },
   },
   shop: {
     openNow:    { en: 'Open Now',                                                                hi: 'अभी खुला है' },
