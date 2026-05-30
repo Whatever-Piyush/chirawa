@@ -16,6 +16,16 @@ interface CartItem {
   unitPrice:   number; // paise — current price
   quantity:    number;
   subtotal:    number; // paise = unitPrice × quantity
+  shopId:      string; // multi-shop carts: which shop this item is from
+  shopName:    string;
+}
+
+// Cart-level "primary" shop = the first item's shop. Kept only for the legacy
+// cart.shopId/shopName fields & the DB Cart row; cart logic is now per-item.
+function primaryShop(items: CartItem[]): { shopId: string; shopName: string } {
+  return items[0]
+    ? { shopId: items[0].shopId, shopName: items[0].shopName }
+    : { shopId: '', shopName: '' };
 }
 
 interface CartData {
@@ -124,18 +134,8 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
 
     const existingCart = await loadCart(userId);
 
-    // Cross-shop protection — can't mix items from different shops
-    if (existingCart && existingCart.shopId && existingCart.shopId !== product.shopId) {
-      throw new BusinessRuleError(
-        'Cart mein pehle se dusri dukaan ka saman hai. Pehle cart clear karein.',
-        {
-          currentShopId:   existingCart.shopId,
-          currentShopName: existingCart.shopName,
-          newShopId:       product.shopId,
-          newShopName:     product.shop.name,
-        },
-      );
-    }
+    // Multi-shop carts are allowed — items from different shops coexist and are
+    // split into one order per shop at checkout.
 
     const oldSubtotal = existingCart?.subtotal ?? 0;
 
@@ -150,6 +150,8 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
       unitPrice:   product.price,
       quantity:    input.quantity,
       subtotal:    product.price * input.quantity,
+      shopId:      product.shopId,
+      shopName:    product.shop.name,
     };
 
     if (existingIndex >= 0) {
@@ -174,8 +176,7 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
     const cart: CartData = {
       cartId,
       userId,
-      shopId:    product.shopId,
-      shopName:  product.shop.name,
+      ...primaryShop(items),
       items,
       subtotal:  newSubtotal,
       updatedAt: new Date().toISOString(),
@@ -245,6 +246,7 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
 
     const cart: CartData = {
       ...existingCart,
+      ...primaryShop(items),
       items,
       subtotal:  newSubtotal,
       updatedAt: new Date().toISOString(),

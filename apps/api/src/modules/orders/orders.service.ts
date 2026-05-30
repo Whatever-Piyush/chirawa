@@ -18,6 +18,7 @@ interface CartData {
   items: Array<{
     productId: string; productName: string;
     unitPrice: number; quantity: number; subtotal: number;
+    shopId?: string; shopName?: string;   // per-item shop (multi-shop carts)
   }>;
 }
 
@@ -33,112 +34,138 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     if (!address || address.isDeleted) throw new NotFoundError('Address');
     if (address.userId !== userId) throw new ForbiddenError('Not your address');
 
-    const shop = await prisma.shop.findUnique({
-      where:  { id: cart.shopId },
-      select: { lat: true, lng: true, isActive: true, name: true, address: true, sellerId: true },
-    });
-    if (!shop || !shop.isActive) throw new BusinessRuleError('Yeh dukaan abhi available nahi hai');
-
-    const { metres, source } = await getRoadDistance(
-      Number(shop.lat), Number(shop.lng),
-      Number(address.lat), Number(address.lng),
-      redis,
-    );
+    // ── Group cart items by shop — each shop becomes its own order ────────────
+    const shopIds = [...new Set(cart.items.map((i) => i.shopId ?? cart.shopId).filter(Boolean))];
+    if (shopIds.length === 0) throw new BusinessRuleError('Cart mein dukaan nahi mili');
 
     const ruleVersion = await getActiveFeeRuleVersion(prisma);
-    const feeResult   = calculateDeliveryFee({
-      cartSubtotalPaise: cart.subtotal,
-      distanceMetres:    metres,
-      ruleVersion,
-    });
 
+    interface ShopPlan {
+      shopId: string; shopName: string; sellerUserId: string | null;
+      items: CartData['items']; subtotal: number;
+      feePaise: number; distanceKm: number; distanceSource: string;
+    }
+    const plans: ShopPlan[] = [];
+    for (const sid of shopIds) {
+      const shop = await prisma.shop.findUnique({
+        where:  { id: sid },
+        select: { lat: true, lng: true, isActive: true, name: true, sellerId: true },
+      });
+      if (!shop || !shop.isActive) throw new BusinessRuleError('Yeh dukaan abhi available nahi hai');
+
+      const shopItems = cart.items.filter((i) => (i.shopId ?? cart.shopId) === sid);
+      const subtotal  = shopItems.reduce((s, i) => s + i.subtotal, 0);
+
+      const { metres, source } = await getRoadDistance(
+        Number(shop.lat), Number(shop.lng),
+        Number(address.lat), Number(address.lng),
+        redis,
+      );
+      const fee = calculateDeliveryFee({ cartSubtotalPaise: subtotal, distanceMetres: metres, ruleVersion });
+      const seller = await prisma.sellerProfile.findUnique({ where: { id: shop.sellerId }, select: { userId: true } });
+
+      plans.push({
+        shopId: sid, shopName: shop.name, sellerUserId: seller?.userId ?? null,
+        items: shopItems, subtotal,
+        feePaise: fee.feePaise, distanceKm: fee.distanceKm, distanceSource: source,
+      });
+    }
+
+    // Single combined delivery fee = farthest shop's fee; assign it to that
+    // shop's order only (others pay 0).
+    const combinedFee   = Math.max(...plans.map((p) => p.feePaise));
+    const feeCarrierIdx = plans.findIndex((p) => p.feePaise === combinedFee);
+
+    // Promo: only supported on single-shop checkouts for now.
     let discountPaise = 0;
     let promoCodeId: string | null = null;
-
     if (input.promoCode) {
-      const promo = await prisma.promoCode.findUnique({
-        where: { code: input.promoCode.toUpperCase() },
-      });
+      if (plans.length > 1) throw new ValidationError('Promo code abhi sirf ek dukaan ke order par lagta hai');
+      const promo = await prisma.promoCode.findUnique({ where: { code: input.promoCode.toUpperCase() } });
       if (!promo || !promo.isActive) throw new ValidationError('Yeh promo code valid nahi hai');
-      if (promo.expiresAt && promo.expiresAt < new Date()) {
-        throw new ValidationError('Promo code expire ho gaya');
-      }
+      if (promo.expiresAt && promo.expiresAt < new Date()) throw new ValidationError('Promo code expire ho gaya');
       if (cart.subtotal < promo.minCartPaise) {
         throw new ValidationError(`Is promo ke liye minimum cart ₹${Math.round(promo.minCartPaise / 100)} chahiye`);
       }
-      const usedCount = await prisma.promoRedemption.count({
-        where: { promoCodeId: promo.id, userId },
-      });
+      const usedCount = await prisma.promoRedemption.count({ where: { promoCodeId: promo.id, userId } });
       if (usedCount >= promo.maxUsesPerUser) throw new ValidationError('Is promo code ka use kar chuke hain');
-      discountPaise = promo.type === 'flat'
-        ? promo.valuePaise
-        : Math.floor((cart.subtotal * promo.valuePaise) / 10000);
+      discountPaise = promo.type === 'flat' ? promo.valuePaise : Math.floor((cart.subtotal * promo.valuePaise) / 10000);
       promoCodeId = promo.id;
     }
 
-    const totalAmount = cart.subtotal + feeResult.feePaise - discountPaise;
-    const isCod       = input.paymentMethod === 'cod';
-    const initStatus  = isCod ? 'confirmed' : 'pending_payment';
+    const isCod      = input.paymentMethod === 'cod';
+    const initStatus = isCod ? 'confirmed' : 'pending_payment';
 
-    // Get seller's userId for notifications
-    const sellerProfile = await prisma.sellerProfile.findUnique({
-      where:  { id: shop.sellerId },
-      select: { userId: true },
-    });
+    const created = await prisma.$transaction(async (tx) => {
+      const out: Array<{ orderId: string; shopId: string; shopName: string; total: number; sellerUserId: string | null }> = [];
+      for (let idx = 0; idx < plans.length; idx++) {
+        const p        = plans[idx]!;
+        const fee      = idx === feeCarrierIdx ? combinedFee : 0;
+        const discount = idx === feeCarrierIdx ? discountPaise : 0;
+        const total    = p.subtotal + fee - discount;
 
-    const order = await prisma.$transaction(async (tx) => {
-      const newOrder = await tx.order.create({
-        data: {
-          customerId: userId, shopId: cart.shopId,
-          deliveryStreet: address.street, deliveryLandmark: address.landmark,
-          deliveryLocality: address.locality, deliveryCity: address.city,
-          deliveryPincode: address.pincode, deliveryLat: address.lat, deliveryLng: address.lng,
-          cartSubtotalAtPricing: cart.subtotal, deliveryFee: feeResult.feePaise,
-          discount: discountPaise, totalAmount,
-          feeRuleVersion: ruleVersion, distanceKm: feeResult.distanceKm, distanceSource: source,
-          paymentMethod: input.paymentMethod, status: initStatus,
-          addressId: address.id, promoCodeId,
-          ...(isCod ? { confirmedAt: new Date() } : {}),
-        },
-      });
-      await tx.orderItem.createMany({
-        data: cart.items.map((item) => ({
-          orderId: newOrder.id, productId: item.productId,
-          productName: item.productName, unitPrice: item.unitPrice,
-          quantity: item.quantity, subtotal: item.subtotal,
-        })),
-      });
-      await tx.orderStatusHistory.create({
-        data: { orderId: newOrder.id, status: initStatus, changedByRole: 'customer', changedById: userId },
-      });
-      if (promoCodeId) {
-        await tx.promoRedemption.create({
-          data: { promoCodeId, userId, orderId: newOrder.id, discount: discountPaise },
+        const newOrder = await tx.order.create({
+          data: {
+            customerId: userId, shopId: p.shopId,
+            deliveryStreet: address.street, deliveryLandmark: address.landmark,
+            deliveryLocality: address.locality, deliveryCity: address.city,
+            deliveryPincode: address.pincode, deliveryLat: address.lat, deliveryLng: address.lng,
+            cartSubtotalAtPricing: p.subtotal, deliveryFee: fee,
+            discount, totalAmount: total,
+            feeRuleVersion: ruleVersion, distanceKm: p.distanceKm, distanceSource: p.distanceSource,
+            paymentMethod: input.paymentMethod, status: initStatus,
+            addressId: address.id, promoCodeId: idx === feeCarrierIdx ? promoCodeId : null,
+            ...(isCod ? { confirmedAt: new Date() } : {}),
+          },
         });
+        await tx.orderItem.createMany({
+          data: p.items.map((item) => ({
+            orderId: newOrder.id, productId: item.productId,
+            productName: item.productName, unitPrice: item.unitPrice,
+            quantity: item.quantity, subtotal: item.subtotal,
+          })),
+        });
+        await tx.orderStatusHistory.create({
+          data: { orderId: newOrder.id, status: initStatus, changedByRole: 'customer', changedById: userId },
+        });
+        out.push({ orderId: newOrder.id, shopId: p.shopId, shopName: p.shopName, total, sellerUserId: p.sellerUserId });
+      }
+      if (promoCodeId) {
+        await tx.promoRedemption.create({ data: { promoCodeId, userId, orderId: out[feeCarrierIdx]!.orderId, discount: discountPaise } });
         await tx.promoCode.update({ where: { id: promoCodeId }, data: { currentUses: { increment: 1 } } });
       }
-      return newOrder;
+      return out;
     });
 
     await redis.del(`cart:${userId}`);
     await prisma.cart.deleteMany({ where: { userId } });
 
-    if (sellerProfile) {
-      emitNewOrderForSeller({
-        orderId: order.id, shopId: cart.shopId, sellerId: sellerProfile.userId,
-        items: cart.items.map((i) => ({ productName: i.productName, quantity: i.quantity, unitPrice: i.unitPrice })),
-        totalAmount, paymentMethod: input.paymentMethod, deliveryLocality: address.locality,
+    for (const o of created) {
+      const plan = plans.find((p) => p.shopId === o.shopId)!;
+      if (o.sellerUserId) {
+        emitNewOrderForSeller({
+          orderId: o.orderId, shopId: o.shopId, sellerId: o.sellerUserId,
+          items: plan.items.map((i) => ({ productName: i.productName, quantity: i.quantity, unitPrice: i.unitPrice })),
+          totalAmount: o.total, paymentMethod: input.paymentMethod, deliveryLocality: address.locality,
+        });
+      }
+      emitOrderStatusChanged({
+        orderId: o.orderId, status: initStatus, shopId: o.shopId,
+        sellerId: o.sellerUserId ?? '', riderId: null, customerId: userId,
       });
     }
 
-    emitOrderStatusChanged({
-      orderId: order.id, status: initStatus, shopId: cart.shopId,
-      sellerId: sellerProfile?.userId ?? '', riderId: null, customerId: userId,
-    });
-
-    return isCod
-      ? { orderId: order.id, status: 'confirmed', totalAmount, message: 'Order place ho gaya!' }
-      : { orderId: order.id, status: 'pending_payment', totalAmount, message: 'Payment complete karein' };
+    const grandTotal = created.reduce((s, o) => s + o.total, 0);
+    const primary    = created[feeCarrierIdx] ?? created[0]!;
+    return {
+      orderId:     primary.orderId,
+      orderIds:    created.map((o) => o.orderId),
+      status:      initStatus,
+      totalAmount: grandTotal,
+      message: isCod
+        ? (created.length > 1 ? `${created.length} orders place ho gaye!` : 'Order place ho gaya!')
+        : 'Payment complete karein',
+    };
   }
 
   async function getOrder(orderId: string, userId: string, role: string) {

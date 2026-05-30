@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -292,15 +292,36 @@ export default function CartScreen({ navigation }: Props) {
 
   const keyExtractor = useCallback((item: CartItem) => item.productId, []);
 
-  const renderItem = useCallback(({ item }: { item: CartItem }) => (
-    <CartItemRow
-      item={item}
-      isUpdating={updating.has(item.productId)}
-      removeLabel={removeLabel}
-      onChange={handleQuantityChange}
-      onRemove={handleRemoveItem}
-    />
-  ), [updating, removeLabel, handleQuantityChange, handleRemoveItem]);
+  // Group cart items by shop: sort so same-shop items are contiguous, then
+  // render a shop header before each shop's first item.
+  const sortedItems = useMemo(
+    () => (cart ? [...cart.items].sort((a, b) => a.shopName.localeCompare(b.shopName)) : []),
+    [cart],
+  );
+  const shopCount = useMemo(
+    () => new Set(sortedItems.map((i) => i.shopId)).size,
+    [sortedItems],
+  );
+
+  const renderItem = useCallback(({ item, index }: { item: CartItem; index: number }) => {
+    const showHeader = index === 0 || sortedItems[index - 1]?.shopId !== item.shopId;
+    return (
+      <>
+        {showHeader && (
+          <View style={styles.shopHeader}>
+            <Text style={styles.shopHeaderText}>🏪 {item.shopName}</Text>
+          </View>
+        )}
+        <CartItemRow
+          item={item}
+          isUpdating={updating.has(item.productId)}
+          removeLabel={removeLabel}
+          onChange={handleQuantityChange}
+          onRemove={handleRemoveItem}
+        />
+      </>
+    );
+  }, [sortedItems, updating, removeLabel, handleQuantityChange, handleRemoveItem]);
 
   const subtotalRupees = cart ? Math.round(cart.subtotal / 100) : 0;
   const totalRupees    = subtotalRupees;
@@ -336,9 +357,11 @@ export default function CartScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      {/* Shop name + clear button */}
+      {/* Cart header + clear button. Items are grouped by shop in the list. */}
       <View style={styles.shopBanner}>
-        <Text style={styles.shopBannerText}>🏪 {cart.shopName}</Text>
+        <Text style={styles.shopBannerText}>
+          🛒 My Cart{shopCount > 1 ? `  ·  ${shopCount} shops` : ''}
+        </Text>
         <TouchableOpacity
           style={styles.clearBtn}
           onPress={handleClearCart}
@@ -358,7 +381,7 @@ export default function CartScreen({ navigation }: Props) {
       )}
 
       <FlatList
-        data={cart.items}
+        data={sortedItems}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         removeClippedSubviews
@@ -462,6 +485,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
   shopBannerText: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
+  shopHeader:     { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, paddingBottom: Spacing.xs, backgroundColor: Colors.background },
+  shopHeaderText: { fontSize: FontSize.sm, fontWeight: '700', color: Colors.textLight },
   clearBtn:       { minHeight: MIN_TAP, justifyContent: 'center', paddingHorizontal: Spacing.xs },
   clearBtnText:   { fontSize: FontSize.sm, color: Colors.error, fontWeight: '700' },
 

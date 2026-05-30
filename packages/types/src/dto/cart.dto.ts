@@ -16,6 +16,8 @@ export interface CartItem {
   unitPrice: Paise;
   quantity: number;
   subtotal: Paise;
+  shopId: string;     // multi-shop carts: which shop this item belongs to
+  shopName: string;
 }
 
 export interface CartResponse {
