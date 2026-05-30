@@ -1,72 +1,66 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View, ScrollView, TouchableOpacity, StyleSheet,
+  View, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useT } from '@chirawa/i18n';
 import { Text, SectionContainer } from '../../components/ui';
 import { Colors, Spacing } from '../../theme';
+import { api } from '../../services/api.service';
+import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 // Signature section — famous local Chirawa vendors. This is the most
 // distinctive surface of the app, so it gets the deep-red accent (not the
 // standard orange) to feel premium.
 //
-// Seed data is hardcoded for now; real shops will arrive from the API later
-// with the same shape (plain `name` / `famousFor` strings). The only
-// translated card is the trailing "Add your local shop" CTA — flagged with
-// isPlaceholder so its copy is pulled from i18n while real shops stay literal.
-export interface SpecialShop {
-  id:            string;
-  name:          string;
-  famousFor:     string;
-  emoji:         string;
-  badgeKey:      string;   // i18n key for the ★ badge
-  colorBg:       string;   // header band fill
-  isPlaceholder?: boolean; // true → CTA card (name/desc from i18n, no Order Now)
+// Now wired to the live catalog: shops come from `api.getShops()` and each card
+// opens ShopDetailScreen. The trailing "Add your local shop" CTA is the only
+// translated card (isPlaceholder → copy from i18n, no Order Now).
+
+// Shape of the catalog/shops list items we actually use here.
+interface ApiShop {
+  id:                       string;
+  name:                     string;
+  description:              string | null;
+  estimatedDeliveryMinutes: number;
+  isCurrentlyOpen:          boolean;
 }
 
-export const SPECIAL_SHOPS: ReadonlyArray<SpecialShop> = [
-  {
-    id:        'lalchand',
-    name:      'Lalchand Mithai Wale',
-    famousFor: 'Peda & Sweets',
-    emoji:     '🍬',
-    badgeKey:  'home.specialBadgeLegend',
-    colorBg:   '#FFE4B5',
-  },
-  // Add more as the client provides shop names — same shape as above.
-  {
-    id:            'add-shop',
-    name:          '',                 // resolved from i18n at render
-    famousFor:     '',
-    emoji:         '🏪',
-    badgeKey:      'common.comingSoon',
-    colorBg:       '#E8F5E9',
-    isPlaceholder: true,
-  },
-];
+// Header-band fills, cycled per card so the carousel stays colorful.
+const CARD_COLORS = ['#FFE4B5', '#E8F5E9', '#FCE4EC', '#E3F2FD', '#FFF3E0', '#F3E5F5'];
+
+// Pick a fitting emoji from the shop name (no emoji column in the schema).
+function emojiFor(name: string): string {
+  if (/mithai|misthan|sweet|halwa|bhandar/i.test(name)) return '🍬';
+  if (/saag|rotta|roti|dhaba|bhojan/i.test(name))       return '🍛';
+  if (/fresh|mart|sabzi|veg|fruit/i.test(name))         return '🥬';
+  return '🏪';
+}
 
 const CARD_WIDTH  = 170;
 const CARD_HEIGHT = 210;
 const HEADER_H    = 100;
 
 interface CardProps {
-  shop:     SpecialShop;
-  name:     string;
-  famous:   string;
-  famousLabel: string;
-  badge:    string;
-  orderNow: string;
-  onPress:  () => void;
+  name:        string;
+  famous:      string;
+  badge:       string;
+  orderNow:    string;
+  emoji:       string;
+  colorBg:     string;
+  isPlaceholder?: boolean;
+  onPress:     () => void;
 }
 
-function ShopCard({ shop, name, famous, famousLabel, badge, orderNow, onPress }: CardProps) {
+function ShopCard({ name, famous, badge, orderNow, emoji, colorBg, isPlaceholder, onPress }: CardProps) {
   return (
     <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={onPress}>
       {/* Colored header band with the shop emoji.
           TODO: swap for <Image source={{ uri: shop.logoUrl }} /> when shop
           photos land — keep the colorBg as the loading/fallback fill. */}
-      <View style={[styles.cardHeader, { backgroundColor: shop.colorBg }]}>
-        <Text style={styles.cardEmoji}>{shop.emoji}</Text>
+      <View style={[styles.cardHeader, { backgroundColor: colorBg }]}>
+        <Text style={styles.cardEmoji}>{emoji}</Text>
       </View>
 
       <View style={styles.cardBody}>
@@ -85,7 +79,7 @@ function ShopCard({ shop, name, famous, famousLabel, badge, orderNow, onPress }:
             numberOfLines={1}
             style={styles.cardFamous}
           >
-            {shop.isPlaceholder ? famous : `${famousLabel} ${famous}`}
+            {famous}
           </Text>
 
           <View style={styles.badge}>
@@ -96,7 +90,7 @@ function ShopCard({ shop, name, famous, famousLabel, badge, orderNow, onPress }:
         </View>
 
         {/* Order Now only for real, orderable shops. */}
-        {!shop.isPlaceholder && (
+        {!isPlaceholder && (
           <Text weight="semibold" color={Colors.specialAccent} style={styles.orderNow}>
             {orderNow}
           </Text>
@@ -108,11 +102,29 @@ function ShopCard({ shop, name, famous, famousLabel, badge, orderNow, onPress }:
 
 interface Props {
   onSeeAll?: () => void;
-  onSelect?: (id: string) => void;
 }
 
-export default function ChirawaSpecialSection({ onSeeAll, onSelect }: Props) {
+export default function ChirawaSpecialSection({ onSeeAll }: Props) {
   const t = useT();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  const [shops, setShops]     = useState<ApiShop[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const data = await api.getShops() as ApiShop[];
+        if (active) setShops(Array.isArray(data) ? data : []);
+      } catch {
+        if (active) setShops([]);   // tolerate — section just shows the CTA
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
 
   return (
     <SectionContainer
@@ -127,18 +139,40 @@ export default function ChirawaSpecialSection({ onSeeAll, onSelect }: Props) {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scroll}
       >
-        {SPECIAL_SHOPS.map((shop) => (
-          <ShopCard
-            key={shop.id}
-            shop={shop}
-            name={shop.isPlaceholder ? t('home.addShopName') : shop.name}
-            famous={shop.isPlaceholder ? t('home.addShopDesc') : shop.famousFor}
-            famousLabel={t('home.specialFamousFor')}
-            badge={t(shop.badgeKey)}
-            orderNow={t('home.specialOrderNow')}
-            onPress={() => onSelect?.(shop.id)}
-          />
-        ))}
+        {loading ? (
+          <View style={styles.loading}>
+            <ActivityIndicator color={Colors.specialAccent} />
+          </View>
+        ) : (
+          shops.map((shop, i) => (
+            <ShopCard
+              key={shop.id}
+              name={shop.name}
+              famous={
+                shop.description?.trim()
+                  ? shop.description
+                  : `${shop.estimatedDeliveryMinutes}-min delivery`
+              }
+              badge={t('home.specialBadgeLegend')}
+              orderNow={t('home.specialOrderNow')}
+              emoji={emojiFor(shop.name)}
+              colorBg={CARD_COLORS[i % CARD_COLORS.length]}
+              onPress={() => navigation.navigate('ShopDetail', { shopId: shop.id, shopName: shop.name })}
+            />
+          ))
+        )}
+
+        {/* Trailing "Add your local shop" CTA — always shown. */}
+        <ShopCard
+          name={t('home.addShopName')}
+          famous={t('home.addShopDesc')}
+          badge={t('common.comingSoon')}
+          orderNow=""
+          emoji="🏪"
+          colorBg="#E8F5E9"
+          isPlaceholder
+          onPress={() => { /* no-op — onboarding flow TBD */ }}
+        />
       </ScrollView>
     </SectionContainer>
   );
@@ -156,6 +190,12 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: Spacing.lg,
     gap:               12,
+  },
+  loading: {
+    width:          CARD_WIDTH,
+    height:         CARD_HEIGHT,
+    justifyContent: 'center',
+    alignItems:     'center',
   },
   card: {
     width:           CARD_WIDTH,
