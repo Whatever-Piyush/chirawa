@@ -25,6 +25,7 @@ import CheckoutScreen   from '../screens/orders/CheckoutScreen';
 import OrderTrackingScreen  from '../screens/orders/OrderTrackingScreen';
 import OrderHistoryScreen   from '../screens/orders/OrderHistoryScreen';
 import CategoriesScreen     from '../screens/categories/CategoriesScreen';
+import CategoryProductsScreen from '../screens/categories/CategoryProductsScreen';
 import ChirawaSpecialScreen from '../screens/categories/ChirawaSpecialScreen';
 import ProfileScreen    from '../screens/profile/ProfileScreen';
 import AddressListScreen from '../screens/profile/AddressListScreen';
@@ -38,6 +39,7 @@ export type RootStackParamList = {
   MainTabs:   NavigatorScreenParams<TabParamList> | undefined;
   Search:     undefined;
   ShopDetail: { shopId: string; shopName: string };
+  CategoryProducts: { category: string };
   Cart:       undefined;
   Checkout:   undefined;
   OrderTracking: { orderId: string };
@@ -121,6 +123,8 @@ export default function AppNavigator() {
             <Stack.Screen name="MainTabs"      component={MainTabs} />
             <Stack.Screen name="Search"        component={SearchScreen} options={{ headerShown: false }} />
             <Stack.Screen name="ShopDetail"    component={ShopDetailScreen} />
+            <Stack.Screen name="CategoryProducts" component={CategoryProductsScreen}
+              options={{ headerShown: true, headerTintColor: Colors.primary }} />
             <Stack.Screen name="Cart"          component={CartScreen}
               options={{ headerShown: true, headerTitle: 'Cart', headerTintColor: Colors.primary }} />
             <Stack.Screen name="Checkout"      component={CheckoutScreen}

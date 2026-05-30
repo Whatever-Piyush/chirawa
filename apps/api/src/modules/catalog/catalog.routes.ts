@@ -16,6 +16,21 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
     return reply.send(await catalogService.getShop(request.params.id));
   });
 
+  // GET /api/v1/catalog/products?category=&limit= — public (flat product list)
+  app.get('/products', async (request: FastifyRequest<{ Querystring: { category?: string; limit?: string } }>, reply) => {
+    const { category, limit } = request.query;
+    const parsed = limit ? parseInt(limit, 10) : undefined;
+    const opts: { category?: string; limit?: number } = {};
+    if (category) opts.category = category;
+    if (parsed !== undefined && Number.isFinite(parsed)) opts.limit = parsed;
+    return reply.send(await catalogService.getProducts(opts));
+  });
+
+  // GET /api/v1/catalog/categories — public (distinct categories w/ counts)
+  app.get('/categories', async (_req, reply) => {
+    return reply.send(await catalogService.getCategories());
+  });
+
   // GET /api/v1/catalog/search — public
   app.get('/search', async (request: FastifyRequest<{ Querystring: { q?: string; shopId?: string } }>, reply) => {
     return reply.send(await catalogService.searchProducts(request.query.q ?? '', request.query.shopId));

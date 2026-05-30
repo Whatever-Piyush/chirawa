@@ -32,7 +32,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       orderBy: { name: 'asc' },
       select: {
         id: true, name: true, description: true, logoUrl: true,
-        openTime: true, closeTime: true, isOpen: true,
+        openTime: true, closeTime: true, isOpen: true, isFeatured: true,
         estimatedDeliveryMinutes: true, address: true,
         lat: true, lng: true,
       },
@@ -265,6 +265,73 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
     };
   }
 
+  // Flat product list across all active shops, optionally filtered by category
+  // NAME (categories are per-shop, so we match on name). Shaped for ProductCard.
+  async function getProducts(opts: { category?: string; limit?: number }) {
+    const limit = Math.min(Math.max(opts.limit ?? 30, 1), 100);
+    const products = await prisma.product.findMany({
+      where: {
+        isActive:    true,
+        stockStatus: { not: 'hidden' },
+        shop:        { isActive: true },
+        ...(opts.category ? { category: { name: opts.category } } : {}),
+      },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      take:    limit,
+      include: {
+        shop:   { select: { id: true, name: true } },
+        images: { orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true } },
+      },
+    });
+
+    return products.map((p) => ({
+      id:          p.id,
+      name:        p.name,
+      pricePaise:  p.price,
+      mrpPaise:    p.mrpPaise,
+      unit:        p.unit,
+      stockStatus: p.stockStatus,
+      inStock:     p.stockStatus === 'available',
+      imageUrl:    p.images[0]?.url ?? null,
+      shopId:      p.shopId,
+      shopName:    p.shop.name,
+    }));
+  }
+
+  // Distinct category NAMES across active shops, aggregated (count + a sample
+  // image), ordered by sortOrder. Powers the Categories tab and Bestsellers.
+  async function getCategories() {
+    const cats = await prisma.category.findMany({
+      where:   { isActive: true, shop: { isActive: true } },
+      orderBy: { sortOrder: 'asc' },
+      select: {
+        name:      true,
+        sortOrder: true,
+        products: {
+          where:   { isActive: true, stockStatus: { not: 'hidden' } },
+          orderBy: { sortOrder: 'asc' },
+          select:  { id: true, images: { orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true } } },
+        },
+      },
+    });
+
+    const byName = new Map<string, { name: string; sortOrder: number; productCount: number; imageUrl: string | null }>();
+    for (const c of cats) {
+      const firstImg = c.products.find((p) => p.images[0]?.url)?.images[0]?.url ?? null;
+      const existing = byName.get(c.name);
+      if (existing) {
+        existing.productCount += c.products.length;
+        if (!existing.imageUrl && firstImg) existing.imageUrl = firstImg;
+      } else {
+        byName.set(c.name, { name: c.name, sortOrder: c.sortOrder, productCount: c.products.length, imageUrl: firstImg });
+      }
+    }
+
+    return [...byName.values()]
+      .filter((c) => c.productCount > 0)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  }
+
   async function invalidateShopCache(shopId: string) {
     await Promise.all([
       redis.del(keys.shopDetail(shopId)),
@@ -272,5 +339,5 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
     ]);
   }
 
-  return { getShops, getShop, searchProducts, searchCatalog, invalidateShopCache };
+  return { getShops, getShop, getProducts, getCategories, searchProducts, searchCatalog, invalidateShopCache };
 }

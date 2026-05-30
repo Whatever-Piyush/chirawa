@@ -177,6 +177,18 @@ export class ChirawaApiClient {
     return this.request('GET', `/catalog/shops/${shopId}`, undefined, false);
   }
 
+  async getProducts(params?: { category?: string; limit?: number }): Promise<unknown> {
+    const qs = new URLSearchParams();
+    if (params?.category) qs.set('category', params.category);
+    if (params?.limit != null) qs.set('limit', String(params.limit));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return this.request('GET', `/catalog/products${suffix}`, undefined, false);
+  }
+
+  async getCategories(): Promise<unknown> {
+    return this.request('GET', '/catalog/categories', undefined, false);
+  }
+
   // ─── Cart ────────────────────────────────────────────────────────────────
 
   async getCart(): Promise<CartResponse> {

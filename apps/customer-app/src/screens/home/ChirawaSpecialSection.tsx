@@ -7,7 +7,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useT } from '@chirawa/i18n';
 import { Text, SectionContainer } from '../../components/ui';
 import { Colors, Spacing } from '../../theme';
-import { api } from '../../services/api.service';
+import { fetchShops, type ApiShop } from '../../services/catalog';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 // Signature section — famous local Chirawa vendors. This is the most
@@ -17,15 +17,6 @@ import type { RootStackParamList } from '../../navigation/AppNavigator';
 // Now wired to the live catalog: shops come from `api.getShops()` and each card
 // opens ShopDetailScreen. The trailing "Add your local shop" CTA is the only
 // translated card (isPlaceholder → copy from i18n, no Order Now).
-
-// Shape of the catalog/shops list items we actually use here.
-interface ApiShop {
-  id:                       string;
-  name:                     string;
-  description:              string | null;
-  estimatedDeliveryMinutes: number;
-  isCurrentlyOpen:          boolean;
-}
 
 // Header-band fills, cycled per card so the carousel stays colorful.
 const CARD_COLORS = ['#FFE4B5', '#E8F5E9', '#FCE4EC', '#E3F2FD', '#FFF3E0', '#F3E5F5'];
@@ -115,8 +106,9 @@ export default function ChirawaSpecialSection({ onSeeAll }: Props) {
     let active = true;
     (async () => {
       try {
-        const data = await api.getShops() as ApiShop[];
-        if (active) setShops(Array.isArray(data) ? data : []);
+        const data = await fetchShops();
+        // Chirawa Special = featured shops only (the famous local vendors).
+        if (active) setShops(data.filter((s) => s.isFeatured));
       } catch {
         if (active) setShops([]);   // tolerate — section just shows the CTA
       } finally {

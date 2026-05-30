@@ -58,6 +58,7 @@ interface SeedShop {
   address:   string;
   lat:       string;
   lng:       string;
+  featured?: boolean;   // true → shown in the "Chirawa Special" surface
   products:  SeedProduct[];
 }
 
@@ -156,7 +157,7 @@ const SHOPS: SeedShop[] = [
   },
   {
     phone: '+919001110006', ownerName: 'Maturam Halwai',
-    shopName: 'Maturam Misthan Bhandar',
+    shopName: 'Maturam Misthan Bhandar', featured: true,
     address: 'Purani Mandi, Chirawa, Jhunjhunu 333026',
     lat: '28.24450000', lng: '75.64450000',
     products: [
@@ -168,7 +169,7 @@ const SHOPS: SeedShop[] = [
   },
   {
     phone: '+919001110007', ownerName: 'Lal Chand',
-    shopName: 'Lal Chand Misthan Bhandar',
+    shopName: 'Lal Chand Misthan Bhandar', featured: true,
     address: 'Main Bazar, Chirawa, Jhunjhunu 333026',
     lat: '28.24560000', lng: '75.64560000',
     products: [
@@ -180,7 +181,7 @@ const SHOPS: SeedShop[] = [
   },
   {
     phone: '+919001110008', ownerName: 'Mukesh Sharma',
-    shopName: 'Sharma Saag Rotta Shop',
+    shopName: 'Sharma Saag Rotta Shop', featured: true,
     address: 'Bazar Road, Chirawa, Jhunjhunu 333026',
     lat: '28.24670000', lng: '75.64670000',
     products: [
@@ -192,7 +193,7 @@ const SHOPS: SeedShop[] = [
   },
   {
     phone: '+919001110009', ownerName: 'Nahar Singh',
-    shopName: 'Nahar Singh Misthan Bhandar',
+    shopName: 'Nahar Singh Misthan Bhandar', featured: true,
     address: 'Station Road, Chirawa, Jhunjhunu 333026',
     lat: '28.24780000', lng: '75.64780000',
     products: [
@@ -204,7 +205,7 @@ const SHOPS: SeedShop[] = [
   },
   {
     phone: '+919001110010', ownerName: 'Bikaner Sweets',
-    shopName: 'Bikaneri Misthan Bhandar',
+    shopName: 'Bikaneri Misthan Bhandar', featured: true,
     address: 'Nehru Colony, Chirawa, Jhunjhunu 333026',
     lat: '28.24890000', lng: '75.64890000',
     products: [
@@ -246,10 +247,11 @@ export async function seedShops(prisma: PrismaClient): Promise<void> {
     });
 
     // 3) Shop (by unique sellerId) — id stays stable across runs
+    const featured = s.featured ?? false;
     const shop = await prisma.shop.upsert({
       where:  { sellerId: profile.id },
-      update: { name: s.shopName, address: s.address, lat: s.lat, lng: s.lng, isActive: true, isOpen: true },
-      create: { sellerId: profile.id, name: s.shopName, address: s.address, lat: s.lat, lng: s.lng, isActive: true, isOpen: true },
+      update: { name: s.shopName, address: s.address, lat: s.lat, lng: s.lng, isActive: true, isOpen: true, isFeatured: featured },
+      create: { sellerId: profile.id, name: s.shopName, address: s.address, lat: s.lat, lng: s.lng, isActive: true, isOpen: true, isFeatured: featured },
     });
     shopCount++;
 

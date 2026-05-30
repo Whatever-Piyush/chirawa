@@ -8,8 +8,10 @@ import Header from './Header';
 import SearchBar from './SearchBar';
 import CategoryTabs from './CategoryTabs';
 import FeaturedBanner from './FeaturedBanner';
+import PopularProductsSection from './PopularProductsSection';
 import BestsellersSection from './BestsellersSection';
 import CategoryGrid, { GROCERY_KITCHEN, SNACKS_DRINKS } from './CategoryGrid';
+import ShopsNearbySection from './ShopsNearbySection';
 import ChirawaSpecialSection from './ChirawaSpecialSection';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
@@ -69,16 +71,22 @@ export default function HomeScreen({ navigation }: Props) {
           entranceTranslate={bannerTranslate}
         />
 
-        {/* ── 5. Bestsellers — 3-column colored category cards ──────────── */}
+        {/* ── 5. Popular products — real add-to-cart cards (live API) ─────── */}
+        <PopularProductsSection />
+
+        {/* ── 6. Shop by category — real categories (live API) ───────────── */}
         <BestsellersSection />
 
-        {/* ── 6. Grocery & Kitchen — 4-column icon tiles ─────────────────── */}
+        {/* ── 7. Grocery & Kitchen — 4-column icon tiles ─────────────────── */}
         <CategoryGrid title={t('home.groceryKitchen')} items={GROCERY_KITCHEN} />
 
-        {/* ── 7. Snacks & Drinks — 4-column icon tiles ───────────────────── */}
+        {/* ── 8. Snacks & Drinks — 4-column icon tiles ───────────────────── */}
         <CategoryGrid title={t('home.snacksDrinks')} items={SNACKS_DRINKS} />
 
-        {/* ── 8. Chirawa's Special — local-shops carousel (signature) ─────── */}
+        {/* ── 9. Shops near you — general (non-featured) shops (live API) ── */}
+        <ShopsNearbySection />
+
+        {/* ── 10. Chirawa's Special — featured local-shops carousel ──────── */}
         <ChirawaSpecialSection />
 
         <View style={{ height: Spacing.huge }} />

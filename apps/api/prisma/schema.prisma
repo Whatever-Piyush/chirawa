@@ -212,6 +212,7 @@ model Shop {
   address                  String   @db.VarChar(255)
   isActive                 Boolean  @default(false) @map("is_active")
   isOpen                   Boolean  @default(false) @map("is_open")
+  isFeatured               Boolean  @default(false) @map("is_featured")
   openTime                 String   @default("09:00") @map("open_time") @db.VarChar(5)
   closeTime                String   @default("22:00") @map("close_time") @db.VarChar(5)
   estimatedDeliveryMinutes Int      @default(30) @map("estimated_delivery_minutes")

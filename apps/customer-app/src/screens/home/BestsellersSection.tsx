@@ -1,168 +1,120 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View, FlatList, TouchableOpacity, StyleSheet, Dimensions,
+  View, Image, FlatList, TouchableOpacity, StyleSheet, Dimensions, ActivityIndicator,
 } from 'react-native';
-import { useT } from '@chirawa/i18n';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Text, SectionContainer } from '../../components/ui';
-import { Colors, Spacing } from '../../theme';
+import { Colors } from '../../theme';
+import { fetchCategories, type ApiCategory } from '../../services/catalog';
+import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Each category gets a soft pastel bg + a slightly darker companion tone used
-// for the 1px border AND for the 2x2 product placeholders. Hand-tuned per
-// category so the placeholder squares "echo" the card colour without being
-// obnoxiously bright. `overflow` is the "+N more" badge count.
-interface BestsellerCategory {
-  id:        string;
-  labelKey:  string;
-  bg:        string;
-  tone:      string;
-  overflow:  number;
-}
+// Real category cards backed by /catalog/categories. Each shows a sample
+// image + live product count and opens that category's product grid.
+const PALETTE = ['#FFF8E1', '#FFF0F5', '#E8F5E9', '#FFF5EE', '#F3F0FF', '#E6F7F4'];
 
-// Six categories → two clean rows of three (no orphan row). Fruits &
-// Vegetables rounds out the grid in the 6th slot.
-const CATEGORIES: ReadonlyArray<BestsellerCategory> = [
-  { id: 'munchies', labelKey: 'home.bsMunchies',   bg: '#FFF8E1', tone: '#F5E5A8', overflow: 1171 },
-  { id: 'icecream', labelKey: 'home.bsIceCream',   bg: '#FFF0F5', tone: '#FAD4E0', overflow: 412  },
-  { id: 'dairy',    labelKey: 'home.bsDairy',      bg: '#E8F5E9', tone: '#C5E0C7', overflow: 214  },
-  { id: 'grocery',  labelKey: 'home.bsGrocery',    bg: '#FFF5EE', tone: '#F5DCC4', overflow: 386  },
-  { id: 'instant',  labelKey: 'home.bsInstant',    bg: '#F3F0FF', tone: '#DAD0F0', overflow: 168  },
-  { id: 'veggies',  labelKey: 'home.bsVegetables', bg: '#E6F7F4', tone: '#BFE6DD', overflow: 263  },
-];
-
-// Geometry: 3 columns inside the section's 16-px horizontal padding, with
-// 2 inter-column gaps. Card height is NOT a fixed ratio — it's content-driven
-// with a reserved 2-line label box, so single- and double-line labels produce
-// identical heights and the two rows stay aligned. (The old fixed-ratio height
-// clipped 2-line names like "Munchies & Drinks".)
 const SECTION_HPAD = 16;
 const CARD_GAP     = 8;
 const CARD_WIDTH   = Math.floor((SCREEN_WIDTH - SECTION_HPAD * 2 - CARD_GAP * 2) / 3);
-const TILE_SIZE    = 32;
-const LABEL_LINE   = 16;            // label line-height
-const LABEL_HEIGHT = LABEL_LINE * 2; // always reserve 2 lines so rows align
+const IMG_SIZE     = CARD_WIDTH - 20;
+const LABEL_LINE   = 16;
+const LABEL_HEIGHT = LABEL_LINE * 2;
 
 interface CardProps {
-  category: BestsellerCategory;
-  label:    string;
-  moreWord: string;
+  category: ApiCategory;
+  bg:       string;
   onPress:  () => void;
 }
 
-function BestsellerCard({ category, label, moreWord, onPress }: CardProps) {
+function BestsellerCard({ category, bg, onPress }: CardProps) {
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.85}
-      style={[
-        styles.card,
-        { backgroundColor: category.bg, borderColor: category.tone },
-      ]}
-    >
-      {/* 2×2 product placeholder grid. Each tile is a slightly darker shade
-          of the card so the texture echoes the colour instead of fighting
-          it. TODO when product images land: swap to <Image source={...} />. */}
-      <View style={styles.tilesGrid}>
-        {[0, 1, 2, 3].map((i) => (
-          <View
-            key={i}
-            style={[styles.tile, { backgroundColor: category.tone }]}
-          />
-        ))}
+    <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={[styles.card, { backgroundColor: bg }]}>
+      <View style={styles.imageBox}>
+        {category.imageUrl ? (
+          <Image source={{ uri: category.imageUrl }} style={styles.image} resizeMode="contain" />
+        ) : (
+          <View style={[styles.image, { backgroundColor: bg }]} />
+        )}
       </View>
 
-      <Text
-        color={Colors.textSecondary}
-        style={styles.moreText}
-      >
-        +{category.overflow} {moreWord}
+      <Text color={Colors.textSecondary} style={styles.countText}>
+        {category.productCount} item{category.productCount === 1 ? '' : 's'}
       </Text>
 
-      <Text
-        weight="semibold"
-        color={Colors.textPrimary}
-        numberOfLines={2}
-        style={styles.label}
-      >
-        {label}
+      <Text weight="semibold" color={Colors.textPrimary} numberOfLines={2} style={styles.label}>
+        {category.name}
       </Text>
     </TouchableOpacity>
   );
 }
 
-interface Props {
-  onSeeAll?: () => void;
-  onSelect?: (id: string) => void;
-}
+export default function BestsellersSection() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const [categories, setCategories] = useState<ApiCategory[]>([]);
+  const [loading, setLoading]       = useState(true);
 
-export default function BestsellersSection({ onSeeAll, onSelect }: Props) {
-  const t = useT();
-  const moreWord = t('home.bsMore');
+  useEffect(() => {
+    let active = true;
+    fetchCategories()
+      .then((c) => { if (active) setCategories(c); })
+      .catch(() => { /* tolerate */ })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  if (!loading && categories.length === 0) return null;
 
   return (
-    <SectionContainer title={t('home.bestsellers')} onSeeAll={onSeeAll}>
-      <FlatList
-        data={CATEGORIES.slice()}
-        keyExtractor={(item) => item.id}
-        numColumns={3}
-        scrollEnabled={false}                /* lives inside HomeScreen's ScrollView */
-        columnWrapperStyle={styles.row}
-        contentContainerStyle={styles.grid}
-        renderItem={({ item }) => (
-          <BestsellerCard
-            category={item}
-            label={t(item.labelKey)}
-            moreWord={moreWord}
-            onPress={() => onSelect?.(item.id)}
-          />
-        )}
-      />
+    <SectionContainer title="Shop by category">
+      {loading ? (
+        <View style={styles.loading}><ActivityIndicator color={Colors.primary} /></View>
+      ) : (
+        <FlatList
+          data={categories}
+          keyExtractor={(item) => item.name}
+          numColumns={3}
+          scrollEnabled={false}                /* lives inside HomeScreen's ScrollView */
+          columnWrapperStyle={styles.row}
+          contentContainerStyle={styles.grid}
+          renderItem={({ item, index }) => (
+            <BestsellerCard
+              category={item}
+              bg={PALETTE[index % PALETTE.length]}
+              onPress={() => navigation.navigate('CategoryProducts', { category: item.name })}
+            />
+          )}
+        />
+      )}
     </SectionContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  grid: {
-    paddingHorizontal: SECTION_HPAD,
-    rowGap:            CARD_GAP,
-  },
-  row: {
-    gap:            CARD_GAP,
-    justifyContent: 'flex-start',
-    /* 5 items in a 3-column grid leaves the second row with 2 cards
-       aligned to the left — fine; reads as "more bestsellers below". */
-  },
+  loading: { height: 120, justifyContent: 'center', alignItems: 'center' },
+  grid: { paddingHorizontal: SECTION_HPAD, rowGap: CARD_GAP },
+  row:  { gap: CARD_GAP, justifyContent: 'flex-start' },
   card: {
     width:        CARD_WIDTH,
     borderRadius: 14,
     borderWidth:  1,
+    borderColor:  'rgba(0,0,0,0.05)',
     paddingHorizontal: 10,
     paddingVertical:   12,
-    // Content-driven height (tiles + more + 2-line label box). overflow:hidden
-    // is a belt-and-braces guard so text can never spill past the corners.
     overflow:     'hidden',
   },
-  tilesGrid: {
-    flexDirection: 'row',
-    flexWrap:      'wrap',
-    width:         TILE_SIZE * 2 + 4,
-    gap:           4,
-    marginBottom:  8,
+  imageBox: {
+    width:          IMG_SIZE,
+    height:         IMG_SIZE,
+    borderRadius:   10,
+    overflow:       'hidden',
+    backgroundColor:'#FFFFFF',
+    justifyContent: 'center',
+    alignItems:     'center',
+    marginBottom:   8,
   },
-  tile: {
-    width:        TILE_SIZE,
-    height:       TILE_SIZE,
-    borderRadius: 8,
-  },
-  moreText: {
-    fontSize:     10,
-    lineHeight:   13,
-    marginBottom: 6,
-  },
-  label: {
-    fontSize:   12,
-    lineHeight: LABEL_LINE,
-    height:     LABEL_HEIGHT,   // reserve 2 lines so every card is equal height
-  },
+  image:     { width: '100%', height: '100%' },
+  countText: { fontSize: 10, lineHeight: 13, marginBottom: 6 },
+  label:     { fontSize: 12, lineHeight: LABEL_LINE, height: LABEL_HEIGHT },
 });
