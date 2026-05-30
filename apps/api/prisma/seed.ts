@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { seedSearchAliases } from './seeds/search-aliases';
+import { seedShops } from './seeds/shops';
 
 const prisma = new PrismaClient();
 
@@ -111,6 +112,17 @@ async function main(): Promise<void> {
 
   // ── Search Aliases ─────────────────────────────────────────────────────────
   await seedSearchAliases(prisma);
+
+  // ── Shops, Categories & Products ─────────────────────────────────────────────
+  await seedShops(prisma);
+
+  // ── Summary counts ───────────────────────────────────────────────────────────
+  const [shops, categories, products] = await Promise.all([
+    prisma.shop.count(),
+    prisma.category.count(),
+    prisma.product.count(),
+  ]);
+  console.log(`  📊 Totals now in DB → shops: ${shops}, categories: ${categories}, products: ${products}`);
 
   console.log('\n✅ Database seeded successfully!\n');
 }

@@ -256,6 +256,7 @@ model Product {
   name        String      @db.VarChar(200)
   description String?     @db.Text
   price       Int
+  mrpPaise    Int?        @map("mrp_paise")
   stockStatus StockStatus @default(available) @map("stock_status")
   isActive    Boolean     @default(true) @map("is_active")
   sortOrder   Int         @default(0) @map("sort_order")

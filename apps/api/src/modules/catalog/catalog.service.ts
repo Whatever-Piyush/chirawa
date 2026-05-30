@@ -89,7 +89,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
         id: cat.id, name: cat.name, sortOrder: cat.sortOrder,
         products: cat.products.map((p) => ({
           id: p.id, name: p.name, description: p.description,
-          price: p.price, unit: p.unit, stockStatus: p.stockStatus,
+          price: p.price, mrpPaise: p.mrpPaise, unit: p.unit, stockStatus: p.stockStatus,
           imageUrl: p.images[0]?.url ?? null, sortOrder: p.sortOrder,
         })),
       })),
