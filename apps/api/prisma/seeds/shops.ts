@@ -77,10 +77,10 @@ const SHOPS: SeedShop[] = [
       // Grocery & Kitchen
       { name: 'Aashirvaad Select Atta', unit: '5 kg',  pricePaise: 28500, mrpPaise: 32000, category: 'Grocery & Kitchen', imageUrl: img('1574323347407-f5e1ad6d020b') },
       { name: 'Amul Taaza Toned Milk',  unit: '1 L',   pricePaise: 6200,  mrpPaise: 6500,  category: 'Grocery & Kitchen', imageUrl: img('1563636619-e9143da7973b') },
-      { name: 'Tata Salt Iodised',      unit: '1 kg',  pricePaise: 2800,  mrpPaise: 3000,  category: 'Grocery & Kitchen', imageUrl: img('1550411294-25b3a29d-4b2c') },
+      { name: 'Tata Salt Iodised',      unit: '1 kg',  pricePaise: 2800,  mrpPaise: 3000,  category: 'Grocery & Kitchen', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7c/Rock_salt_%28halitite%29_%28Billianwala_Salt_Member%2C_Salt_Range_Formation%2C_Ediacaran_to_Lower_Cambrian%3B_Khewra_Salt_Mine%2C_Salt_Range%2C_Pakistan%29_14.jpg/330px-Rock_salt_%28halitite%29_%28Billianwala_Salt_Member%2C_Salt_Range_Formation%2C_Ediacaran_to_Lower_Cambrian%3B_Khewra_Salt_Mine%2C_Salt_Range%2C_Pakistan%29_14.jpg' },
       { name: 'Fortune Sunflower Oil',  unit: '1 L',   pricePaise: 15500, mrpPaise: 18000, category: 'Grocery & Kitchen', imageUrl: img('1474979266404-7eaacbcd87c5') },
       { name: 'India Gate Basmati Rice',unit: '1 kg',  pricePaise: 9500,  mrpPaise: 11000, category: 'Grocery & Kitchen', imageUrl: img('1586201375761-83865001e31c') },
-      { name: 'Tata Tea Gold',          unit: '250 g', pricePaise: 11500, mrpPaise: 13000, category: 'Grocery & Kitchen', imageUrl: img('1556679343-c7306c1976bc') },
+      { name: 'Tata Tea Gold',          unit: '250 g', pricePaise: 11500, mrpPaise: 13000, category: 'Grocery & Kitchen', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/89/Chai_In_Sakora.jpg/330px-Chai_In_Sakora.jpg' },
       { name: 'MDH Garam Masala',       unit: '100 g', pricePaise: 5500,  mrpPaise: 6000,  category: 'Grocery & Kitchen', imageUrl: img('1596040033229-a9821ebd058d') },
       { name: 'Patanjali Desi Ghee',    unit: '500 ml',pricePaise: 28000, mrpPaise: 31000, category: 'Grocery & Kitchen', imageUrl: img('1589985270826-4b7bb135bc9d') },
       { name: 'Moong Dal Dhuli',        unit: '500 g', pricePaise: 6500,  mrpPaise: 7200,  category: 'Grocery & Kitchen', imageUrl: img('1515543904379-3d757afe72e4') },
@@ -101,7 +101,7 @@ const SHOPS: SeedShop[] = [
       { name: "Lay's Classic Salted",   unit: '26 g',  pricePaise: 2000, mrpPaise: 2000, category: 'Snacks & Drinks', imageUrl: img('1558961363-fa8fdf82db35') },
       { name: "Haldiram's Aloo Bhujia", unit: '200 g', pricePaise: 6500, mrpPaise: 7500, category: 'Snacks & Drinks', imageUrl: img('1599490659213-e2b9527bd087') },
       { name: 'Parle-G Biscuits',       unit: '250 g', pricePaise: 2000, mrpPaise: 2200, category: 'Snacks & Drinks', imageUrl: img('1558961363-fa8fdf82db35') },
-      { name: 'Kurkure Masala Munch',   unit: '90 g',  pricePaise: 3500, mrpPaise: 4000, category: 'Snacks & Drinks', imageUrl: img('1558961363-fa8fdf82db35') },
+      { name: 'Kurkure Masala Munch',   unit: '90 g',  pricePaise: 3500, mrpPaise: 4000, category: 'Snacks & Drinks', imageUrl: 'https://upload.wikimedia.org/wikipedia/en/thumb/e/e5/Kurkure_Logo.png/330px-Kurkure_Logo.png' },
       { name: 'Maggi 2-Minute Noodles', unit: '70 g',  pricePaise: 1400, mrpPaise: 1500, category: 'Snacks & Drinks', imageUrl: img('1612927601601-6638404737ce') },
       { name: 'Coca-Cola',              unit: '750 ml',pricePaise: 4500, mrpPaise: 5000, category: 'Snacks & Drinks', imageUrl: img('1554866585-cd94860890b7') },
       { name: 'Frooti Mango Drink',     unit: '200 ml',pricePaise: 2000, mrpPaise: 2000, category: 'Snacks & Drinks', imageUrl: img('1600271886742-f049cd451bba') },
@@ -118,7 +118,7 @@ const SHOPS: SeedShop[] = [
       { name: 'Almonds',          unit: '100 g', pricePaise: 9000,  mrpPaise: 10500, category: 'Dry Fruits & Nuts', imageUrl: img('1574226516831-e1dff420e562') },
       { name: 'Raisins (Kishmish)',unit: '200 g',pricePaise: 7500,  mrpPaise: 8500,  category: 'Dry Fruits & Nuts', imageUrl: img('1576673442511-7e39b6545c87') },
       { name: 'Walnuts',          unit: '100 g', pricePaise: 9500,  mrpPaise: 11000, category: 'Dry Fruits & Nuts', imageUrl: img('1606923829579-0cb981a83e2e') },
-      { name: 'Mixed Dry Fruits', unit: '200 g', pricePaise: 15000, mrpPaise: 17500, category: 'Dry Fruits & Nuts', imageUrl: img('1550411294-25b3a29d-4b2c') },
+      { name: 'Mixed Dry Fruits', unit: '200 g', pricePaise: 15000, mrpPaise: 17500, category: 'Dry Fruits & Nuts', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b2/DriedfruitS.jpg/330px-DriedfruitS.jpg' },
     ],
   },
   {
@@ -151,7 +151,7 @@ const SHOPS: SeedShop[] = [
     lat: '28.24340000', lng: '75.64340000',
     products: [
       // Sauces & Spreads
-      { name: 'Kissan Tomato Ketchup',  unit: '500 g', pricePaise: 9500, mrpPaise: 11000, category: 'Sauces & Spreads', imageUrl: img('1556679343-c7306c1976bc') },
+      { name: 'Kissan Tomato Ketchup',  unit: '500 g', pricePaise: 9500, mrpPaise: 11000, category: 'Sauces & Spreads', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f3/Ketchup_20160918_181342_%28cropped%29.jpg/330px-Ketchup_20160918_181342_%28cropped%29.jpg' },
       { name: 'Maggi Hot & Sweet Sauce',unit: '400 g', pricePaise: 7500, mrpPaise: 8500,  category: 'Sauces & Spreads', imageUrl: img('1565299624946-b28f40a0ae38') },
     ],
   },
@@ -161,10 +161,10 @@ const SHOPS: SeedShop[] = [
     address: 'Purani Mandi, Chirawa, Jhunjhunu 333026',
     lat: '28.24450000', lng: '75.64450000',
     products: [
-      { name: 'Fresh Jalebi',    unit: '250 g', pricePaise: 6000, mrpPaise: 6500,  category: 'Sweets & Mithai', imageUrl: SWEET_IMG },
-      { name: 'Besan Ladoo',     unit: '250 g', pricePaise: 8000, mrpPaise: 9000,  category: 'Sweets & Mithai', imageUrl: SWEET_IMG },
-      { name: 'Motichoor Ladoo', unit: '250 g', pricePaise: 9000, mrpPaise: 10000, category: 'Sweets & Mithai', imageUrl: SWEET_IMG },
-      { name: 'Gulab Jamun',     unit: '6 pcs', pricePaise: 6000, mrpPaise: 6500,  category: 'Sweets & Mithai', imageUrl: SWEET_IMG },
+      { name: 'Fresh Jalebi',    unit: '250 g', pricePaise: 6000, mrpPaise: 6500,  category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/96/Basavanagudi_Kadalekai_Parishe_%282025%29_Bangalore_%2886%29.jpg/330px-Basavanagudi_Kadalekai_Parishe_%282025%29_Bangalore_%2886%29.jpg' },
+      { name: 'Besan Ladoo',     unit: '250 g', pricePaise: 8000, mrpPaise: 9000,  category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Laddu_Sweet.JPG/330px-Laddu_Sweet.JPG' },
+      { name: 'Motichoor Ladoo', unit: '250 g', pricePaise: 9000, mrpPaise: 10000, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Laddu_Sweet.JPG/330px-Laddu_Sweet.JPG' },
+      { name: 'Gulab Jamun',     unit: '6 pcs', pricePaise: 6000, mrpPaise: 6500,  category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Bowl_of_Gulab_Jamuns.jpg/330px-Bowl_of_Gulab_Jamuns.jpg' },
     ],
   },
   {
@@ -173,10 +173,10 @@ const SHOPS: SeedShop[] = [
     address: 'Main Bazar, Chirawa, Jhunjhunu 333026',
     lat: '28.24560000', lng: '75.64560000',
     products: [
-      { name: 'Kaju Barfi', unit: '250 g', pricePaise: 18000, mrpPaise: 20000, category: 'Sweets & Mithai', imageUrl: SWEET_IMG },
-      { name: 'Milk Cake',  unit: '250 g', pricePaise: 15000, mrpPaise: 17000, category: 'Sweets & Mithai', imageUrl: SWEET_IMG },
-      { name: 'Soan Papdi', unit: '200 g', pricePaise: 9000,  mrpPaise: 10000, category: 'Sweets & Mithai', imageUrl: SWEET_IMG },
-      { name: 'Balushahi',  unit: '250 g', pricePaise: 7000,  mrpPaise: 8000,  category: 'Sweets & Mithai', imageUrl: SWEET_IMG },
+      { name: 'Kaju Barfi', unit: '250 g', pricePaise: 18000, mrpPaise: 20000, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ac/Kaju_katli_sweet.jpg/330px-Kaju_katli_sweet.jpg' },
+      { name: 'Milk Cake',  unit: '250 g', pricePaise: 15000, mrpPaise: 17000, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/Koderma_Kalakand.jpg/330px-Koderma_Kalakand.jpg' },
+      { name: 'Soan Papdi', unit: '200 g', pricePaise: 9000,  mrpPaise: 10000, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/Son_papadi.jpg/330px-Son_papadi.jpg' },
+      { name: 'Balushahi',  unit: '250 g', pricePaise: 7000,  mrpPaise: 8000,  category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/24/Home_made_makkhan_bada.jpg/330px-Home_made_makkhan_bada.jpg' },
     ],
   },
   {
@@ -185,10 +185,10 @@ const SHOPS: SeedShop[] = [
     address: 'Bazar Road, Chirawa, Jhunjhunu 333026',
     lat: '28.24670000', lng: '75.64670000',
     products: [
-      { name: 'Sarson ka Saag',  unit: '200 g', pricePaise: 4500, mrpPaise: 5000, category: 'Sweets & Mithai', imageUrl: SAAG_IMG },
-      { name: 'Makki ki Roti',   unit: '2 pcs', pricePaise: 3000, mrpPaise: 3500, category: 'Sweets & Mithai', imageUrl: SAAG_IMG },
-      { name: 'Bajra Roti',      unit: '2 pcs', pricePaise: 2500, mrpPaise: 3000, category: 'Sweets & Mithai', imageUrl: SAAG_IMG },
-      { name: 'Mixed Dal Tadka', unit: '200 g', pricePaise: 5000, mrpPaise: 5500, category: 'Sweets & Mithai', imageUrl: SAAG_IMG },
+      { name: 'Sarson ka Saag',  unit: '200 g', pricePaise: 4500, mrpPaise: 5000, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Saagroti.jpg/330px-Saagroti.jpg' },
+      { name: 'Makki ki Roti',   unit: '2 pcs', pricePaise: 3000, mrpPaise: 3500, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/49/Makki_Di_Roti.JPG/330px-Makki_Di_Roti.JPG' },
+      { name: 'Bajra Roti',      unit: '2 pcs', pricePaise: 2500, mrpPaise: 3000, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/70/Bhakri_1.jpg/330px-Bhakri_1.jpg' },
+      { name: 'Mixed Dal Tadka', unit: '200 g', pricePaise: 5000, mrpPaise: 5500, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/3_types_of_lentil.png/330px-3_types_of_lentil.png' },
     ],
   },
   {
@@ -197,10 +197,10 @@ const SHOPS: SeedShop[] = [
     address: 'Station Road, Chirawa, Jhunjhunu 333026',
     lat: '28.24780000', lng: '75.64780000',
     products: [
-      { name: 'Ghewar Special', unit: '1 pc',  pricePaise: 8000, mrpPaise: 9000, category: 'Sweets & Mithai', imageUrl: SWEET_IMG },
-      { name: 'Imarti',         unit: '250 g', pricePaise: 6500, mrpPaise: 7500, category: 'Sweets & Mithai', imageUrl: SWEET_IMG },
-      { name: 'Khurma',         unit: '250 g', pricePaise: 6500, mrpPaise: 7500, category: 'Sweets & Mithai', imageUrl: SWEET_IMG },
-      { name: 'Mawa Kachori',   unit: '4 pcs', pricePaise: 6000, mrpPaise: 7000, category: 'Sweets & Mithai', imageUrl: SWEET_IMG },
+      { name: 'Ghewar Special', unit: '1 pc',  pricePaise: 8000, mrpPaise: 9000, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/bc/Ghevar_with_Malai_Topping.jpg/330px-Ghevar_with_Malai_Topping.jpg' },
+      { name: 'Imarti',         unit: '250 g', pricePaise: 6500, mrpPaise: 7500, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e6/JalebiIndia.jpg/330px-JalebiIndia.jpg' },
+      { name: 'Khurma',         unit: '250 g', pricePaise: 6500, mrpPaise: 7500, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Gujhia.JPG/330px-Gujhia.JPG' },
+      { name: 'Mawa Kachori',   unit: '4 pcs', pricePaise: 6000, mrpPaise: 7000, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Rajasthani_Raj_Kachori.jpg/330px-Rajasthani_Raj_Kachori.jpg' },
     ],
   },
   {
@@ -209,10 +209,10 @@ const SHOPS: SeedShop[] = [
     address: 'Nehru Colony, Chirawa, Jhunjhunu 333026',
     lat: '28.24890000', lng: '75.64890000',
     products: [
-      { name: 'Bikaneri Bhujia',  unit: '200 g', pricePaise: 8000, mrpPaise: 9000, category: 'Sweets & Mithai', imageUrl: BHUJIA_IMG },
-      { name: 'Mathri',           unit: '200 g', pricePaise: 5500, mrpPaise: 6500, category: 'Sweets & Mithai', imageUrl: BHUJIA_IMG },
-      { name: 'Namkeen Mix',      unit: '200 g', pricePaise: 5000, mrpPaise: 6000, category: 'Sweets & Mithai', imageUrl: BHUJIA_IMG },
-      { name: 'Chakki Mungfali',  unit: '200 g', pricePaise: 4500, mrpPaise: 5500, category: 'Sweets & Mithai', imageUrl: BHUJIA_IMG },
+      { name: 'Bikaneri Bhujia',  unit: '200 g', pricePaise: 8000, mrpPaise: 9000, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/75/Shop_selling_Bikaneri_bhujia_in_Jaipur.jpg/330px-Shop_selling_Bikaneri_bhujia_in_Jaipur.jpg' },
+      { name: 'Mathri',           unit: '200 g', pricePaise: 5500, mrpPaise: 6500, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/Mathri.JPG/330px-Mathri.JPG' },
+      { name: 'Namkeen Mix',      unit: '200 g', pricePaise: 5000, mrpPaise: 6000, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d9/Sev_2013-12-01_16-57.jpg/330px-Sev_2013-12-01_16-57.jpg' },
+      { name: 'Chakki Mungfali',  unit: '200 g', pricePaise: 4500, mrpPaise: 5500, category: 'Sweets & Mithai', imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a4/Arachis_hypogaea_-_K%C3%B6hler%E2%80%93s_Medizinal-Pflanzen-163.jpg/330px-Arachis_hypogaea_-_K%C3%B6hler%E2%80%93s_Medizinal-Pflanzen-163.jpg' },
     ],
   },
 ];
