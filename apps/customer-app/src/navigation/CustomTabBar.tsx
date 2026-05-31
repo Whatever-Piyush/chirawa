@@ -1,11 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { View, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useT } from '@chirawa/i18n';
 import { Text } from '../components/ui';
-import { Colors } from '../theme';
+import { useTheme, type ColorPalette } from '../theme/ThemeContext';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -23,7 +23,7 @@ interface TabDef {
 // presentation is redesigned.
 const TABS: ReadonlyArray<TabDef> = [
   // 🔴 I CHANGED THIS LINE: swapped 'home' for an aesthetic 'storefront' 
-  { routeName: 'Home',         labelKey: 'home.tabHome',       iconActive: 'storefront',   iconInactive: 'storefront-outline',  pillColor: '#FFF0E9', activeIconColor: Colors.primary },
+  { routeName: 'Home',         labelKey: 'home.tabHome',       iconActive: 'storefront',   iconInactive: 'storefront-outline',  pillColor: '#FFF0E9', activeIconColor: '#FF6B35' },
   
   { routeName: 'OrderHistory', labelKey: 'home.tabOrderAgain', iconActive: 'bag-handle',   iconInactive: 'bag-handle-outline',  pillColor: '#E8F5E9', activeIconColor: '#2E7D32' },
   { routeName: 'Categories',   labelKey: 'home.tabCategories', iconActive: 'grid',         iconInactive: 'grid-outline',        pillColor: '#EDE7F6', activeIconColor: '#5E35B1' },
@@ -39,6 +39,8 @@ function RegularTab({
   def, focused, onPress,
 }: { def: TabDef; focused: boolean; onPress: () => void }) {
   const t = useT();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const pill  = useRef(new Animated.Value(focused ? 1 : 0)).current;  // pill reveal
   const scale = useRef(new Animated.Value(1)).current;                // press bounce
 
@@ -104,6 +106,8 @@ function RegularTab({
 // ── Raised maroon "Special" button ───────────────────────────────────────────
 function SpecialTab({ focused, onPress }: { focused: boolean; onPress: () => void }) {
   const t = useT();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const scale = useRef(new Animated.Value(1)).current;
 
   const handlePress = () => {
@@ -144,6 +148,8 @@ function SpecialTab({ focused, onPress }: { focused: boolean; onPress: () => voi
 
 export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   const navigateTo = (routeName: string, key: string, isFocused: boolean) => () => {
     const event = navigation.emit({ type: 'tabPress', target: key, canPreventDefault: true });
@@ -181,7 +187,8 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   bar: {
     flexDirection:   'row',
     backgroundColor: Colors.footerBg,

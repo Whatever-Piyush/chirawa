@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
-import { Colors } from '../../theme';
 
 interface Props {
   color?: string;
@@ -9,7 +8,7 @@ interface Props {
 }
 
 export default function DotsLoader({
-  color = Colors.white,
+  color = '#FFFFFF',
   size  = 6,
   style,
 }: Props) {

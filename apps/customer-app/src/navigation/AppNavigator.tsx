@@ -1,5 +1,9 @@
 import React from 'react';
-import { NavigationContainer, type NavigatorScreenParams } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  DefaultTheme as NavDefaultTheme,
+  type NavigatorScreenParams,
+} from '@react-navigation/native';
 import { navigationRef } from './ref';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -7,6 +11,7 @@ import { View, StyleSheet } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '@chirawa/i18n';
 import { Colors, Spacing } from '../theme';
+import { useTheme } from '../theme/ThemeContext';
 import { Text, DotsLoader } from '../components/ui';
 import LanguagePickerScreen from '../screens/LanguagePickerScreen';
 import CustomTabBar from './CustomTabBar';
@@ -30,6 +35,7 @@ import CategoryProductsScreen from '../screens/categories/CategoryProductsScreen
 import ChirawaSpecialScreen from '../screens/categories/ChirawaSpecialScreen';
 import ProfileScreen from '../screens/profile/ProfileScreen';
 import AddressListScreen from '../screens/profile/AddressListScreen';
+import AccountPrivacyScreen from '../screens/profile/AccountPrivacyScreen';
 import SearchScreen from '../screens/search/SearchScreen';
 
 export type RootStackParamList = {
@@ -40,6 +46,8 @@ export type RootStackParamList = {
   // Main
   MainTabs: NavigatorScreenParams<TabParamList> | undefined;
   Search: undefined;
+  EditProfile: undefined;
+  AccountPrivacy: undefined;
   ShopDetail: { shopId: string; shopName: string };
   CategoryProducts: { category: string };
   Cart: undefined;
@@ -100,6 +108,7 @@ function LoadingScreen() {
 export default function AppNavigator() {
   const { state } = useAuth();
   const { hasChosen } = useLanguage();
+  const { colors, scheme } = useTheme();
 
   if (hasChosen === null) {
     return <View style={{ flex: 1, backgroundColor: Colors.primary }} />;
@@ -111,13 +120,31 @@ export default function AppNavigator() {
 
   if (state.isLoading) return <LoadingScreen />;
 
+  // Root scene background follows the active scheme so screen edges / transitions
+  // and any not-yet-migrated screens sit on the correct backdrop.
+  const navTheme = {
+    ...NavDefaultTheme,
+    dark: scheme === 'dark',
+    colors: {
+      ...NavDefaultTheme.colors,
+      background: colors.background,
+      card: colors.surface,
+      text: colors.textPrimary,
+      border: colors.border,
+      primary: colors.primary,
+    },
+  };
+
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer ref={navigationRef} theme={navTheme}>
       <CartProvider>
         <Stack.Navigator
           screenOptions={{
             headerShown: false,
-            headerStyle: { backgroundColor: Colors.white },
+            headerStyle: { backgroundColor: colors.surface },
+            headerTitleStyle: { color: colors.textPrimary },
+            headerTintColor: colors.primary,
+            contentStyle: { backgroundColor: colors.background },
             statusBarColor: Colors.primary as never,
             statusBarStyle: 'light' as never,
             animation: 'slide_from_right',
@@ -135,6 +162,12 @@ export default function AppNavigator() {
                   name="Search"
                   component={SearchScreen}
                   options={{ headerShown: false }}
+                />
+                <Stack.Screen name="EditProfile" component={SetupProfileScreen} />
+                <Stack.Screen
+                  name="AccountPrivacy"
+                  component={AccountPrivacyScreen}
+                  options={{ headerShown: true, headerTitle: 'Account & Privacy' }}
                 />
                 <Stack.Screen name="ShopDetail" component={ShopDetailScreen} />
                 <Stack.Screen

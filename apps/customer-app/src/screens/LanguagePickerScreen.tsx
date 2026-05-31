@@ -1,12 +1,15 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { useLanguage } from '@chirawa/i18n';
-import { Colors, FontSize, Radius, Spacing } from '../theme';
+import { FontSize, Radius, Spacing } from '../theme';
+import { useTheme, type ColorPalette } from '../theme/ThemeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function LanguagePickerScreen() {
   const { setLanguage } = useLanguage();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const [selected, setSelected] = useState<'hi' | 'en' | null>(null);
 
   function handleSelect(lang: 'hi' | 'en') {
@@ -48,7 +51,8 @@ export default function LanguagePickerScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.primary,

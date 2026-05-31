@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Text, SectionContainer } from '../../components/ui';
-import { Colors, Spacing, Radius } from '../../theme';
+import { Spacing, Radius } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { fetchShops, type ApiShop } from '../../services/catalog';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
@@ -12,6 +13,8 @@ import type { RootStackParamList } from '../../navigation/AppNavigator';
 // the Chirawa Special carousel. Tapping a row opens that shop's detail page.
 export default function ShopsNearbySection() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const [shops, setShops]     = useState<ApiShop[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -59,7 +62,8 @@ export default function ShopsNearbySection() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   loading: { height: 80, justifyContent: 'center', alignItems: 'center' },
   list:    { paddingHorizontal: Spacing.lg, gap: 10 },
   row: {

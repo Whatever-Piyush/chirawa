@@ -19,6 +19,7 @@ import NotificationsBootstrap from './src/components/NotificationsBootstrap';
 import { ToastProvider } from './src/components/ui';
 import { FlyToCartProvider } from './src/components/cart/FlyToCart';
 import { Colors } from './src/theme';
+import { ThemeProvider } from './src/theme/ThemeContext';
 
 export default function App() {
   // Gate the tree on Poppins so every <Text> renders with the brand font
@@ -42,17 +43,19 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ErrorBoundary>
-          <ToastProvider>
-            <LanguageProvider>
-              <AuthProvider>
-                <FlyToCartProvider>
-                  <StatusBar style="light" translucent backgroundColor="transparent" />
-                  <NotificationsBootstrap />
-                  <AppNavigator />
-                </FlyToCartProvider>
-              </AuthProvider>
-            </LanguageProvider>
-          </ToastProvider>
+          <ThemeProvider>
+            <ToastProvider>
+              <LanguageProvider>
+                <AuthProvider>
+                  <FlyToCartProvider>
+                    <StatusBar style="light" translucent backgroundColor="transparent" />
+                    <NotificationsBootstrap />
+                    <AppNavigator />
+                  </FlyToCartProvider>
+                </AuthProvider>
+              </LanguageProvider>
+            </ToastProvider>
+          </ThemeProvider>
         </ErrorBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>

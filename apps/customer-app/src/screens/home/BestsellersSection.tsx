@@ -5,7 +5,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Text, SectionContainer } from '../../components/ui';
-import { Colors } from '../../theme';
+import { useTheme } from '../../theme/ThemeContext';
 import { fetchCategories, type ApiCategory } from '../../services/catalog';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
@@ -29,6 +29,7 @@ interface CardProps {
 }
 
 function BestsellerCard({ category, bg, onPress }: CardProps) {
+  const { colors: Colors } = useTheme();
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={[styles.card, { backgroundColor: bg }]}>
       <View style={styles.imageBox}>
@@ -52,6 +53,7 @@ function BestsellerCard({ category, bg, onPress }: CardProps) {
 
 export default function BestsellersSection() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { colors: Colors } = useTheme();
   const [categories, setCategories] = useState<ApiCategory[]>([]);
   const [loading, setLoading]       = useState(true);
 

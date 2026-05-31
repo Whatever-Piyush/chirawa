@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
-import { Colors, FontSize, FontWeight, Radius, Spacing } from '../../theme';
+import { FontSize, FontWeight, Radius, Spacing } from '../../theme';
+import { useTheme } from '../../theme/ThemeContext';
 import Text from './Text';
 
 export type BadgeVariant = 'success' | 'error' | 'warning' | 'info' | 'neutral';
@@ -11,15 +12,15 @@ interface Props {
   style?:   StyleProp<ViewStyle>;
 }
 
-const PALETTE: Record<BadgeVariant, { bg: string; fg: string }> = {
-  success: { bg: Colors.successLight, fg: Colors.success },
-  error:   { bg: Colors.errorLight,   fg: Colors.error   },
-  warning: { bg: Colors.warningLight, fg: Colors.warning },
-  info:    { bg: Colors.infoLight,    fg: Colors.info    },
-  neutral: { bg: Colors.surfaceAlt,   fg: Colors.textSecondary },
-};
-
 export default function Badge({ label, variant = 'neutral', style }: Props) {
+  const { colors: Colors } = useTheme();
+  const PALETTE: Record<BadgeVariant, { bg: string; fg: string }> = {
+    success: { bg: Colors.successLight, fg: Colors.success },
+    error:   { bg: Colors.errorLight,   fg: Colors.error   },
+    warning: { bg: Colors.warningLight, fg: Colors.warning },
+    info:    { bg: Colors.infoLight,    fg: Colors.info    },
+    neutral: { bg: Colors.surfaceAlt,   fg: Colors.textSecondary },
+  };
   const { bg, fg } = PALETTE[variant];
   return (
     <View style={[styles.pill, { backgroundColor: bg }, style]}>

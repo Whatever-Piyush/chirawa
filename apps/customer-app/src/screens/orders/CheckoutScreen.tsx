@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -24,7 +24,8 @@ import type {
 } from '@chirawa/types';
 import { PaymentMethod } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 
@@ -63,6 +64,8 @@ function deliveryNudge(subtotalPaise: number, t: (k: string) => string): { text:
 function DeliveryItemRow({
   item, color, onQty, busy,
 }: { item: CartItem; color: string; onQty: (qty: number) => void; busy: boolean }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
     <View style={styles.itemRow}>
       <View style={[styles.itemThumb, { backgroundColor: color }]} />
@@ -89,6 +92,8 @@ function DeliveryItemRow({
 // ─── Payment method card ──────────────────────────────────────────────────────
 interface PayCardProps { icon: string; title: string; hint: string; selected: boolean; badge?: string; onPress: () => void }
 function PayCard({ icon, title, hint, selected, badge, onPress }: PayCardProps) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const checkScale = useRef(new Animated.Value(selected ? 1 : 0)).current;
   useEffect(() => {
     Animated.spring(checkScale, { toValue: selected ? 1 : 0, friction: 5, tension: 200, useNativeDriver: true }).start();
@@ -117,6 +122,8 @@ function PayCard({ icon, title, hint, selected, badge, onPress }: PayCardProps) 
 
 // ─── Animated dots loading indicator ──────────────────────────────────────────
 function LoadingDots() {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const a = useRef(new Animated.Value(0.3)).current;
   const b = useRef(new Animated.Value(0.3)).current;
   const c = useRef(new Animated.Value(0.3)).current;
@@ -144,6 +151,8 @@ function LoadingDots() {
 export default function CheckoutScreen({ navigation }: Props) {
   const t = useT();
   const insets = useSafeAreaInsets();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   const [cart, setCart]               = useState<CartResponse | null>(null);
   const [cartLoading, setCartLoading] = useState(true);
@@ -545,7 +554,8 @@ export default function CheckoutScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background, gap: Spacing.md },
   loadingText: { fontSize: FontSize.md, color: Colors.textLight },

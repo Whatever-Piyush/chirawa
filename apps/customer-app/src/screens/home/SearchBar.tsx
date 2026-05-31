@@ -5,7 +5,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useT } from '@chirawa/i18n';
 import { useToast } from '../../components/ui';
-import { Colors, Spacing } from '../../theme';
+import { Spacing } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 
 const ROTATE_MS  = 1500;   // how long each placeholder dwells
 const FADE_OUT   = 100;
@@ -28,7 +29,9 @@ export default function SearchBar({
 }: Props) {
   const t        = useT();
   const toast    = useToast();
+  const { colors: Colors } = useTheme();
   const [index, setIndex] = useState(0);
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   // Memoise the placeholder list — only rebuilds on locale change.
   const placeholders = useMemo(
@@ -130,7 +133,8 @@ export default function SearchBar({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   outer: {
     paddingHorizontal: Spacing.lg,    // spec: 16
     paddingVertical:   10,            // spec: 10

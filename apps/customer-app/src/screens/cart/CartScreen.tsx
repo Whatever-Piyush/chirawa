@@ -15,7 +15,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { CartItem, CartResponse } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import Shimmer from '../../components/ui/Shimmer';
@@ -33,6 +34,8 @@ function avatarColor(name: string): string {
 // ─── Skeleton ────────────────────────────────────────────────────────────────
 
 function SkeletonRow() {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
     <View style={styles.skeletonRow}>
       <Shimmer width={64} height={64} borderRadius={Radius.md} />
@@ -51,6 +54,8 @@ function SkeletonRow() {
 // ─── Animated stepper qty ────────────────────────────────────────────────────
 
 function BouncyNumber({ value }: { value: number }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const scale = useRef(new Animated.Value(1)).current;
   const last  = useRef(value);
   useEffect(() => {
@@ -82,6 +87,8 @@ interface CartItemRowProps {
 const CartItemRow = React.memo(function CartItemRow({
   item, isUpdating, removeLabel, onChange, onRemove,
 }: CartItemRowProps) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const unitRupees     = Math.round(item.unitPrice / 100);
   const subtotalRupees = Math.round(item.subtotal / 100);
   const firstLetter    = (item.productName?.[0] ?? '?').toUpperCase();
@@ -150,6 +157,8 @@ const CartItemRow = React.memo(function CartItemRow({
 export default function CartScreen({ navigation }: Props) {
   const t = useT();
   const insets = useSafeAreaInsets();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const [cart, setCart] = useState<CartResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -440,7 +449,8 @@ export default function CartScreen({ navigation }: Props) {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
 
   // Header

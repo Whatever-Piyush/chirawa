@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, TouchableOpacity, type ViewStyle } from 'react-native';
 import Text from './Text';
-import { Colors, Spacing } from '../../theme';
+import { Spacing } from '../../theme';
+import { useTheme } from '../../theme/ThemeContext';
 
 interface Props {
   title:     string;
@@ -22,6 +23,7 @@ export default function SectionContainer({
   headerStyle,
   children,
 }: Props) {
+  const { colors: Colors } = useTheme();
   return (
     <View style={{ marginTop: Spacing.xxl }}>
       <View

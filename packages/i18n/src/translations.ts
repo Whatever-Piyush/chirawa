@@ -310,6 +310,28 @@ export const translations = {
     gstSoon:         { en: 'GST billing is coming soon',  hi: 'GST बिलिंग जल्द आएगी' },
     rewardsSoon:     { en: 'Rewards are coming soon!',    hi: 'रिवॉर्ड्स जल्द आ रहे हैं!' },
     shareMessage:    { en: 'Check out Bringly — Chirawa\'s own 30-minute delivery app! 🛵', hi: 'Bringly आज़माओ — चिरावा का अपना 30 मिनट डिलीवरी ऐप! 🛵' },
+    // ── Appearance (dark mode) ───────────────────────────────────────
+    theme_light:     { en: 'Light',                       hi: 'लाइट' },
+    theme_dark:      { en: 'Dark',                        hi: 'डार्क' },
+    theme_system:    { en: 'System default',              hi: 'सिस्टम डिफ़ॉल्ट' },
+    birthdaySaved:   { en: 'Your birthday',               hi: 'आपका जन्मदिन' },
+    // ── Edit profile ─────────────────────────────────────────────────
+    editTitle:       { en: 'Edit profile',                hi: 'प्रोफ़ाइल बदलें' },
+    editSubtitle:    { en: 'Update your name and birthday.', hi: 'अपना नाम और जन्मदिन अपडेट करें।' },
+    saveChanges:     { en: 'Save changes',                hi: 'बदलाव सेव करें' },
+    saved:           { en: 'Profile updated',             hi: 'प्रोफ़ाइल अपडेट हो गई' },
+    // ── Account & privacy ────────────────────────────────────────────
+    privacyTitle:    { en: 'Account & Privacy',           hi: 'अकाउंट और प्राइवेसी' },
+    privacyLegal:    { en: 'Legal',                       hi: 'कानूनी' },
+    privacyPolicy:   { en: 'Privacy policy',              hi: 'प्राइवेसी पॉलिसी' },
+    terms:           { en: 'Terms of service',            hi: 'सेवा की शर्तें' },
+    privacyData:     { en: 'Your data',                   hi: 'आपका डेटा' },
+    downloadData:    { en: 'Request my data',             hi: 'मेरा डेटा माँगें' },
+    deleteAccount:   { en: 'Delete my account',           hi: 'मेरा अकाउंट डिलीट करें' },
+    deleteConfirmTitle: { en: 'Delete account?',          hi: 'अकाउंट डिलीट करें?' },
+    deleteConfirmBody:  { en: 'This sends a deletion request to our team on WhatsApp. Your account and data will be removed.', hi: 'यह WhatsApp पर हमारी टीम को डिलीट अनुरोध भेजेगा। आपका अकाउंट और डेटा हटा दिया जाएगा।' },
+    deleteRequestMsg:   { en: 'Hi, I would like to delete my Bringly account and data.', hi: 'नमस्ते, मैं अपना Bringly अकाउंट और डेटा डिलीट करना चाहता/चाहती हूँ।' },
+    dataRequestMsg:     { en: 'Hi, I would like a copy of my Bringly account data.', hi: 'नमस्ते, मुझे मेरे Bringly अकाउंट डेटा की एक कॉपी चाहिए।' },
   },
   address: {
     title:          { en: 'My Addresses',                   hi: 'मेरे पते' },

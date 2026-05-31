@@ -1,6 +1,7 @@
 import React from 'react';
 import { Text as RNText, type TextProps as RNTextProps, type TextStyle } from 'react-native';
-import { Colors, FontSize, FontWeight, poppinsFamily } from '../../theme';
+import { FontSize, FontWeight, poppinsFamily } from '../../theme';
+import { useTheme } from '../../theme/ThemeContext';
 
 export type TextVariant =
   | 'hero'
@@ -47,6 +48,7 @@ export default function Text({
   children,
   ...rest
 }: Props) {
+  const { colors: Colors } = useTheme();
   const base = VARIANT_STYLES[variant];
   // Resolve the *effective* weight (explicit prop wins; otherwise use the variant's).
   // We use this to pick the correct Poppins family — RN doesn't synthesize weights from

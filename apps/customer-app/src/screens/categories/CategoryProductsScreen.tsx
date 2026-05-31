@@ -1,10 +1,10 @@
-import React, { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { View, FlatList, StyleSheet, ActivityIndicator } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { Text } from '../../components/ui';
-import { Colors } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import ProductCard from '../../components/product/ProductCard';
 import { fetchProducts, toProductCard, type ApiProduct } from '../../services/catalog';
 
@@ -17,6 +17,8 @@ type Props = {
 // Bestsellers cards and the Categories tab.
 export default function CategoryProductsScreen({ navigation, route }: Props) {
   const { category } = route.params;
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const [products, setProducts] = useState<ApiProduct[]>([]);
   const [loading, setLoading]   = useState(true);
 
@@ -53,7 +55,8 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background },
   grid:   { padding: 16, rowGap: 12, backgroundColor: Colors.background, flexGrow: 1 },
   row:    { gap: 12, justifyContent: 'space-between' },

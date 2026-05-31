@@ -8,7 +8,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing, Gradients } from '../../theme';
+import { FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing, Gradients } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import PressableScale from '../../components/ui/PressableScale';
@@ -43,6 +44,8 @@ function avatarColor(name: string): string {
 // ─── Skeleton card ────────────────────────────────────────────────────────────
 
 function ProductCardSkeleton() {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
     <View style={[styles.productCard, { width: CARD_WIDTH }]}>
       <Shimmer width={CARD_WIDTH} height={CARD_WIDTH} borderRadius={Radius.lg} />
@@ -60,6 +63,8 @@ function ProductCardSkeleton() {
 // ─── Animated quantity number ─────────────────────────────────────────────────
 
 function BouncyQty({ qty }: { qty: number }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const scale = useRef(new Animated.Value(1)).current;
   const last  = useRef(qty);
 
@@ -95,6 +100,8 @@ interface ProductGridCardProps {
 const ProductGridCard = React.memo(function ProductGridCard({
   item, qty, addLabel, outLabel, onAdd, onInc, onDec,
 }: ProductGridCardProps) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const oos = item.stockStatus === 'out_of_stock';
 
   return (
@@ -162,6 +169,8 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
   const { shopId, shopName } = route.params;
   const t = useT();
   const insets = useSafeAreaInsets();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   const [shop,    setShop]   = useState<ShopDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -463,7 +472,8 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
 
   // Header

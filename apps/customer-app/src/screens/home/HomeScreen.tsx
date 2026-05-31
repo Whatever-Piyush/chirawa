@@ -1,8 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { View, StyleSheet, ScrollView, Animated } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, Spacing } from '../../theme';
+import { Spacing } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { useT } from '@chirawa/i18n';
 import Header from './Header';
 import SearchBar from './SearchBar';
@@ -20,6 +21,8 @@ type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTa
 // Header + Search are fixed above the scroll; everything else scrolls.
 export default function HomeScreen({ navigation }: Props) {
   const t = useT();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   // Entrance animations: header fades in, search + banner slide up just after.
   const headerOpacity   = useRef(new Animated.Value(0)).current;
@@ -95,7 +98,8 @@ export default function HomeScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   scrollContent: { paddingBottom: Spacing.xxxl },
   // Pull the SearchBar up into the orange header's bottom padding zone.

@@ -1,10 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   View, Image, TouchableOpacity, StyleSheet, Animated, Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../ui';
-import { Colors, Radius, Shadow } from '../../theme';
+import { Radius, Shadow } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { useCart } from '../../context/CartContext';
 import { useFlyToCart } from '../cart/FlyToCart';
 
@@ -34,6 +35,8 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
   const imageRef = useRef<View>(null);
   const qty = quantities[product.productId] ?? 0;
   const inCart = qty > 0;
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   // Morph the ADD button into a stepper: animate width + crossfade contents.
   const morph = useRef(new Animated.Value(inCart ? 1 : 0)).current;
@@ -118,7 +121,8 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   card: {
     width:           PRODUCT_CARD_WIDTH,
     backgroundColor: Colors.surface,

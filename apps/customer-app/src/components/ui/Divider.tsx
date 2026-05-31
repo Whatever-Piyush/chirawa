@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
-import { Colors, Spacing } from '../../theme';
+import { Spacing } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import Text from './Text';
 
 interface Props {
@@ -9,6 +10,8 @@ interface Props {
 }
 
 export default function Divider({ label, style }: Props) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   if (!label) {
     return <View style={[styles.line, style]} />;
   }
@@ -23,7 +26,8 @@ export default function Divider({ label, style }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   line: {
     flex:            1,
     height:          StyleSheet.hairlineWidth,

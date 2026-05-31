@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View, FlatList, TouchableOpacity, StyleSheet, Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useT } from '@chirawa/i18n';
 import { Text, SectionContainer } from '../../components/ui';
-import { Colors } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -56,6 +56,8 @@ interface TileProps {
 }
 
 function CategoryTile({ item, label, onPress }: TileProps) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
     <TouchableOpacity style={styles.tile} activeOpacity={0.8} onPress={onPress}>
       {/* Colored image placeholder. TODO when category artwork lands:
@@ -88,6 +90,8 @@ interface Props {
 // HomeScreen ScrollView.
 export default function CategoryGrid({ title, items, onSeeAll, onSelect }: Props) {
   const t = useT();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
     <SectionContainer title={title} onSeeAll={onSeeAll}>
       <FlatList
@@ -109,7 +113,8 @@ export default function CategoryGrid({ title, items, onSeeAll, onSelect }: Props
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   grid: {
     paddingHorizontal: SECTION_HPAD,
     rowGap:            12,

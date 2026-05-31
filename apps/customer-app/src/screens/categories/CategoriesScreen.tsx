@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Image, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
@@ -7,7 +7,8 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useT } from '@chirawa/i18n';
 import { Text } from '../../components/ui';
-import { Colors, Spacing, Radius } from '../../theme';
+import { Spacing, Radius } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { fetchCategories, type ApiCategory } from '../../services/catalog';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
@@ -17,6 +18,9 @@ export default function CategoriesScreen() {
   const t = useT();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   const [categories, setCategories] = useState<ApiCategory[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -73,7 +77,8 @@ export default function CategoriesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
     backgroundColor:   Colors.primary,

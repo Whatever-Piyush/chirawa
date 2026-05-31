@@ -21,7 +21,8 @@ import type { RouteProp } from '@react-navigation/native';
 import type { OrderDetailResponse, OrderItemResponse } from '@chirawa/types';
 import { OrderStatus } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
 import { StorageService } from '../../services/storage.service';
 import { useT } from '@chirawa/i18n';
@@ -69,6 +70,8 @@ const STATUS_EMOJI: Partial<Record<OrderStatus, string>> = {
 // ─── Compact order item row ───────────────────────────────────────────────────
 
 function ItemRow({ item }: { item: OrderItemResponse }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
     <View style={styles.itemRow}>
       <Text style={styles.itemName} numberOfLines={1}>{item.productName}</Text>
@@ -81,6 +84,8 @@ function ItemRow({ item }: { item: OrderItemResponse }) {
 // ─── Pulsing ring for active step ─────────────────────────────────────────────
 
 function PulsingRing() {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const scale   = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(0.6)).current;
   useEffect(() => {
@@ -110,6 +115,8 @@ function ProgressStepper({
   currentStep: number;
   t: (key: string) => string;
 }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
     <View style={styles.stepper}>
       {STEP_KEYS.map((key, i) => {
@@ -155,6 +162,8 @@ function ProgressStepper({
 // ─── Status emoji card (animated bounce-in) ───────────────────────────────────
 
 function StatusEmojiCard({ emoji }: { emoji: string }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const scale = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     scale.setValue(0);
@@ -178,6 +187,8 @@ const PARTICLES = ['⭐', '✨', '🎉', '⭐', '✨', '🎊'];
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 function Confetti() {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const particles = useMemo(
     () => PARTICLES.map((p, i) => ({
       emoji: p,
@@ -240,6 +251,8 @@ function Confetti() {
 // ─── Delivered success banner ─────────────────────────────────────────────────
 
 function DeliveredBanner({ t }: { t: (key: string) => string }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const scale   = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(0)).current;
 
@@ -277,6 +290,8 @@ function RatingCard({
   initialComment: string | null;
   showToast: (msg: string, type: 'success' | 'error') => void;
 }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const [selectedRating, setSelectedRating] = useState(initialRating ?? 0);
   const [comment, setComment]               = useState(initialComment ?? '');
   const [submitting, setSubmitting]         = useState(false);
@@ -390,6 +405,8 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
   const t = useT();
   const toast = useToast();
   const insets = useSafeAreaInsets();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   const [order,      setOrder]      = useState<OrderDetailResponse | null>(null);
   const [loading,    setLoading]    = useState(true);
@@ -724,7 +741,8 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   container:    { flex: 1, backgroundColor: Colors.background },
   scrollContent:{ padding: Spacing.lg, gap: Spacing.md, paddingBottom: Spacing.xxl },
   center:       { flex: 1, justifyContent: 'center', alignItems: 'center' },

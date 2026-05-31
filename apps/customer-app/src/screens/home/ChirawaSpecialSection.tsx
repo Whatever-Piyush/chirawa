@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
@@ -6,7 +6,8 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useT } from '@chirawa/i18n';
 import { Text, SectionContainer } from '../../components/ui';
-import { Colors, Spacing } from '../../theme';
+import { Spacing } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { fetchShops, type ApiShop } from '../../services/catalog';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
@@ -45,6 +46,8 @@ interface CardProps {
 }
 
 function ShopCard({ name, famous, badge, orderNow, emoji, colorBg, isPlaceholder, onPress }: CardProps) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
     <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={onPress}>
       {/* Colored header band with the shop emoji.
@@ -98,6 +101,8 @@ interface Props {
 export default function ChirawaSpecialSection({ onSeeAll }: Props) {
   const t = useT();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   const [shops, setShops]     = useState<ApiShop[]>([]);
   const [loading, setLoading] = useState(true);
@@ -170,7 +175,8 @@ export default function ChirawaSpecialSection({ onSeeAll }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   // Full-width tinted strip behind the section header (bg fills the row;
   // the 16-px horizontal padding insets the text). paddingVertical lifts it
   // into a proper band per spec §8.

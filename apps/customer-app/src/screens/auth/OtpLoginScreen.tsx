@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, KeyboardAvoidingView, Platform,
@@ -6,7 +6,8 @@ import {
 } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, Spacing, FontSize, Radius } from '../../theme';
+import { Spacing, FontSize, Radius } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import { DotsLoader } from '../../components/ui';
@@ -15,6 +16,8 @@ type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'OtpLog
 
 export default function OtpLoginScreen({ navigation }: Props) {
   const t = useT();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const [phone,   setPhone]   = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -94,7 +97,8 @@ export default function OtpLoginScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   content:   { flexGrow: 1, justifyContent: 'center', paddingHorizontal: Spacing.xl, paddingVertical: Spacing.xxl },
   logoBox:   { alignItems: 'center', marginBottom: Spacing.xxxl },

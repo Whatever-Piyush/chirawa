@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
-import { Colors, Radius } from '../../theme';
+import { Radius } from '../../theme';
+import { useTheme } from '../../theme/ThemeContext';
 
 interface Props {
   width?:        number | `${number}%`;
@@ -15,6 +16,7 @@ export default function Shimmer({
   borderRadius = Radius.sm,
   style,
 }: Props) {
+  const { colors: Colors } = useTheme();
   const opacity = useRef(new Animated.Value(0.5)).current;
 
   useEffect(() => {

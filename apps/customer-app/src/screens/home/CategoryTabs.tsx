@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ScrollView, TouchableOpacity, StyleSheet, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useT } from '@chirawa/i18n';
 import { Text } from '../../components/ui';
-import { Colors } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 
 // Single source of truth for the 5 home chips — order matches spec §3.
 // `id` is intentionally English-stable so persisted "active tab" state
@@ -37,6 +37,8 @@ interface Props {
 
 export default function CategoryTabs({ onSelect, active }: Props) {
   const t = useT();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const [internal, setInternal] = useState<ChipId>('all');
   const activeId = active ?? internal;
 
@@ -82,7 +84,8 @@ export default function CategoryTabs({ onSelect, active }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   row: {
     paddingHorizontal: 14,   // spec §3
     paddingVertical:    8,

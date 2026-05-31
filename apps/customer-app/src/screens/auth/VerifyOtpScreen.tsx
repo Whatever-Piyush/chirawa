@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, Alert,
@@ -7,7 +7,8 @@ import {
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, Spacing, FontSize, Radius } from '../../theme';
+import { Spacing, FontSize, Radius } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
 import { useT } from '@chirawa/i18n';
@@ -25,6 +26,8 @@ export default function VerifyOtpScreen({ navigation, route }: Props) {
   const [otp, setOtp]  = useState(__DEV__ ? '123456' : '');
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   async function handleVerify() {
     if (otp.length !== 6) return;
@@ -102,7 +105,8 @@ export default function VerifyOtpScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   content:   { flexGrow: 1, justifyContent: 'center', paddingHorizontal: Spacing.xl, paddingVertical: Spacing.xxl, gap: Spacing.xl },
   title:     { fontSize: FontSize.xxl, fontWeight: '800', color: Colors.text },

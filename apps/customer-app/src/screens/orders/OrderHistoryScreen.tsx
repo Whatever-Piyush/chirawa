@@ -13,7 +13,8 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import { useToast } from '../../components/ui';
@@ -70,10 +71,10 @@ function formatDate(iso: string): string {
   return `${d.getDate()} ${MONTHS[d.getMonth()]}, ${hour}:${min} ${ampm}`;
 }
 
-function statusPalette(status: string): { bg: string; fg: string } {
-  if (status === 'delivered') return { bg: '#E8F5E9', fg: Colors.success };
-  if (status === 'cancelled') return { bg: '#FDECEC', fg: Colors.error };
-  return { bg: '#FFF4E5', fg: Colors.warning };
+function statusPalette(status: string, c: ColorPalette): { bg: string; fg: string } {
+  if (status === 'delivered') return { bg: '#E8F5E9', fg: c.success };
+  if (status === 'cancelled') return { bg: '#FDECEC', fg: c.error };
+  return { bg: '#FFF4E5', fg: c.warning };
 }
 
 function statusLabel(status: string, t: (k: string) => string): string {
@@ -85,6 +86,8 @@ function statusLabel(status: string, t: (k: string) => string): string {
 // ─── Skeleton card ────────────────────────────────────────────────────────────
 
 function SkeletonCard() {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const opacity = useRef(new Animated.Value(0.4)).current;
 
   useEffect(() => {
@@ -111,6 +114,8 @@ function SkeletonCard() {
 // ─── Empty state (v2 §Feature 1) ───────────────────────────────────────────────
 
 function EmptyState({ onBrowse, t }: { onBrowse: () => void; t: (k: string) => string }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIllustration}>
@@ -130,6 +135,8 @@ function EmptyState({ onBrowse, t }: { onBrowse: () => void; t: (k: string) => s
 export default function OrderHistoryScreen({ navigation }: Props) {
   const t = useT();
   const toast = useToast();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   const [orders,      setOrders]      = useState<OrderListItem[]>([]);
   const [shopMap,     setShopMap]     = useState<Map<string, string>>(new Map());
@@ -242,7 +249,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
   // ─── Render single order card ──────────────────────────────────────────────
 
   const renderOrder = useCallback(({ item }: { item: OrderListItem }) => {
-    const palette       = statusPalette(item.status);
+    const palette       = statusPalette(item.status, Colors);
     const label         = statusLabel(item.status, t);
     const shopName      = shopMap.get(item.shopId) ?? t('history.shop');
     const itemCount     = item.items.reduce((sum, i) => sum + i.quantity, 0);
@@ -396,6 +403,8 @@ export default function OrderHistoryScreen({ navigation }: Props) {
 function OrderAgainHeader({
   products, t, hasOrders,
 }: { products: ProductCardData[]; t: (k: string) => string; hasOrders: boolean }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
     <View>
       {products.length > 0 && (
@@ -415,7 +424,8 @@ function OrderAgainHeader({
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   container:   { flex: 1, backgroundColor: Colors.background },
   listContent: { padding: Spacing.lg, gap: Spacing.md },
 

@@ -1,5 +1,5 @@
 import React, {
-  useCallback, useEffect, useRef, useState,
+  useCallback, useEffect, useMemo, useRef, useState,
 } from 'react';
 import {
   View, TextInput, TouchableOpacity, FlatList,
@@ -10,7 +10,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { SearchProductResult, SearchShopResult } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import { useToast } from '../../components/ui/Toast';
@@ -33,6 +34,8 @@ type Props = {
 // ─── Skeleton row ─────────────────────────────────────────────────────────────
 
 function SkeletonRow() {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
     <View style={styles.skeletonRow}>
       <Shimmer width={48} height={48} borderRadius={Radius.md} />
@@ -49,6 +52,8 @@ function SkeletonRow() {
 // ─── Animated qty number — exact copy of ShopDetailScreen.BouncyQty ──────────
 
 function BouncyQty({ qty }: { qty: number }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const scale = useRef(new Animated.Value(1)).current;
   const last  = useRef(qty);
   useEffect(() => {
@@ -77,6 +82,8 @@ function ShopCard({
   openLabel: string;
   closedLabel: string;
 }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const initial = shop.name.charAt(0).toUpperCase();
   return (
     <TouchableOpacity style={styles.shopCard} onPress={onPress} activeOpacity={0.85}>
@@ -108,6 +115,8 @@ const ProductRow = React.memo(function ProductRow({
   onDecrement: (productId: string, currentQty: number) => void;
   addLabel: string;
 }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const initial     = product.name.charAt(0).toUpperCase();
   const priceRupees = Math.round(product.pricePaise / 100);
 
@@ -163,6 +172,8 @@ export default function SearchScreen({ navigation }: Props) {
   const t      = useT();
   const insets = useSafeAreaInsets();
   const toast  = useToast();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   const [query,    setQuery]    = useState('');
   const [loading,  setLoading]  = useState(false);
@@ -483,7 +494,8 @@ export default function SearchScreen({ navigation }: Props) {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
 
   // Header

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, Alert,
   TextInput, Modal, KeyboardAvoidingView, Platform, ScrollView,
@@ -7,7 +7,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { AddressResponse } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { Colors, FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import { DotsLoader, Shimmer } from '../../components/ui';
@@ -30,6 +31,8 @@ function labelEmoji(label?: string | null): string {
 export default function AddressListScreen({ navigation }: Props) {
   const t      = useT();
   const insets = useSafeAreaInsets();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   const [addresses, setAddresses] = useState<AddressResponse[]>([]);
   const [loading,   setLoading]   = useState(true);
@@ -236,6 +239,8 @@ interface AddAddressModalProps {
 function AddAddressModal({ visible, onClose, onSaved }: AddAddressModalProps) {
   const t      = useT();
   const insets = useSafeAreaInsets();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const [label,    setLabel]    = useState<LabelChoice>('home');
   const [street,   setStreet]   = useState('');
   const [locality, setLocality] = useState('');
@@ -368,7 +373,8 @@ function AddAddressModal({ visible, onClose, onSaved }: AddAddressModalProps) {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+const makeStyles = (Colors: ColorPalette) =>
+  StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   listPad:   { padding: Spacing.lg },
 

@@ -8,7 +8,8 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { Colors, Radius, Shadow } from '../../theme';
+import { Radius, Shadow } from '../../theme';
+import { useTheme } from '../../theme/ThemeContext';
 
 export type CardShadow = 'none' | 'xs' | 'sm' | 'md' | 'lg';
 
@@ -37,6 +38,7 @@ export default function Card({
   disabled,
   testID,
 }: Props) {
+  const { colors: Colors } = useTheme();
   const scale = useRef(new Animated.Value(1)).current;
 
   const base: ViewStyle = {
