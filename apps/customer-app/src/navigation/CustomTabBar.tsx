@@ -22,7 +22,9 @@ interface TabDef {
 // route names are unchanged (so deep links / Profile nav keep working); only
 // presentation is redesigned.
 const TABS: ReadonlyArray<TabDef> = [
-  { routeName: 'Home',         labelKey: 'home.tabHome',       iconActive: 'home',         iconInactive: 'home-outline',        pillColor: '#FFF0E9', activeIconColor: Colors.primary },
+  // 🔴 I CHANGED THIS LINE: swapped 'home' for an aesthetic 'storefront' 
+  { routeName: 'Home',         labelKey: 'home.tabHome',       iconActive: 'storefront',   iconInactive: 'storefront-outline',  pillColor: '#FFF0E9', activeIconColor: Colors.primary },
+  
   { routeName: 'OrderHistory', labelKey: 'home.tabOrderAgain', iconActive: 'bag-handle',   iconInactive: 'bag-handle-outline',  pillColor: '#E8F5E9', activeIconColor: '#2E7D32' },
   { routeName: 'Categories',   labelKey: 'home.tabCategories', iconActive: 'grid',         iconInactive: 'grid-outline',        pillColor: '#EDE7F6', activeIconColor: '#5E35B1' },
 ];
