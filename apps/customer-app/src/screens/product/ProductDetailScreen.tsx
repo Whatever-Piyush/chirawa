@@ -14,8 +14,8 @@ import { useT } from '@chirawa/i18n';
 import { Text } from '../../components/ui';
 import { Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
-import { useCart } from '../../context/CartContext';
-import ProductCard, { type ProductCardData } from '../../components/product/ProductCard';
+import { useCart, cartKey } from '../../context/CartContext';
+import ProductCard from '../../components/product/ProductCard';
 import { fetchProductDetail, toProductCard, type ApiProductDetail } from '../../services/catalog';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
@@ -33,6 +33,7 @@ export default function ProductDetailScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [selectedVariantId, setSelectedVariantId] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
@@ -40,7 +41,10 @@ export default function ProductDetailScreen({ navigation, route }: Props) {
     setError(false);
     fetchProductDetail(productId)
       .then((d) => {
-        if (active) setDetail(d);
+        if (active) {
+          setDetail(d);
+          setSelectedVariantId(d.variants[0]?.id); // default to first variant if any
+        }
       })
       .catch(() => {
         if (active) setError(true);
@@ -77,17 +81,21 @@ export default function ProductDetailScreen({ navigation, route }: Props) {
     );
   }
 
-  const rupees = Math.round(detail.pricePaise / 100);
-  const hasMrp = detail.mrpPaise != null && detail.mrpPaise > detail.pricePaise;
-  const mrpRupees = hasMrp ? Math.round((detail.mrpPaise ?? 0) / 100) : 0;
+  const selectedVariant = detail.variants.find((v) => v.id === selectedVariantId);
+  const effPrice = selectedVariant ? selectedVariant.pricePaise : detail.pricePaise;
+  const effMrp = selectedVariant ? selectedVariant.mrpPaise : detail.mrpPaise;
+  const effInStock = selectedVariant ? selectedVariant.inStock : detail.inStock;
 
-  const qty = quantities[detail.id] ?? 0;
-  const cartProduct: ProductCardData = {
+  const rupees = Math.round(effPrice / 100);
+  const hasMrp = effMrp != null && effMrp > effPrice;
+  const mrpRupees = hasMrp ? Math.round((effMrp ?? 0) / 100) : 0;
+
+  const lineKey = cartKey(detail.id, selectedVariantId);
+  const qty = quantities[lineKey] ?? 0;
+  const addInput = {
     productId: detail.id,
+    variantId: selectedVariantId,
     name: detail.name,
-    pricePaise: detail.pricePaise,
-    mrpPaise: detail.mrpPaise,
-    weightLabel: detail.unit,
     imageUrl: detail.imageUrl,
   };
 
@@ -124,9 +132,9 @@ export default function ProductDetailScreen({ navigation, route }: Props) {
 
         <View style={styles.body}>
           {/* Availability */}
-          <View style={[styles.badge, detail.inStock ? styles.badgeIn : styles.badgeOut]}>
-            <Text weight="bold" color={detail.inStock ? Colors.success : Colors.error} style={styles.badgeText}>
-              {detail.inStock ? t('product.inStock') : t('product.outOfStock')}
+          <View style={[styles.badge, effInStock ? styles.badgeIn : styles.badgeOut]}>
+            <Text weight="bold" color={effInStock ? Colors.success : Colors.error} style={styles.badgeText}>
+              {effInStock ? t('product.inStock') : t('product.outOfStock')}
             </Text>
           </View>
 
@@ -139,6 +147,36 @@ export default function ProductDetailScreen({ navigation, route }: Props) {
               {detail.unit}
             </Text>
           ) : null}
+
+          {/* Pack-size variants */}
+          {detail.variants.length > 0 && (
+            <View style={styles.variantRow}>
+              {detail.variants.map((v) => {
+                const sel = v.id === selectedVariantId;
+                return (
+                  <TouchableOpacity
+                    key={v.id}
+                    disabled={!v.inStock}
+                    activeOpacity={0.8}
+                    onPress={() => setSelectedVariantId(v.id)}
+                    style={[
+                      styles.variantChip,
+                      sel && styles.variantChipSel,
+                      !v.inStock && styles.variantChipOut,
+                    ]}
+                  >
+                    <Text
+                      weight={sel ? 'bold' : 'medium'}
+                      color={sel ? Colors.primary : Colors.textSecondary}
+                      style={styles.variantChipText}
+                    >
+                      {v.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
 
           {/* Price */}
           <View style={styles.priceRow}>
@@ -197,7 +235,7 @@ export default function ProductDetailScreen({ navigation, route }: Props) {
 
       {/* Sticky add-to-cart */}
       <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.md }]}>
-        {!detail.inStock ? (
+        {!effInStock ? (
           <View style={[styles.addBtn, styles.addBtnDisabled]}>
             <Text weight="bold" color={Colors.white} style={styles.addBtnText}>
               {t('product.outOfStock')}
@@ -207,7 +245,7 @@ export default function ProductDetailScreen({ navigation, route }: Props) {
           <View style={styles.stepper}>
             <TouchableOpacity
               style={styles.stepBtn}
-              onPress={() => void setQuantity(detail.id, qty - 1)}
+              onPress={() => void setQuantity(detail.id, qty - 1, selectedVariantId)}
               activeOpacity={0.8}
             >
               <Ionicons name="remove" size={22} color={Colors.white} />
@@ -217,14 +255,14 @@ export default function ProductDetailScreen({ navigation, route }: Props) {
             </Text>
             <TouchableOpacity
               style={styles.stepBtn}
-              onPress={() => void setQuantity(detail.id, qty + 1)}
+              onPress={() => void setQuantity(detail.id, qty + 1, selectedVariantId)}
               activeOpacity={0.8}
             >
               <Ionicons name="add" size={22} color={Colors.white} />
             </TouchableOpacity>
           </View>
         ) : (
-          <TouchableOpacity style={styles.addBtn} onPress={() => void addItem(cartProduct)} activeOpacity={0.85}>
+          <TouchableOpacity style={styles.addBtn} onPress={() => void addItem(addInput)} activeOpacity={0.85}>
             <Ionicons name="cart-outline" size={20} color={Colors.white} />
             <Text weight="bold" color={Colors.white} style={styles.addBtnText}>
               {t('product.addToCart')} · ₹{rupees}
@@ -298,6 +336,18 @@ const makeStyles = (Colors: ColorPalette) =>
 
     name: { fontSize: 22, lineHeight: 28, letterSpacing: -0.3 },
     unit: { fontSize: 14, marginTop: 2 },
+    variantRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: Spacing.md },
+    variantChip: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 12,
+      borderWidth: 1.5,
+      borderColor: Colors.border,
+      backgroundColor: Colors.surface,
+    },
+    variantChipSel: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+    variantChipOut: { opacity: 0.4 },
+    variantChipText: { fontSize: 14 },
     priceRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginTop: Spacing.sm },
     price: { fontSize: 24 },
     mrp: { fontSize: 16, textDecorationLine: 'line-through' },

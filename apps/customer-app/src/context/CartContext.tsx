@@ -13,6 +13,7 @@ export interface LastAddedItem {
 
 export interface AddItemInput {
   productId:  string;
+  variantId?: string;          // optional pack-size variant
   name:       string;
   imageUrl?:  string | null;
   imageColor?: string;
@@ -21,14 +22,21 @@ export interface AddItemInput {
 interface CartContextValue {
   count:          number;                  // total quantity across items
   subtotalPaise:  number;
-  quantities:     Record<string, number>;  // productId → qty (for ProductCard steppers)
+  quantities:     Record<string, number>;  // cartKey → qty (for steppers)
   lastAddedItem:  LastAddedItem | null;
   addItem:        (item: AddItemInput) => Promise<void>;
-  setQuantity:    (productId: string, qty: number) => Promise<void>;
+  setQuantity:    (productId: string, qty: number, variantId?: string) => Promise<void>;
   refresh:        () => Promise<void>;
 }
 
 const CartContext = createContext<CartContextValue | null>(null);
+
+// A cart line's key: variant-less items use the bare productId (so existing
+// ProductCard steppers keyed by productId keep working); variant lines append
+// the variantId so two sizes of the same product are tracked separately.
+export function cartKey(productId: string, variantId?: string | null): string {
+  return variantId ? `${productId}::${variantId}` : productId;
+}
 
 const DEFAULT_COLOR = '#FFE0CC';
 
@@ -63,7 +71,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     try {
       const cart = await api.getCart();
       const map: Record<string, number> = {};
-      for (const it of cart.items) map[it.productId] = it.quantity;
+      for (const it of cart.items) {
+        map[cartKey(it.productId, (it as { variantId?: string }).variantId)] = it.quantity;
+      }
       setQuantities(map);
       setSubtotal(cart.subtotal);
     } catch {
@@ -73,9 +83,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, [isAuthed]);
 
   const addItem = useCallback(async (item: AddItemInput) => {
-    const cur = quantities[item.productId] ?? 0;
+    const key = cartKey(item.productId, item.variantId);
+    const cur = quantities[key] ?? 0;
     // optimistic
-    setQuantities((q) => ({ ...q, [item.productId]: cur + 1 }));
+    setQuantities((q) => ({ ...q, [key]: cur + 1 }));
     setLastAdded({
       productId:  item.productId,
       name:       item.name,
@@ -83,8 +94,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       imageColor: item.imageColor ?? DEFAULT_COLOR,
     });
     try {
-      if (cur > 0) await api.updateCartItem(item.productId, cur + 1);
-      else         await api.addToCart({ productId: item.productId, quantity: 1 });
+      if (cur > 0) await api.updateCartItem(item.productId, cur + 1, item.variantId);
+      else         await api.addToCart({ productId: item.productId, quantity: 1, ...(item.variantId ? { variantId: item.variantId } : {}) });
       await refresh();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Could not add to cart';
@@ -93,16 +104,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, [quantities, refresh, toast]);
 
-  const setQuantity = useCallback(async (productId: string, qty: number) => {
+  const setQuantity = useCallback(async (productId: string, qty: number, variantId?: string) => {
+    const key = cartKey(productId, variantId);
     const next = Math.max(0, qty);
     setQuantities((q) => {
       const copy = { ...q };
-      if (next === 0) delete copy[productId];
-      else copy[productId] = next;
+      if (next === 0) delete copy[key];
+      else copy[key] = next;
       return copy;
     });
     try {
-      await api.updateCartItem(productId, next);
+      await api.updateCartItem(productId, next, variantId);
       await refresh();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Could not update cart';

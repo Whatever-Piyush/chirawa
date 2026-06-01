@@ -282,8 +282,9 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       take:    limit,
       include: {
-        shop:   { select: { id: true, name: true } },
-        images: { orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true } },
+        shop:     { select: { id: true, name: true } },
+        images:   { orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true } },
+        variants: { where: { isActive: true }, take: 1, select: { id: true } },
       },
     });
 
@@ -295,6 +296,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       unit:        p.unit,
       stockStatus: p.stockStatus,
       inStock:     p.stockStatus === 'available',
+      hasVariants: p.variants.length > 0,
       imageUrl:    p.images[0]?.url ?? null,
       shopId:      p.shopId,
       shopName:    p.shop.name,
@@ -344,8 +346,13 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
     const p = await prisma.product.findUnique({
       where: { id: productId },
       include: {
-        shop:   { select: { id: true, name: true, isActive: true } },
-        images: { orderBy: { sortOrder: 'asc' }, select: { url: true } },
+        shop:     { select: { id: true, name: true, isActive: true } },
+        images:   { orderBy: { sortOrder: 'asc' }, select: { url: true } },
+        variants: {
+          where:   { isActive: true },
+          orderBy: { sortOrder: 'asc' },
+          select:  { id: true, name: true, price: true, mrpPaise: true, stockQty: true },
+        },
       },
     });
     if (!p || !p.isActive || !p.shop.isActive || p.stockStatus === 'hidden') {
@@ -371,6 +378,13 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       shopName:    p.shop.name,
       imageUrl:    p.images[0]?.url ?? null,
       images:      p.images.map((i) => i.url),
+      variants: p.variants.map((v) => ({
+        id:       v.id,
+        name:     v.name,
+        price:    v.price,
+        mrpPaise: v.mrpPaise,
+        inStock:  v.stockQty > 0,
+      })),
       related: related.map((r) => ({
         id:          r.id,
         name:        r.name,

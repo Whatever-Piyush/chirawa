@@ -27,6 +27,7 @@ export interface ProductCardData {
   imageUrl?:   string | null;
   imageColor?: string;           // placeholder fill until real images land
   isNonVeg?:   boolean;
+  hasVariants?: boolean;         // multi-variant products open the PDP to choose a size
 }
 
 const ADD_W      = 72;
@@ -60,6 +61,11 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
   const hasMrp   = product.mrpPaise != null && product.mrpPaise > product.pricePaise;
 
   const onAdd = () => {
+    // Multi-variant products must pick a size on the PDP — don't quick-add base price.
+    if (product.hasVariants) {
+      navigation.navigate('ProductDetail', { productId: product.productId });
+      return;
+    }
     // Fly a copy of the product image to the cart capsule, then add.
     imageRef.current?.measureInWindow((x, y, w, h) => {
       fly.trigger({ x: x + w / 2, y: y + h / 2, color: product.imageColor ?? '#FFE0CC' });

@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
+import { cartKey } from '../../context/CartContext';
 import { useT } from '@chirawa/i18n';
 import Shimmer from '../../components/ui/Shimmer';
 
@@ -80,8 +81,8 @@ interface CartItemRowProps {
   item:       CartItem;
   isUpdating: boolean;
   removeLabel: string;
-  onChange:   (productId: string, delta: number, currentQty: number) => void;
-  onRemove:   (productId: string) => void;
+  onChange:   (productId: string, variantId: string | undefined, delta: number, currentQty: number) => void;
+  onRemove:   (productId: string, variantId: string | undefined) => void;
 }
 
 const CartItemRow = React.memo(function CartItemRow({
@@ -96,7 +97,7 @@ const CartItemRow = React.memo(function CartItemRow({
   const renderRightActions = () => (
     <TouchableOpacity
       style={styles.deleteAction}
-      onPress={() => onRemove(item.productId)}
+      onPress={() => onRemove(item.productId, item.variantId)}
       activeOpacity={0.8}
     >
       <Text style={styles.deleteActionIcon}>🗑️</Text>
@@ -129,7 +130,7 @@ const CartItemRow = React.memo(function CartItemRow({
         <View style={[styles.stepper, isUpdating && styles.stepperDisabled]}>
           <TouchableOpacity
             style={styles.stepperBtn}
-            onPress={() => !isUpdating && onChange(item.productId, -1, item.quantity)}
+            onPress={() => !isUpdating && onChange(item.productId, item.variantId, -1, item.quantity)}
             activeOpacity={0.7}
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
           >
@@ -140,7 +141,7 @@ const CartItemRow = React.memo(function CartItemRow({
 
           <TouchableOpacity
             style={styles.stepperBtn}
-            onPress={() => !isUpdating && onChange(item.productId, 1, item.quantity)}
+            onPress={() => !isUpdating && onChange(item.productId, item.variantId, 1, item.quantity)}
             activeOpacity={0.7}
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
           >
@@ -233,44 +234,43 @@ export default function CartScreen({ navigation }: Props) {
 
   const handleQuantityChange = useCallback(async (
     productId: string,
+    variantId: string | undefined,
     delta: number,
     currentQty: number,
   ) => {
     const newQty = currentQty + delta;
+    const key = cartKey(productId, variantId);
+    const isLine = (i: CartItem) => i.productId === productId && (i.variantId ?? undefined) === variantId;
 
     setCart((prev) => {
       if (!prev) return prev;
       if (newQty <= 0) {
-        return { ...prev, items: prev.items.filter((i) => i.productId !== productId) };
+        return { ...prev, items: prev.items.filter((i) => !isLine(i)) };
       }
       return {
         ...prev,
-        items: prev.items.map((i) =>
-          i.productId === productId ? { ...i, quantity: newQty } : i,
-        ),
+        items: prev.items.map((i) => (isLine(i) ? { ...i, quantity: newQty } : i)),
       };
     });
 
-    markUpdating(productId, true);
+    markUpdating(key, true);
     try {
-      const updated = await api.updateCartItem(productId, Math.max(0, newQty));
+      const updated = await api.updateCartItem(productId, Math.max(0, newQty), variantId);
       setCart(updated);
     } catch {
       void loadCart();
       Alert.alert(t('common.error'), t('common.retry'));
     } finally {
-      markUpdating(productId, false);
+      markUpdating(key, false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadCart, markUpdating]);
 
-  const handleRemoveItem = useCallback(async (productId: string) => {
-    setCart((prev) => prev
-      ? { ...prev, items: prev.items.filter((i) => i.productId !== productId) }
-      : prev,
-    );
+  const handleRemoveItem = useCallback(async (productId: string, variantId: string | undefined) => {
+    const isLine = (i: CartItem) => i.productId === productId && (i.variantId ?? undefined) === variantId;
+    setCart((prev) => prev ? { ...prev, items: prev.items.filter((i) => !isLine(i)) } : prev);
     try {
-      const updated = await api.updateCartItem(productId, 0);
+      const updated = await api.updateCartItem(productId, 0, variantId);
       setCart(updated);
     } catch {
       void loadCart();
@@ -299,7 +299,7 @@ export default function CartScreen({ navigation }: Props) {
 
   const removeLabel = t('cart.remove');
 
-  const keyExtractor = useCallback((item: CartItem) => item.productId, []);
+  const keyExtractor = useCallback((item: CartItem) => cartKey(item.productId, item.variantId), []);
 
   // Group cart items by shop: sort so same-shop items are contiguous, then
   // render a shop header before each shop's first item.
@@ -323,7 +323,7 @@ export default function CartScreen({ navigation }: Props) {
         )}
         <CartItemRow
           item={item}
-          isUpdating={updating.has(item.productId)}
+          isUpdating={updating.has(cartKey(item.productId, item.variantId))}
           removeLabel={removeLabel}
           onChange={handleQuantityChange}
           onRemove={handleRemoveItem}

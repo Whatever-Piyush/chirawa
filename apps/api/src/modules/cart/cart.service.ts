@@ -18,6 +18,14 @@ interface CartItem {
   subtotal:    number; // paise = unitPrice × quantity
   shopId:      string; // multi-shop carts: which shop this item is from
   shopName:    string;
+  variantId?:  string; // optional pack-size variant (undefined = base product)
+  variantName?: string;
+}
+
+// A cart line is identified by product + variant. Variant-less items
+// (variantId undefined) match purely on productId — unchanged legacy behavior.
+function sameLine(item: CartItem, productId: string, variantId?: string): boolean {
+  return item.productId === productId && (item.variantId ?? null) === (variantId ?? null);
 }
 
 // Cart-level "primary" shop = the first item's shop. Kept only for the legacy
@@ -132,6 +140,28 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
     }
     if (product.stockStatus === 'hidden') throw new NotFoundError('Product');
 
+    // Resolve an optional pack-size variant — its price + name override the base.
+    let unitPrice = product.price;
+    let lineName  = product.name;
+    let variantId: string | undefined;
+    let variantName: string | undefined;
+    if (input.variantId) {
+      const variant = await prisma.productVariant.findUnique({
+        where:  { id: input.variantId },
+        select: { id: true, productId: true, name: true, price: true, stockQty: true, isActive: true },
+      });
+      if (!variant || !variant.isActive || variant.productId !== product.id) {
+        throw new NotFoundError('Variant');
+      }
+      if (variant.stockQty <= 0) {
+        throw new BusinessRuleError(`${product.name} (${variant.name}) abhi stock mein nahi hai`);
+      }
+      unitPrice   = variant.price;
+      lineName    = `${product.name} (${variant.name})`;
+      variantId   = variant.id;
+      variantName = variant.name;
+    }
+
     const existingCart = await loadCart(userId);
 
     // Multi-shop carts are allowed — items from different shops coexist and are
@@ -141,17 +171,18 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
 
     // Build updated items list
     const items: CartItem[] = existingCart?.items ?? [];
-    const existingIndex = items.findIndex((i) => i.productId === input.productId);
+    const existingIndex = items.findIndex((i) => sameLine(i, product.id, variantId));
 
     const newItem: CartItem = {
       productId:   product.id,
-      productName: product.name,
+      productName: lineName,
       imageUrl:    product.images[0]?.url ?? null,
-      unitPrice:   product.price,
+      unitPrice,
       quantity:    input.quantity,
-      subtotal:    product.price * input.quantity,
+      subtotal:    unitPrice * input.quantity,
       shopId:      product.shopId,
       shopName:    product.shop.name,
+      ...(variantId ? { variantId, variantName } : {}),
     };
 
     if (existingIndex >= 0) {
@@ -160,9 +191,9 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
       const newQty   = existing.quantity + input.quantity;
       items[existingIndex] = {
         ...existing,
-        unitPrice: product.price, // Refresh price
+        unitPrice, // Refresh price
         quantity:  newQty,
-        subtotal:  product.price * newQty,
+        subtotal:  unitPrice * newQty,
       };
     } else {
       items.push(newItem);
@@ -199,34 +230,42 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
     const existingCart = await loadCart(userId);
     if (!existingCart) throw new NotFoundError('Cart');
 
-    const itemIndex = existingCart.items.findIndex((i) => i.productId === productId);
-    if (itemIndex < 0) throw new NotFoundError('Cart item');
+    const variantId = input.variantId;
+    const target = existingCart.items.find((i) => sameLine(i, productId, variantId));
+    if (!target) throw new NotFoundError('Cart item');
 
     const oldSubtotal = existingCart.subtotal;
     let items: CartItem[];
 
     if (input.quantity === 0) {
-      // Remove item
-      items = existingCart.items.filter((i) => i.productId !== productId);
+      // Remove the matching line
+      items = existingCart.items.filter((i) => !sameLine(i, productId, variantId));
     } else {
-      // Get fresh price from DB
-      const product = await prisma.product.findUnique({
-        where: { id: productId },
-        select: { price: true, stockStatus: true },
-      });
-
-      if (!product || product.stockStatus === 'out_of_stock') {
-        throw new BusinessRuleError('Yeh item abhi available nahi hai');
+      // Get fresh price from the variant (if any) or the base product
+      let unitPrice: number;
+      if (target.variantId) {
+        const variant = await prisma.productVariant.findUnique({
+          where:  { id: target.variantId },
+          select: { price: true, stockQty: true, isActive: true },
+        });
+        if (!variant || !variant.isActive || variant.stockQty <= 0) {
+          throw new BusinessRuleError('Yeh item abhi available nahi hai');
+        }
+        unitPrice = variant.price;
+      } else {
+        const product = await prisma.product.findUnique({
+          where:  { id: productId },
+          select: { price: true, stockStatus: true },
+        });
+        if (!product || product.stockStatus === 'out_of_stock') {
+          throw new BusinessRuleError('Yeh item abhi available nahi hai');
+        }
+        unitPrice = product.price;
       }
 
       items = existingCart.items.map((item) =>
-        item.productId === productId
-          ? {
-              ...item,
-              unitPrice: product.price,
-              quantity:  input.quantity,
-              subtotal:  product.price * input.quantity,
-            }
+        sameLine(item, productId, variantId)
+          ? { ...item, unitPrice, quantity: input.quantity, subtotal: unitPrice * input.quantity }
           : item,
       );
     }

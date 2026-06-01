@@ -206,12 +206,19 @@ export class ChirawaApiClient {
     return this.request<CartResponse>('GET', '/cart');
   }
 
-  async addToCart(data: AddToCartRequest): Promise<CartResponse> {
+  async addToCart(data: AddToCartRequest & { variantId?: string }): Promise<CartResponse> {
     return this.request<CartResponse>('POST', '/cart/items', data);
   }
 
-  async updateCartItem(productId: string, quantity: number): Promise<CartResponse> {
-    return this.request<CartResponse>('PUT', `/cart/items/${productId}`, { quantity });
+  async updateCartItem(
+    productId: string,
+    quantity: number,
+    variantId?: string,
+  ): Promise<CartResponse> {
+    return this.request<CartResponse>('PUT', `/cart/items/${productId}`, {
+      quantity,
+      ...(variantId ? { variantId } : {}),
+    });
   }
 
   async clearCart(): Promise<void> {

@@ -14,15 +14,16 @@ export interface ApiShop {
 }
 
 export interface ApiProduct {
-  id:         string;
-  name:       string;
-  pricePaise: number;
-  mrpPaise:   number | null;
-  unit:       string | null;
-  imageUrl:   string | null;
-  inStock:    boolean;
-  shopId:     string;
-  shopName:   string;
+  id:          string;
+  name:        string;
+  pricePaise:  number;
+  mrpPaise:    number | null;
+  unit:        string | null;
+  imageUrl:    string | null;
+  inStock:     boolean;
+  shopId:      string;
+  shopName:    string;
+  hasVariants?: boolean;
 }
 
 export interface ApiCategory {
@@ -30,6 +31,14 @@ export interface ApiCategory {
   sortOrder:    number;
   productCount: number;
   imageUrl:     string | null;
+}
+
+export interface ApiVariant {
+  id:         string;
+  name:       string;
+  pricePaise: number;
+  mrpPaise:   number | null;
+  inStock:    boolean;
 }
 
 export interface ApiProductDetail {
@@ -44,6 +53,7 @@ export interface ApiProductDetail {
   shopName:    string;
   imageUrl:    string | null;
   images:      string[];
+  variants:    ApiVariant[];
   related:     ApiProduct[];
 }
 
@@ -68,6 +78,7 @@ interface RawProductDetail {
   price: number; mrpPaise: number | null; unit: string | null;
   stockStatus: string; shopId: string; shopName: string;
   imageUrl: string | null; images: string[] | null;
+  variants: Array<{ id: string; name: string; price: number; mrpPaise: number | null; inStock: boolean }> | null;
   related: Array<{
     id: string; name: string; price: number; mrpPaise: number | null;
     unit: string | null; stockStatus: string; imageUrl: string | null;
@@ -88,6 +99,13 @@ export async function fetchProductDetail(productId: string): Promise<ApiProductD
     shopName:    d.shopName,
     imageUrl:    d.imageUrl,
     images:      d.images ?? [],
+    variants: (d.variants ?? []).map((v) => ({
+      id:         v.id,
+      name:       v.name,
+      pricePaise: v.price,
+      mrpPaise:   v.mrpPaise,
+      inStock:    v.inStock,
+    })),
     related: (d.related ?? []).map((r) => ({
       id:         r.id,
       name:       r.name,
@@ -110,5 +128,6 @@ export function toProductCard(p: ApiProduct): ProductCardData {
     mrpPaise:    p.mrpPaise,
     weightLabel: p.unit,
     imageUrl:    p.imageUrl,
+    hasVariants: p.hasVariants ?? false,
   };
 }
