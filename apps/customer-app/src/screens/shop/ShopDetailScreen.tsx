@@ -14,6 +14,7 @@ import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import PressableScale from '../../components/ui/PressableScale';
 import Shimmer from '../../components/ui/Shimmer';
+import RatingBadge from '../../components/ui/RatingBadge';
 import FauxGradient from '../../components/ui/FauxGradient';
 
 type Props = {
@@ -28,7 +29,7 @@ interface Product {
 }
 
 interface Category { id: string; name: string; products: Product[] }
-interface ShopDetail { id: string; name: string; isCurrentlyOpen: boolean; openTime: string; closeTime: string; categories: Category[] }
+interface ShopDetail { id: string; name: string; isCurrentlyOpen: boolean; openTime: string; closeTime: string; categories: Category[]; rating?: { average: number | null; count: number } }
 
 const COLUMNS = 2;
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -389,7 +390,7 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
                 {shop.isCurrentlyOpen ? t('shop.openNow') : t('shop.closed')}
               </Text>
             </View>
-            <Text style={styles.shopStripRating}>{t('shop.ratingSoon')}</Text>
+            <RatingBadge average={shop.rating?.average ?? null} count={shop.rating?.count ?? 0} size={13} />
           </View>
         </View>
         <View style={styles.emptyContainer}>

@@ -41,12 +41,30 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       },
     });
 
-    const result = shops.map((s) => ({
-      ...s,
-      lat: Number(s.lat),
-      lng: Number(s.lng),
-      isCurrentlyOpen: computeIsOpen(s),
-    }));
+    // Aggregate customer ratings (Order.rating) per shop in one query.
+    const ratingRows = await prisma.order.groupBy({
+      by:     ['shopId'],
+      where:  { rating: { not: null } },
+      _avg:   { rating: true },
+      _count: { rating: true },
+    });
+    const ratingMap = new Map(
+      ratingRows.map((r) => [r.shopId, { average: r._avg.rating, count: r._count.rating }]),
+    );
+
+    const result = shops.map((s) => {
+      const r = ratingMap.get(s.id);
+      return {
+        ...s,
+        lat: Number(s.lat),
+        lng: Number(s.lng),
+        isCurrentlyOpen: computeIsOpen(s),
+        rating: {
+          average: r?.average != null ? Math.round(r.average * 10) / 10 : null,
+          count: r?.count ?? 0,
+        },
+      };
+    });
 
     await redis.setex(keys.shopList(), CACHE_TTL.shopList, JSON.stringify(result));
     return result;
@@ -81,6 +99,12 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
 
     if (!shop) throw new NotFoundError('Shop');
 
+    const ratingAgg = await prisma.order.aggregate({
+      where:  { shopId, rating: { not: null } },
+      _avg:   { rating: true },
+      _count: { rating: true },
+    });
+
     const result = {
       id: shop.id, name: shop.name, description: shop.description,
       logoUrl: shop.logoUrl, address: shop.address,
@@ -88,6 +112,10 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       isCurrentlyOpen: computeIsOpen(shop),
       openTime: shop.openTime, closeTime: shop.closeTime,
       estimatedDeliveryMinutes: shop.estimatedDeliveryMinutes,
+      rating: {
+        average: ratingAgg._avg.rating != null ? Math.round(ratingAgg._avg.rating * 10) / 10 : null,
+        count: ratingAgg._count.rating,
+      },
       categories: shop.categories.map((cat) => ({
         id: cat.id, name: cat.name, sortOrder: cat.sortOrder,
         products: cat.products.map((p) => ({

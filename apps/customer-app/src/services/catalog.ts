@@ -4,6 +4,11 @@
 import { api } from './api.service';
 import type { ProductCardData } from '../components/product/ProductCard';
 
+export interface ShopRating {
+  average: number | null;
+  count:   number;
+}
+
 export interface ApiShop {
   id:                       string;
   name:                     string;
@@ -11,6 +16,7 @@ export interface ApiShop {
   estimatedDeliveryMinutes: number;
   isCurrentlyOpen:          boolean;
   isFeatured:               boolean;
+  rating?:                  ShopRating;
 }
 
 export interface ApiProduct {

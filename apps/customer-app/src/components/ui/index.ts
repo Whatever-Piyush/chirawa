@@ -12,6 +12,8 @@ export type { CardShadow }            from './Card';
 export { default as Badge }           from './Badge';
 export type { BadgeVariant }          from './Badge';
 
+export { default as RatingBadge }     from './RatingBadge';
+
 export { default as Divider }         from './Divider';
 export { default as Shimmer }         from './Shimmer';
 export { default as DotsLoader }      from './DotsLoader';

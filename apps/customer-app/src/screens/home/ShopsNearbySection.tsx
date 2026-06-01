@@ -3,7 +3,7 @@ import { View, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-nat
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { Text, SectionContainer } from '../../components/ui';
+import { Text, SectionContainer, RatingBadge } from '../../components/ui';
 import { Spacing, Radius } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { fetchShops, type ApiShop } from '../../services/catalog';
@@ -49,9 +49,12 @@ export default function ShopsNearbySection() {
                 <Text weight="semibold" color={Colors.textPrimary} numberOfLines={1} style={styles.name}>
                   {shop.name}
                 </Text>
-                <Text weight="regular" color={Colors.textSecondary} numberOfLines={1} style={styles.meta}>
-                  {shop.isCurrentlyOpen ? 'Open now' : 'Closed'} · {shop.estimatedDeliveryMinutes} min
-                </Text>
+                <View style={styles.metaRow}>
+                  <RatingBadge average={shop.rating?.average ?? null} count={shop.rating?.count ?? 0} size={12} showCount={false} />
+                  <Text weight="regular" color={Colors.textSecondary} numberOfLines={1} style={styles.meta}>
+                    {shop.isCurrentlyOpen ? 'Open now' : 'Closed'} · {shop.estimatedDeliveryMinutes} min
+                  </Text>
+                </View>
               </View>
               <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
             </TouchableOpacity>
@@ -83,5 +86,6 @@ const makeStyles = (Colors: ColorPalette) =>
   },
   info: { flex: 1 },
   name: { fontSize: 14, lineHeight: 18 },
-  meta: { fontSize: 12, lineHeight: 16, marginTop: 2 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 },
+  meta: { fontSize: 12, lineHeight: 16 },
 });
