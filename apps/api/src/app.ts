@@ -4,7 +4,9 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import sensible from '@fastify/sensible';
 import rateLimit from '@fastify/rate-limit';
+import multipart from '@fastify/multipart';
 import { env } from './config/env';
+import { MAX_IMAGE_BYTES } from './services/r2.service';
 
 import prismaPlugin        from './shared/plugins/prisma.plugin';
 import redisPlugin         from './shared/plugins/redis.plugin';
@@ -61,36 +63,59 @@ export async function buildApp(): Promise<FastifyInstance> {
     max:        env.NODE_ENV === 'development' ? 1000 : 100,
     timeWindow: '1 minute',
     errorResponseBuilder: (_req, context) => ({
-      statusCode: 429,
-      error:   'Too Many Requests',
-      message: `Bahut zyada requests. ${context.after} baad try karein.`,
-      code:    'RATE_LIMIT_EXCEEDED',
+      success: false,
+      error: {
+        code:    'RATE_LIMIT_EXCEEDED',
+        message: `Bahut zyada requests. ${context.after} baad try karein.`,
+      },
     }),
   });
 
+  // Multipart — image uploads (admin only). 5 MB cap, single file per request.
+  await app.register(multipart, {
+    limits: { fileSize: MAX_IMAGE_BYTES, files: 1 },
+  });
+
   // ── Global Error Handler ──────────────────────────────────────────────────
+  // Every error response follows a single shape: { success: false, error: { code, message } }.
+  // Error codes are SCREAMING_SNAKE_CASE (see shared/errors/app-errors.ts).
   app.setErrorHandler((error, request, reply) => {
     request.log.error({ err: error }, 'Request error');
+
+    // App-defined errors (AppError subclasses) carry statusCode + code.
     if (error instanceof Error && 'statusCode' in error && 'code' in error) {
       return reply.status(error.statusCode as number).send({
-        statusCode: error.statusCode, error: error.name,
-        message: error.message, code: error.code,
+        success: false,
+        error: { code: String((error as { code: unknown }).code), message: error.message },
       });
     }
+
+    // Fastify schema validation failures.
     if (error.validation) {
       return reply.status(400).send({
-        statusCode: 400, error: 'Bad Request',
-        message: 'Invalid request data', code: 'VALIDATION_ERROR',
-        details: error.validation,
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid request data' },
       });
     }
-    if (error.statusCode === 429) return reply.status(429).send(error);
+
+    // Rate limiter (defensive — errorResponseBuilder already shapes the body).
+    if (error.statusCode === 429) {
+      return reply.status(429).send({
+        success: false,
+        error: { code: 'RATE_LIMIT_EXCEEDED', message: error.message || 'Too many requests' },
+      });
+    }
+
+    // Anything else → 500. Never leak stack traces in production.
     return reply.status(500).send({
-      statusCode: 500, error: 'Internal Server Error',
-      message: env.NODE_ENV === 'production'
-        ? 'Kuch galat ho gaya. Dobara try karein.'
-        : error.message,
-      code: 'INTERNAL_ERROR',
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message:
+          env.NODE_ENV === 'production'
+            ? 'Kuch galat ho gaya. Dobara try karein.'
+            : error.message,
+      },
     });
   });
 

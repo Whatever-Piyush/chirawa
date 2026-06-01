@@ -1,5 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { authenticate, requireRole } from '../../shared/middleware/auth.middleware';
+import { ValidationError, NotFoundError } from '../../shared/errors/app-errors';
+import { uploadImage, ALLOWED_IMAGE_MIME } from '../../services/r2.service';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ALIAS_CACHE_TTL = 3600;
 const aliasExpandKey = (q: string) => `search:aliases:expanded:${q.toLowerCase().trim()}`;
@@ -23,7 +27,7 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const body = request.body as { term?: unknown; aliases?: unknown };
       if (typeof body.term !== 'string' || !Array.isArray(body.aliases)) {
-        return reply.status(400).send({ error: 'term (string) and aliases (array) required' });
+        throw new ValidationError('term (string) and aliases (array) required');
       }
 
       const normalized    = body.term.toLowerCase().trim();
@@ -58,7 +62,7 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const body = request.body as { aliases?: unknown };
       if (!Array.isArray(body.aliases)) {
-        return reply.status(400).send({ error: 'aliases (array) required' });
+        throw new ValidationError('aliases (array) required');
       }
 
       const { term } = request.params as { term: string };
@@ -66,7 +70,7 @@ export default async function routes(app: FastifyInstance): Promise<void> {
       const existing   = await app.prisma.searchAlias.findUnique({ where: { term: normalized } });
 
       if (!existing) {
-        return reply.status(404).send({ error: `No alias entry found for term "${normalized}"` });
+        throw new NotFoundError(`Alias entry for term "${normalized}"`);
       }
 
       const newAliases    = (body.aliases as string[]).map((a) => a.toLowerCase().trim()).filter(Boolean);
@@ -97,6 +101,94 @@ export default async function routes(app: FastifyInstance): Promise<void> {
         select:  { id: true, term: true, aliases: true, language: true, createdAt: true },
       });
       return reply.send({ count: aliases.length, data: aliases });
+    },
+  );
+
+  // ── Image management (shop onboarding) ─────────────────────────────────────
+
+  /*
+   * POST /api/v1/admin/upload-image?folder=products|shops
+   * Multipart image upload → Cloudflare R2. Returns { url }.
+   */
+  app.post(
+    '/upload-image',
+    { preHandler: [authenticate, requireRole('admin')] },
+    async (request, reply) => {
+      const folderRaw = (request.query as { folder?: string }).folder;
+      const folder: 'shops' | 'products' = folderRaw === 'shops' ? 'shops' : 'products';
+
+      const data = await request.file();
+      if (!data) throw new ValidationError('No image file provided');
+      if (!ALLOWED_IMAGE_MIME.includes(data.mimetype)) {
+        throw new ValidationError(`Unsupported image type: ${data.mimetype}. Use jpg, png or webp.`);
+      }
+      const buffer = await data.toBuffer();
+      if (data.file.truncated) throw new ValidationError('Image too large (max 5MB)');
+
+      const url = await uploadImage(folder, buffer, data.mimetype);
+      return reply.status(201).send({ url });
+    },
+  );
+
+  /*
+   * PATCH /api/v1/admin/shops/:id/images  { logoUrl?, coverImageUrl? }
+   */
+  app.patch(
+    '/shops/:id/images',
+    { preHandler: [authenticate, requireRole('admin')] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      if (!UUID_RE.test(id)) throw new NotFoundError('Shop');
+
+      const body = request.body as { logoUrl?: unknown; coverImageUrl?: unknown };
+      const data: { logoUrl?: string; coverImageUrl?: string } = {};
+      if (typeof body.logoUrl === 'string') data.logoUrl = body.logoUrl;
+      if (typeof body.coverImageUrl === 'string') data.coverImageUrl = body.coverImageUrl;
+      if (Object.keys(data).length === 0) {
+        throw new ValidationError('Provide logoUrl and/or coverImageUrl');
+      }
+
+      const shop = await app.prisma.shop.findUnique({ where: { id }, select: { id: true } });
+      if (!shop) throw new NotFoundError('Shop');
+
+      const updated = await app.prisma.shop.update({
+        where: { id },
+        data,
+        select: { id: true, logoUrl: true, coverImageUrl: true },
+      });
+      await app.redis.del(`catalog:shop:${id}:full`, 'catalog:shops:active').catch(() => {});
+      return reply.send(updated);
+    },
+  );
+
+  /*
+   * PUT /api/v1/admin/products/:id/image  { url }
+   * Sets the product's primary image (replaces existing images).
+   */
+  app.put(
+    '/products/:id/image',
+    { preHandler: [authenticate, requireRole('admin')] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      if (!UUID_RE.test(id)) throw new NotFoundError('Product');
+
+      const body = request.body as { url?: unknown };
+      if (typeof body.url !== 'string' || !/^https?:\/\//.test(body.url)) {
+        throw new ValidationError('A valid image url is required');
+      }
+
+      const product = await app.prisma.product.findUnique({
+        where: { id },
+        select: { shopId: true },
+      });
+      if (!product) throw new NotFoundError('Product');
+
+      await app.prisma.$transaction([
+        app.prisma.productImage.deleteMany({ where: { productId: id } }),
+        app.prisma.productImage.create({ data: { productId: id, url: body.url, sortOrder: 0 } }),
+      ]);
+      await app.redis.del(`catalog:shop:${product.shopId}:full`).catch(() => {});
+      return reply.send({ productId: id, url: body.url });
     },
   );
 

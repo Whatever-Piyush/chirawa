@@ -26,6 +26,7 @@ import { PaymentMethod } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
+import { isOpenNow } from '../../utils/operatingHours';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 
@@ -46,16 +47,13 @@ const CHIRAWA_PINCODE = '333026';
 // Thumbnail placeholders until product images exist.
 const ITEM_COLORS = ['#FFF0E9', '#E8F5E9', '#FFF0F5', '#EDE7F6', '#FFF8E1', '#E6F7F4'];
 
-// ─── Delivery-fee savings nudge (mirrors backend calculateFeeV1 bands) ─────────
-// short distance: < ₹100 → ₹20, ₹100–₹300 → ₹15, > ₹300 → ₹10.
+// ─── Delivery-fee savings nudge (mirrors backend flat pricing) ─────────────────
+// Flat Chirawa pricing: cart < ₹100 → ₹25, cart ≥ ₹100 → ₹10 (₹15 on Chirawa
+// Special). Below ₹100 we nudge the customer to reach ₹100 and pay ₹10.
 function deliveryNudge(subtotalPaise: number, t: (k: string) => string): { text: string; progress: number; done: boolean } {
   if (subtotalPaise < 10000) {
     const amt = Math.ceil((10000 - subtotalPaise) / 100);
-    return { text: t('checkout.saveTo15').replace('{amt}', String(amt)), progress: subtotalPaise / 10000, done: false };
-  }
-  if (subtotalPaise <= 30000) {
-    const amt = Math.ceil((30001 - subtotalPaise) / 100);
-    return { text: t('checkout.saveTo10').replace('{amt}', String(amt)), progress: subtotalPaise / 30000, done: false };
+    return { text: t('checkout.saveTo10').replace('{amt}', String(amt)), progress: subtotalPaise / 10000, done: false };
   }
   return { text: t('checkout.bestRate'), progress: 1, done: true };
 }
@@ -325,7 +323,8 @@ export default function CheckoutScreen({ navigation }: Props) {
   const nudge          = cart ? deliveryNudge(cart.subtotal, t) : null;
   const selectedAddr   = addresses.find((a) => a.id === addressId) ?? null;
 
-  const canPlaceOrder = (!!addressId || (!!street.trim() && !!area.trim())) && !placing && !!cart;
+  const withinHours   = isOpenNow();
+  const canPlaceOrder = (!!addressId || (!!street.trim() && !!area.trim())) && !placing && !!cart && withinHours;
   const canConfirm    = !!street.trim() && !!area.trim() && !confirming;
 
   const ListHeader = (
@@ -525,6 +524,13 @@ export default function CheckoutScreen({ navigation }: Props) {
           </View>
           <Text style={styles.addrChange}>{t('checkout.change')}</Text>
         </TouchableOpacity>
+
+        {/* Closed-hours notice — Place Order is disabled outside 8 AM – 9 PM */}
+        {!withinHours && (
+          <Text style={[styles.payUsingValue, { color: Colors.error }]}>
+            {t('checkout.closedNotice')}
+          </Text>
+        )}
 
         {/* pay using + place order */}
         <View style={styles.payRow}>

@@ -1,13 +1,16 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Image, TouchableOpacity, StyleSheet, Animated, Dimensions,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../ui';
 import { Radius, Shadow } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { useCart } from '../../context/CartContext';
 import { useFlyToCart } from '../cart/FlyToCart';
+import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -37,6 +40,8 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
   const inCart = qty > 0;
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const [imgError, setImgError] = useState(false);
 
   // Morph the ADD button into a stepper: animate width + crossfade contents.
   const morph = useRef(new Animated.Value(inCart ? 1 : 0)).current;
@@ -65,7 +70,11 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
   const onDec = () => { void setQuantity(product.productId, qty - 1); };
 
   return (
-    <View style={styles.card}>
+    <TouchableOpacity
+      style={styles.card}
+      activeOpacity={0.9}
+      onPress={() => navigation.navigate('ProductDetail', { productId: product.productId })}
+    >
       {/* veg / non-veg indicator */}
       <View style={[styles.veg, { borderColor: vegColor }]}>
         <View style={[styles.vegDot, { backgroundColor: vegColor }]} />
@@ -73,8 +82,13 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
 
       {/* image area */}
       <View ref={imageRef} collapsable={false} style={styles.imageArea}>
-        {product.imageUrl ? (
-          <Image source={{ uri: product.imageUrl }} style={styles.image} resizeMode="contain" />
+        {product.imageUrl && !imgError ? (
+          <Image
+            source={{ uri: product.imageUrl }}
+            style={styles.image}
+            resizeMode="contain"
+            onError={() => setImgError(true)}
+          />
         ) : (
           <View style={[styles.placeholder, { backgroundColor: product.imageColor ?? '#FFF0E9' }]} />
         )}
@@ -117,7 +131,7 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
       <Text weight="medium" color={Colors.textPrimary} numberOfLines={2} style={styles.name}>
         {product.name}
       </Text>
-    </View>
+    </TouchableOpacity>
   );
 }
 

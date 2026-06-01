@@ -32,6 +32,21 @@ export interface ApiCategory {
   imageUrl:     string | null;
 }
 
+export interface ApiProductDetail {
+  id:          string;
+  name:        string;
+  description: string | null;
+  pricePaise:  number;
+  mrpPaise:    number | null;
+  unit:        string | null;
+  inStock:     boolean;
+  shopId:      string;
+  shopName:    string;
+  imageUrl:    string | null;
+  images:      string[];
+  related:     ApiProduct[];
+}
+
 export async function fetchShops(): Promise<ApiShop[]> {
   const data = await api.getShops();
   return Array.isArray(data) ? (data as ApiShop[]) : [];
@@ -45,6 +60,46 @@ export async function fetchProducts(params?: { category?: string; limit?: number
 export async function fetchCategories(): Promise<ApiCategory[]> {
   const data = await api.getCategories();
   return Array.isArray(data) ? (data as ApiCategory[]) : [];
+}
+
+// Raw shape from GET /catalog/products/:id (price/stockStatus are raw fields).
+interface RawProductDetail {
+  id: string; name: string; description: string | null;
+  price: number; mrpPaise: number | null; unit: string | null;
+  stockStatus: string; shopId: string; shopName: string;
+  imageUrl: string | null; images: string[] | null;
+  related: Array<{
+    id: string; name: string; price: number; mrpPaise: number | null;
+    unit: string | null; stockStatus: string; imageUrl: string | null;
+  }> | null;
+}
+
+export async function fetchProductDetail(productId: string): Promise<ApiProductDetail> {
+  const d = (await api.getProduct(productId)) as RawProductDetail;
+  return {
+    id:          d.id,
+    name:        d.name,
+    description: d.description,
+    pricePaise:  d.price,
+    mrpPaise:    d.mrpPaise,
+    unit:        d.unit,
+    inStock:     d.stockStatus === 'available',
+    shopId:      d.shopId,
+    shopName:    d.shopName,
+    imageUrl:    d.imageUrl,
+    images:      d.images ?? [],
+    related: (d.related ?? []).map((r) => ({
+      id:         r.id,
+      name:       r.name,
+      pricePaise: r.price,
+      mrpPaise:   r.mrpPaise,
+      unit:       r.unit,
+      imageUrl:   r.imageUrl,
+      inStock:    r.stockStatus === 'available',
+      shopId:     d.shopId,
+      shopName:   d.shopName,
+    })),
+  };
 }
 
 export function toProductCard(p: ApiProduct): ProductCardData {

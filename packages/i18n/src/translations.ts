@@ -32,6 +32,7 @@ export const translations = {
     deliveryIn30:      { en: 'Delivery in 30 min',                   hi: 'डिलीवरी 30 मिनट में' },
     viewAll:           { en: 'See all',                              hi: 'सभी देखें' },
     tabHome:           { en: 'Home',                                 hi: 'होम' },
+    closedBanner:      { en: "We're closed — we deliver 8 AM – 9 PM. Browse now, order tomorrow!", hi: 'हम अभी बंद हैं — डिलीवरी 8 AM – 9 PM। अभी देखें, कल ऑर्डर करें!' },
     tabOrders:         { en: 'Orders',                               hi: 'ऑर्डर' },
     tabProfile:        { en: 'Profile',                              hi: 'प्रोफाइल' },
     // ── HomeScreen redesign — Chunk 8 (bottom nav: 4 tabs) ───────────
@@ -151,6 +152,7 @@ export const translations = {
     onlineHint:        { en: 'UPI · Cards · Wallets',                hi: 'UPI · कार्ड · वॉलेट' },
     comingSoon:        { en: 'Online payment coming soon!',          hi: 'ऑनलाइन पेमेंट जल्द आएगी!' },
     placeOrder:        { en: 'Place Order',                          hi: 'ऑर्डर दें' },
+    closedNotice:      { en: 'We deliver 8 AM – 9 PM. Please order during these hours.', hi: 'हम 8 AM – 9 PM डिलीवरी करते हैं। कृपया इसी समय ऑर्डर करें।' },
     chirawa:           { en: 'Chirawa — 333026',                     hi: 'चिरावा — 333026' },
     safeSecure:        { en: 'Safe & Secure Checkout',               hi: 'सुरक्षित और भरोसेमंद चेकआउट' },
     trustBadge:        { en: 'Secure Checkout — 100% Safe',          hi: 'सुरक्षित चेकआउट — 100% Safe' },
@@ -244,6 +246,15 @@ export const translations = {
     stockLabel:      { en: 'Stock',               hi: 'स्टॉक' },
     updateStock:     { en: 'Update Stock',        hi: 'स्टॉक अपडेट करें' },
     settlementTitle: { en: 'Settlement',          hi: 'भुगतान' },
+  },
+  product: {
+    about:            { en: 'About this product',    hi: 'इस प्रोडक्ट के बारे में' },
+    frequentlyBought: { en: 'You might also like',   hi: 'ये भी पसंद आ सकता है' },
+    inStock:          { en: 'In stock',              hi: 'स्टॉक में है' },
+    outOfStock:       { en: 'Out of stock',          hi: 'स्टॉक में नहीं' },
+    soldBy:           { en: 'Sold by',               hi: 'विक्रेता' },
+    addToCart:        { en: 'Add to cart',           hi: 'कार्ट में डालें' },
+    notFound:         { en: 'Product not found',     hi: 'प्रोडक्ट नहीं मिला' },
   },
   common: {
     loading:    { en: 'Loading...',               hi: 'लोड हो रहा है...' },

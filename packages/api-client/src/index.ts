@@ -106,8 +106,15 @@ export class ChirawaApiClient {
     const data = await response.json() as Record<string, unknown>;
 
     if (!response.ok) {
-      const message = typeof data['message'] === 'string' ? data['message'] : 'Something went wrong';
-      const code = typeof data['code'] === 'string' ? data['code'] : undefined;
+      // Standard error shape: { success: false, error: { code, message } }.
+      // Falls back to legacy top-level { message, code } for safety.
+      const errObj =
+        data['error'] && typeof data['error'] === 'object'
+          ? (data['error'] as Record<string, unknown>)
+          : data;
+      const message =
+        typeof errObj['message'] === 'string' ? errObj['message'] : 'Something went wrong';
+      const code = typeof errObj['code'] === 'string' ? errObj['code'] : undefined;
       throw new ApiError(response.status, message, code);
     }
 
@@ -183,6 +190,10 @@ export class ChirawaApiClient {
     if (params?.limit != null) qs.set('limit', String(params.limit));
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     return this.request('GET', `/catalog/products${suffix}`, undefined, false);
+  }
+
+  async getProduct(productId: string): Promise<unknown> {
+    return this.request('GET', `/catalog/products/${productId}`, undefined, false);
   }
 
   async getCategories(): Promise<unknown> {

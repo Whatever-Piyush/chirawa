@@ -5,6 +5,8 @@ import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { useT } from '@chirawa/i18n';
+import { Text } from '../../components/ui';
+import { isOpenNow } from '../../utils/operatingHours';
 import Header from './Header';
 import SearchBar from './SearchBar';
 import CategoryTabs from './CategoryTabs';
@@ -60,6 +62,15 @@ export default function HomeScreen({ navigation }: Props) {
         />
       </View>
 
+      {/* ── Closed banner — outside delivery hours (browsing still allowed) ── */}
+      {!isOpenNow() && (
+        <View style={styles.closedBanner}>
+          <Text weight="medium" color={Colors.warning} style={styles.closedBannerText}>
+            🕒 {t('home.closedBanner')}
+          </Text>
+        </View>
+      )}
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -104,4 +115,13 @@ const makeStyles = (Colors: ColorPalette) =>
   scrollContent: { paddingBottom: Spacing.xxxl },
   // Pull the SearchBar up into the orange header's bottom padding zone.
   searchOverlap: { marginTop: -20 },
+  closedBanner: {
+    backgroundColor: Colors.warningLight,
+    marginHorizontal: Spacing.lg,
+    borderRadius: 12,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  closedBannerText: { fontSize: 13, lineHeight: 18 },
 });

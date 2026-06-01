@@ -36,6 +36,7 @@ import ChirawaSpecialScreen from '../screens/categories/ChirawaSpecialScreen';
 import ProfileScreen from '../screens/profile/ProfileScreen';
 import AddressListScreen from '../screens/profile/AddressListScreen';
 import AccountPrivacyScreen from '../screens/profile/AccountPrivacyScreen';
+import ProductDetailScreen from '../screens/product/ProductDetailScreen';
 import SearchScreen from '../screens/search/SearchScreen';
 
 export type RootStackParamList = {
@@ -49,6 +50,7 @@ export type RootStackParamList = {
   EditProfile: undefined;
   AccountPrivacy: undefined;
   ShopDetail: { shopId: string; shopName: string };
+  ProductDetail: { productId: string };
   CategoryProducts: { category: string };
   Cart: undefined;
   Checkout: undefined;
@@ -170,6 +172,7 @@ export default function AppNavigator() {
                   options={{ headerShown: true, headerTitle: 'Account & Privacy' }}
                 />
                 <Stack.Screen name="ShopDetail" component={ShopDetailScreen} />
+                <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
                 <Stack.Screen
                   name="CategoryProducts"
                   component={CategoryProductsScreen}

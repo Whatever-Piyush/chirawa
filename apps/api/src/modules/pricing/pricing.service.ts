@@ -1,114 +1,82 @@
 import { ValidationError } from '../../shared/errors/app-errors';
 
+// ─── Flat pricing — Chirawa launch (no distance logic) ─────────────────────────
+// Business rules (BRINGLY_PRODUCTION_PLAN, Chunk 0):
+//   • cart total  <  ₹100  → ₹25 delivery (small-cart fee; order still allowed)
+//   • cart total  ≥  ₹100  → ₹10 standard, OR ₹15 if the cart contains a
+//                            "Chirawa Special" (featured) shop
+//   • No distance calculation, no basket-size tiers, no hard minimum-order block.
+// All monetary values are integer paise — NEVER float.
+
+export const MIN_CART_FOR_STANDARD_FEE_PAISE = 10_000; // ₹100
+export const FEE_SMALL_CART_PAISE = 2_500; // ₹25 — cart below ₹100
+export const FEE_STANDARD_PAISE = 1_000; // ₹10 — regular shops
+export const FEE_SPECIAL_PAISE = 1_500; // ₹15 — Chirawa Special (featured) shops
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface FeeCalculationInput {
-  cartSubtotalPaise: number;  // integer paise — NEVER float
-  distanceMetres:    number;  // road distance in metres
-  ruleVersion:       number;
+  cartSubtotalPaise: number; // integer paise — whole-cart goods value
+  hasSpecialShop: boolean; // true if any shop in the cart is Chirawa Special (featured)
+  ruleVersion: number; // stamped onto the order for accounting/audit
 }
 
 export interface FeeCalculationResult {
-  feePaise:       number;
-  ruleVersion:    number;
-  distanceKm:     number;
-  breakdownHindi: string; // Shown in cart UI
+  feePaise: number;
+  ruleVersion: number;
+  breakdownHindi: string; // shown in cart/checkout UI
 }
 
-// ─── Fee Rules — Version 1 ────────────────────────────────────────────────────
-// All monetary values in paise, all distances in metres.
-//
-// Rule table (from playbook):
-//   distance > 4000m               → ₹25 (2500p)
-//   distance ≤ 4000m, cart <  ₹100 → ₹20 (2000p)
-//   distance ≤ 4000m, cart ₹100–₹300 → ₹15 (1500p)
-//   distance ≤ 4000m, cart > ₹300  → ₹10 (1000p)
-//
-// Boundary precision (exact):
-//   distance: strictly > 4000 → long-distance; == 4000 → short-distance
-//   cart:     < 10000p = low; >= 10000p AND <= 30000p = mid; > 30000p = high
-
-export function calculateFeeV1(
-  cartSubtotalPaise: number,
-  distanceMetres: number,
-): number {
-  // Long distance — cart value irrelevant
-  if (distanceMetres > 4000) return 2500;
-
-  // Short distance — cart band determines fee
-  if (cartSubtotalPaise < 10000)  return 2000; // < ₹100
-  if (cartSubtotalPaise <= 30000) return 1500; // ₹100 to ₹300 inclusive
-  return 1000;                                  // > ₹300
+// ─── Pure flat-fee function ────────────────────────────────────────────────────
+export function calculateFlatFee(cartSubtotalPaise: number, hasSpecialShop: boolean): number {
+  if (cartSubtotalPaise < MIN_CART_FOR_STANDARD_FEE_PAISE) return FEE_SMALL_CART_PAISE;
+  return hasSpecialShop ? FEE_SPECIAL_PAISE : FEE_STANDARD_PAISE;
 }
 
-// ─── Version registry — add new versions here, never mutate old ones ─────────
-const FEE_CALCULATORS: Record<number, (cart: number, dist: number) => number> = {
-  1: calculateFeeV1,
-};
+// ─── Main export — validates inputs, returns fee + UI breakdown ────────────────
+export function calculateDeliveryFee(input: FeeCalculationInput): FeeCalculationResult {
+  const { cartSubtotalPaise, hasSpecialShop, ruleVersion } = input;
 
-// ─── Main export — validates inputs, delegates to versioned calculator ────────
-export function calculateDeliveryFee(
-  input: FeeCalculationInput,
-): FeeCalculationResult {
-  const { cartSubtotalPaise, distanceMetres, ruleVersion } = input;
-
-  // Input validation — financial bugs must be caught at boundary
+  // Input validation — financial bugs must be caught at the boundary.
   if (!Number.isInteger(cartSubtotalPaise)) {
     throw new ValidationError(`cartSubtotalPaise must be integer, got: ${cartSubtotalPaise}`);
   }
   if (cartSubtotalPaise < 0) {
     throw new ValidationError(`cartSubtotalPaise cannot be negative`);
   }
-  if (!Number.isFinite(distanceMetres) || distanceMetres < 0) {
-    throw new ValidationError(`distanceMetres must be a non-negative finite number`);
-  }
 
-  const calculator = FEE_CALCULATORS[ruleVersion];
-  if (!calculator) {
-    throw new ValidationError(`Unknown fee rule version: ${ruleVersion}`);
-  }
-
-  const feePaise   = calculator(cartSubtotalPaise, distanceMetres);
-  const distanceKm = distanceMetres / 1000;
+  const feePaise = calculateFlatFee(cartSubtotalPaise, hasSpecialShop);
 
   return {
     feePaise,
     ruleVersion,
-    distanceKm,
-    breakdownHindi: buildBreakdownHindi(cartSubtotalPaise, distanceMetres, feePaise),
+    breakdownHindi: buildBreakdownHindi(cartSubtotalPaise, hasSpecialShop, feePaise),
   };
 }
 
-// ─── Hindi explanation shown in the cart UI ───────────────────────────────────
-function buildBreakdownHindi(
-  cartPaise: number,
-  distMetres: number,
-  feePaise: number,
-): string {
+// ─── Hindi explanation shown in the cart/checkout UI ───────────────────────────
+function buildBreakdownHindi(cartPaise: number, hasSpecialShop: boolean, feePaise: number): string {
   const cartRs = Math.round(cartPaise / 100);
-  const distKm = (distMetres / 1000).toFixed(1);
-  const feeRs  = Math.round(feePaise / 100);
+  const feeRs = Math.round(feePaise / 100);
 
   const reason =
-    distMetres > 4000
-      ? `Doori 4 km se zyada hai (${distKm} km)`
-      : cartPaise < 10000
-        ? `Cart ₹100 se kam hai`
-        : cartPaise <= 30000
-          ? `Cart ₹100–₹300 ke beech hai`
-          : `Cart ₹300 se zyada hai`;
+    cartPaise < MIN_CART_FOR_STANDARD_FEE_PAISE
+      ? `Order ₹100 se kam hai`
+      : hasSpecialShop
+        ? `Chirawa Special delivery`
+        : `Standard delivery`;
 
-  return `Delivery charge ₹${feeRs} — ${reason} (doori: ${distKm} km, cart: ₹${cartRs})`;
+  return `Delivery charge ₹${feeRs} — ${reason} (cart: ₹${cartRs})`;
 }
 
-// ─── Get active fee rule version from DB ──────────────────────────────────────
+// ─── Get active fee rule version from DB (stamped onto orders) ─────────────────
 import type { PrismaClient } from '@prisma/client';
 
 export async function getActiveFeeRuleVersion(prisma: PrismaClient): Promise<number> {
   const rule = await prisma.feeRule.findFirst({
-    where:   { effectiveTo: null },
+    where: { effectiveTo: null },
     orderBy: { version: 'desc' },
-    select:  { version: true },
+    select: { version: true },
   });
 
   if (!rule) throw new ValidationError('No active fee rule found');

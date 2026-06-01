@@ -26,6 +26,11 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
     return reply.send(await catalogService.getProducts(opts));
   });
 
+  // GET /api/v1/catalog/products/:id — public (full product detail for PDP)
+  app.get('/products/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    return reply.send(await catalogService.getProductDetail(request.params.id));
+  });
+
   // GET /api/v1/catalog/categories — public (distinct categories w/ counts)
   app.get('/categories', async (_req, reply) => {
     return reply.send(await catalogService.getCategories());

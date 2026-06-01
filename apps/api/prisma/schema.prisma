@@ -207,12 +207,16 @@ model Shop {
   name                     String   @db.VarChar(100)
   description              String?  @db.Text
   logoUrl                  String?  @map("logo_url")
+  coverImageUrl            String?  @map("cover_image_url")
   lat                      Decimal  @db.Decimal(10, 8)
   lng                      Decimal  @db.Decimal(11, 8)
   address                  String   @db.VarChar(255)
   isActive                 Boolean  @default(false) @map("is_active")
   isOpen                   Boolean  @default(false) @map("is_open")
   isFeatured               Boolean  @default(false) @map("is_featured")
+  // Per-shop commission rate as a fraction (0.13 = 13%). Overrides the shop's
+  // Category rate. Defaults to 0 — set from admin for Chirawa Special shops.
+  commissionRate           Decimal  @default(0) @map("commission_rate") @db.Decimal(5, 4)
   openTime                 String   @default("09:00") @map("open_time") @db.VarChar(5)
   closeTime                String   @default("22:00") @map("close_time") @db.VarChar(5)
   estimatedDeliveryMinutes Int      @default(30) @map("estimated_delivery_minutes")
@@ -227,6 +231,8 @@ model Shop {
   settlements Settlement[]
 
   @@index([isActive])
+  @@index([isOpen])
+  @@index([isFeatured])
   @@index([lat, lng])
   @@map("shops")
 }
@@ -238,6 +244,9 @@ model Category {
   name      String   @db.VarChar(100)
   sortOrder Int      @default(0) @map("sort_order")
   isActive  Boolean  @default(true) @map("is_active")
+  // Category-level commission rate as a fraction (0.13 = 13%). A shop's own
+  // commissionRate (if > 0) overrides this. Defaults to 0.
+  commissionRate Decimal @default(0) @map("commission_rate") @db.Decimal(5, 4)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -273,6 +282,7 @@ model Product {
   stockUpdateLog StockUpdateLog[]
 
   @@index([shopId, stockStatus, isActive])
+  @@index([categoryId])
   @@index([name])
   @@map("products")
 }

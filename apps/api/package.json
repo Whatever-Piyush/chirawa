@@ -20,9 +20,11 @@
     "worker": "tsx watch src/worker/index.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1057.0",
     "@chirawa/types": "workspace:*",
     "@fastify/cors": "^9.0.1",
     "@fastify/helmet": "^11.1.1",
+    "@fastify/multipart": "^8.3.1",
     "@fastify/rate-limit": "^9.1.0",
     "@fastify/sensible": "^5.5.0",
     "@prisma/client": "^5.13.0",

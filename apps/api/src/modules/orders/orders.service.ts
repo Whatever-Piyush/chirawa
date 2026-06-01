@@ -2,11 +2,11 @@ import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import type { PlaceOrderInput } from './orders.schema';
 import { calculateDeliveryFee, getActiveFeeRuleVersion } from '../pricing/pricing.service';
-import { getRoadDistance } from '../pricing/distance.service';
 import {
   NotFoundError, ForbiddenError,
-  ValidationError, BusinessRuleError,
+  ValidationError, BusinessRuleError, AppError,
 } from '../../shared/errors/app-errors';
+import { isWithinOperatingHours, OPERATING_HOURS_LABEL } from '../../shared/config/operating-hours';
 import {
   emitOrderStatusChanged,
   emitNewOrderForSeller,
@@ -25,6 +25,15 @@ interface CartData {
 export function createOrdersService(prisma: PrismaClient, redis: Redis) {
 
   async function placeOrder(userId: string, input: PlaceOrderInput) {
+    // Operating-hours gate — Bringly delivers 8 AM – 9 PM IST.
+    if (!isWithinOperatingHours()) {
+      throw new AppError(
+        422,
+        `We deliver ${OPERATING_HOURS_LABEL}. Place your order tomorrow!`,
+        'SHOP_CLOSED',
+      );
+    }
+
     const cartRaw = await redis.get(`cart:${userId}`);
     if (!cartRaw) throw new ValidationError('Cart khaali hai');
     const cart = JSON.parse(cartRaw) as CartData;
@@ -42,39 +51,38 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
 
     interface ShopPlan {
       shopId: string; shopName: string; sellerUserId: string | null;
-      items: CartData['items']; subtotal: number;
-      feePaise: number; distanceKm: number; distanceSource: string;
+      items: CartData['items']; subtotal: number; isFeatured: boolean;
     }
     const plans: ShopPlan[] = [];
     for (const sid of shopIds) {
       const shop = await prisma.shop.findUnique({
         where:  { id: sid },
-        select: { lat: true, lng: true, isActive: true, name: true, sellerId: true },
+        select: { isActive: true, name: true, sellerId: true, isFeatured: true },
       });
       if (!shop || !shop.isActive) throw new BusinessRuleError('Yeh dukaan abhi available nahi hai');
 
       const shopItems = cart.items.filter((i) => (i.shopId ?? cart.shopId) === sid);
       const subtotal  = shopItems.reduce((s, i) => s + i.subtotal, 0);
-
-      const { metres, source } = await getRoadDistance(
-        Number(shop.lat), Number(shop.lng),
-        Number(address.lat), Number(address.lng),
-        redis,
-      );
-      const fee = calculateDeliveryFee({ cartSubtotalPaise: subtotal, distanceMetres: metres, ruleVersion });
       const seller = await prisma.sellerProfile.findUnique({ where: { id: shop.sellerId }, select: { userId: true } });
 
       plans.push({
         shopId: sid, shopName: shop.name, sellerUserId: seller?.userId ?? null,
-        items: shopItems, subtotal,
-        feePaise: fee.feePaise, distanceKm: fee.distanceKm, distanceSource: source,
+        items: shopItems, subtotal, isFeatured: shop.isFeatured,
       });
     }
 
-    // Single combined delivery fee = farthest shop's fee; assign it to that
-    // shop's order only (others pay 0).
-    const combinedFee   = Math.max(...plans.map((p) => p.feePaise));
-    const feeCarrierIdx = plans.findIndex((p) => p.feePaise === combinedFee);
+    // Flat pricing (Chirawa): one combined fee for the whole cart — no distance.
+    // ₹25 if cart < ₹100, else ₹15 if any shop is Chirawa Special, else ₹10.
+    // The single fee is carried by one order (a Special shop if present, else the
+    // first); the other shops' orders pay 0.
+    const hasSpecialShop = plans.some((p) => p.isFeatured);
+    const combinedFee    = calculateDeliveryFee({
+      cartSubtotalPaise: cart.subtotal,
+      hasSpecialShop,
+      ruleVersion,
+    }).feePaise;
+    const specialIdx     = plans.findIndex((p) => p.isFeatured);
+    const feeCarrierIdx  = specialIdx >= 0 ? specialIdx : 0;
 
     // Promo: only supported on single-shop checkouts for now.
     let discountPaise = 0;
@@ -112,7 +120,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
             deliveryPincode: address.pincode, deliveryLat: address.lat, deliveryLng: address.lng,
             cartSubtotalAtPricing: p.subtotal, deliveryFee: fee,
             discount, totalAmount: total,
-            feeRuleVersion: ruleVersion, distanceKm: p.distanceKm, distanceSource: p.distanceSource,
+            feeRuleVersion: ruleVersion, distanceKm: 0, distanceSource: 'flat',
             paymentMethod: input.paymentMethod, status: initStatus,
             addressId: address.id, promoCodeId: idx === feeCarrierIdx ? promoCodeId : null,
             ...(isCod ? { confirmedAt: new Date() } : {}),

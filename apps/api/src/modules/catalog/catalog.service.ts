@@ -6,6 +6,9 @@ import { NotFoundError } from '../../shared/errors/app-errors';
 const CACHE_TTL = { shopList: 600, shopDetail: 300 };
 const ALIAS_CACHE_TTL = 3600;
 
+// Validate UUIDs before hitting Prisma so a malformed :id returns 404, not 500.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const keys = {
   shopList:    ()           => `catalog:shops:active`,
   shopDetail:  (shopId: string) => `catalog:shop:${shopId}:full`,
@@ -332,6 +335,54 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
   }
 
+  // Single product detail for the Product Detail Page (PDP). Returns the full
+  // product + all its images + up to 6 related products from the same shop.
+  async function getProductDetail(productId: string) {
+    // Guard malformed IDs so a bad URL returns 404, not a Prisma 500.
+    if (!UUID_RE.test(productId)) throw new NotFoundError('Product');
+
+    const p = await prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        shop:   { select: { id: true, name: true, isActive: true } },
+        images: { orderBy: { sortOrder: 'asc' }, select: { url: true } },
+      },
+    });
+    if (!p || !p.isActive || !p.shop.isActive || p.stockStatus === 'hidden') {
+      throw new NotFoundError('Product');
+    }
+
+    const related = await prisma.product.findMany({
+      where:   { shopId: p.shopId, isActive: true, stockStatus: { not: 'hidden' }, id: { not: p.id } },
+      orderBy: { sortOrder: 'asc' },
+      take:    6,
+      include: { images: { orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true } } },
+    });
+
+    return {
+      id:          p.id,
+      name:        p.name,
+      description: p.description,
+      price:       p.price,
+      mrpPaise:    p.mrpPaise,
+      unit:        p.unit,
+      stockStatus: p.stockStatus,
+      shopId:      p.shopId,
+      shopName:    p.shop.name,
+      imageUrl:    p.images[0]?.url ?? null,
+      images:      p.images.map((i) => i.url),
+      related: related.map((r) => ({
+        id:          r.id,
+        name:        r.name,
+        price:       r.price,
+        mrpPaise:    r.mrpPaise,
+        unit:        r.unit,
+        stockStatus: r.stockStatus,
+        imageUrl:    r.images[0]?.url ?? null,
+      })),
+    };
+  }
+
   async function invalidateShopCache(shopId: string) {
     await Promise.all([
       redis.del(keys.shopDetail(shopId)),
@@ -339,5 +390,5 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
     ]);
   }
 
-  return { getShops, getShop, getProducts, getCategories, searchProducts, searchCatalog, invalidateShopCache };
+  return { getShops, getShop, getProducts, getCategories, getProductDetail, searchProducts, searchCatalog, invalidateShopCache };
 }
