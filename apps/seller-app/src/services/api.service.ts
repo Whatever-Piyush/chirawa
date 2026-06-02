@@ -135,4 +135,29 @@ export const SellerApi = {
 
   registerDeviceToken: (fcmToken: string, token: string) =>
     request('POST', '/notifications/register-token', { token: fcmToken, platform: 'android' }, token),
+
+  // Seller dashboard (Chunk 8.4 / 8.5)
+  getSalesSummary: (token: string) =>
+    request<SalesSummary>('GET', '/sellers/me/sales-summary', undefined, token),
+
+  getSettlements: (token: string) =>
+    request<SettlementsResponse>('GET', '/sellers/me/settlements', undefined, token),
 };
+
+export interface SalesWindow { orders: number; valuePaise: number }
+export interface SalesSummary {
+  shopName: string;
+  today: SalesWindow;
+  week:  SalesWindow;
+  month: SalesWindow;
+  bestSeller: { productName: string; quantity: number } | null;
+}
+export interface SettlementPeriod {
+  id: string; periodDate: string; totalOrders: number;
+  totalProductPaise: number; platformFeePaise: number;
+  netPayablePaise: number; status: string; paidAt: string | null;
+}
+export interface SettlementsResponse {
+  settlements: SettlementPeriod[];
+  current: { orders: number; totalProductPaise: number; platformFeePaise: number; netPayablePaise: number };
+}
