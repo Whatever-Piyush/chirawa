@@ -59,6 +59,16 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
     return { status };
   }
 
+  // Current availability for the rider home screen (defaults to offline).
+  async function getAvailability(userId: string): Promise<{ status: AvailabilityStatus }> {
+    const rider = await prisma.riderProfile.findUnique({
+      where:  { userId },
+      select: { availability: { select: { status: true } } },
+    });
+    if (!rider) throw new NotFoundError('Rider profile');
+    return { status: (rider.availability?.status as AvailabilityStatus) ?? 'offline' };
+  }
+
   async function loadActiveZones(): Promise<ZoneLite[]> {
     const zones = await prisma.deliveryZone.findMany({ where: { isActive: true } });
     return zones.map((z) => ({ id: z.id, name: z.name, polygon: (z.polygon as unknown as LatLng[]) ?? [] }));
@@ -121,5 +131,5 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
     return { assigned: true as const, riderId: best.riderProfileId, zone: zone?.name ?? null };
   }
 
-  return { setAvailability, assignOrder };
+  return { setAvailability, getAvailability, assignOrder };
 }

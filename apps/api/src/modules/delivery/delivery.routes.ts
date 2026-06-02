@@ -13,8 +13,17 @@ const availabilitySchema = z.object({
 export default async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   const dispatch = createDispatchService(app.prisma, app.redis);
 
-  // POST /api/v1/delivery/availability — rider goes online / offline (Task 5.2)
-  app.post(
+  // GET /api/v1/delivery/availability — rider's current online/offline status
+  app.get(
+    '/availability',
+    { preHandler: [authenticate, requireRole('rider')] },
+    async (request, reply) => {
+      return reply.send(await dispatch.getAvailability(request.auth!.userId));
+    },
+  );
+
+  // PATCH /api/v1/delivery/availability — rider goes online / offline (Task 5.2)
+  app.patch(
     '/availability',
     { preHandler: [authenticate, requireRole('rider')] },
     async (request, reply) => {
