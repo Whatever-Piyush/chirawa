@@ -712,7 +712,7 @@ model ReferralRedemption {
 model PromoCode {
   id             String    @id @default(uuid()) @db.Uuid
   code           String    @unique @db.VarChar(30)
-  type           String    @db.VarChar(10)
+  type           String    @db.VarChar(20)   // flat | percent | free_delivery
   valuePaise     Int       @map("value_paise")
   minCartPaise   Int       @default(0) @map("min_cart_paise")
   maxUsesTotal   Int?      @map("max_uses_total")

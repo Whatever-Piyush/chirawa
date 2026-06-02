@@ -110,6 +110,24 @@ async function main(): Promise<void> {
   }
   console.log('  ✅ App config seeded (14 keys)');
 
+  // ── Promotions ───────────────────────────────────────────────────────────
+  // FIRSTORDER: free delivery on a customer's first order (auto-applied at
+  // checkout for anyone with zero prior orders). value_paise is informational
+  // for free_delivery — the discount equals the actual delivery fee.
+  await prisma.promoCode.upsert({
+    where:  { code: 'FIRSTORDER' },
+    update: { type: 'free_delivery', isActive: true, minCartPaise: 9900, maxUsesPerUser: 1 },
+    create: {
+      code:           'FIRSTORDER',
+      type:           'free_delivery',
+      valuePaise:     1000,   // ₹10 — typical delivery fee (informational)
+      minCartPaise:   9900,   // ₹99 minimum order
+      maxUsesPerUser: 1,
+      isActive:       true,
+    },
+  });
+  console.log('  ✅ Promo seeded (FIRSTORDER — free first delivery)');
+
   // ── Search Aliases ─────────────────────────────────────────────────────────
   await seedSearchAliases(prisma);
 

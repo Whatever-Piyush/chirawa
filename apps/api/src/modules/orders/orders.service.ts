@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import type { PlaceOrderInput } from './orders.schema';
 import { calculateDeliveryFee, getActiveFeeRuleVersion } from '../pricing/pricing.service';
+import { validatePromo, resolveAutoPromo, type ValidatedPromo } from '../promotions/promotions.service';
 import {
   NotFoundError, ForbiddenError,
   ValidationError, BusinessRuleError, AppError,
@@ -84,21 +85,33 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     const specialIdx     = plans.findIndex((p) => p.isFeatured);
     const feeCarrierIdx  = specialIdx >= 0 ? specialIdx : 0;
 
-    // Promo: only supported on single-shop checkouts for now.
+    // Promo: only supported on single-shop checkouts for now. A code typed by the
+    // customer is validated; if none is given, first-time customers get FIRSTORDER
+    // (free delivery) auto-applied. Discount lands on the fee-carrier order below.
     let discountPaise = 0;
     let promoCodeId: string | null = null;
-    if (input.promoCode) {
-      if (plans.length > 1) throw new ValidationError('Promo code abhi sirf ek dukaan ke order par lagta hai');
-      const promo = await prisma.promoCode.findUnique({ where: { code: input.promoCode.toUpperCase() } });
-      if (!promo || !promo.isActive) throw new ValidationError('Yeh promo code valid nahi hai');
-      if (promo.expiresAt && promo.expiresAt < new Date()) throw new ValidationError('Promo code expire ho gaya');
-      if (cart.subtotal < promo.minCartPaise) {
-        throw new ValidationError(`Is promo ke liye minimum cart ₹${Math.round(promo.minCartPaise / 100)} chahiye`);
+    if (plans.length === 1) {
+      let applied: ValidatedPromo | null = null;
+      if (input.promoCode) {
+        applied = await validatePromo(prisma, {
+          code:              input.promoCode,
+          userId,
+          cartSubtotalPaise: cart.subtotal,
+          deliveryFeePaise:  combinedFee,
+        });
+      } else {
+        applied = await resolveAutoPromo(prisma, {
+          userId,
+          cartSubtotalPaise: cart.subtotal,
+          deliveryFeePaise:  combinedFee,
+        });
       }
-      const usedCount = await prisma.promoRedemption.count({ where: { promoCodeId: promo.id, userId } });
-      if (usedCount >= promo.maxUsesPerUser) throw new ValidationError('Is promo code ka use kar chuke hain');
-      discountPaise = promo.type === 'flat' ? promo.valuePaise : Math.floor((cart.subtotal * promo.valuePaise) / 10000);
-      promoCodeId = promo.id;
+      if (applied) {
+        discountPaise = applied.discountPaise;
+        promoCodeId   = applied.promoId;
+      }
+    } else if (input.promoCode) {
+      throw new ValidationError('Promo code abhi sirf ek dukaan ke order par lagta hai');
     }
 
     const isCod      = input.paymentMethod === 'cod';
