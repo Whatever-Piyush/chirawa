@@ -3,12 +3,13 @@ import React, {
 } from 'react';
 import {
   View, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, Alert, Animated,
+  StyleSheet, Alert, Animated, ScrollView, Switch, Modal, Pressable,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { SearchProductResult, SearchShopResult } from '@chirawa/types';
+import type { SearchProductResult, SearchShopResult, SearchFilters, SearchSort } from '@chirawa/types';
+import { fetchCategories, type ApiCategory } from '../../services/catalog';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
@@ -26,6 +27,24 @@ const DEBOUNCE_MS   = 300;
 const MIN_QUERY_LEN = 2;
 
 const POPULAR_CHIPS = ['आलू', 'प्याज', 'दूध', 'साबुन', 'चीनी', 'तेल'];
+
+// Price buckets (paise). A preset-chip alternative to a native slider so the
+// filter sheet stays pure-JS (no extra native module / dev-client rebuild).
+type PriceBucket = { id: string; label: string; min?: number; max?: number };
+const PRICE_BUCKETS: PriceBucket[] = [
+  { id: 'any',     label: 'कोई भी' },
+  { id: 'u50',     label: '₹50 से कम',  max: 5000 },
+  { id: '50-100',  label: '₹50–₹100',   min: 5000,  max: 10000 },
+  { id: '100-200', label: '₹100–₹200',  min: 10000, max: 20000 },
+  { id: '200+',    label: '₹200+',      min: 20000 },
+];
+
+const SORT_OPTIONS: { id: SearchSort; label: string }[] = [
+  { id: 'relevance', label: 'सबसे प्रासंगिक' },
+  { id: 'priceLow',  label: 'कीमत: कम से ज़्यादा' },
+  { id: 'priceHigh', label: 'कीमत: ज़्यादा से कम' },
+  { id: 'rating',    label: 'रेटिंग' },
+];
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Search'>;
@@ -180,13 +199,41 @@ export default function SearchScreen({ navigation }: Props) {
   const [products, setProducts] = useState<SearchProductResult[]>([]);
   const [shops,    setShops]    = useState<SearchShopResult[]>([]);
   const [searched, setSearched] = useState('');
+  const [total,    setTotal]    = useState(0);
   const [recent,   setRecent]   = useState<string[]>([]);
   // productId → quantity map, mirrors the live cart
   const [cartMap,  setCartMap]  = useState<Record<string, number>>({});
 
+  // ── Filters (Chunk 4 — Task 4.2) ───────────────────────────────────────────
+  const [categories, setCategories]       = useState<ApiCategory[]>([]);
+  const [category, setCategory]           = useState<string | null>(null); // null = All
+  const [priceBucket, setPriceBucket]     = useState('any');
+  const [inStockOnly, setInStockOnly]     = useState(false);
+  const [sort, setSort]                   = useState<SearchSort>('relevance');
+  const [sheetOpen, setSheetOpen]         = useState(false);
+
   const inputRef     = useRef<TextInput>(null);
   const debounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestIdRef = useRef(0);
+
+  // Current filter set, derived from state. Kept in a ref so the (stable)
+  // runSearch closure always reads the latest values without being re-created.
+  const filters = useMemo<SearchFilters>(() => {
+    const bucket = PRICE_BUCKETS.find((b) => b.id === priceBucket);
+    const f: SearchFilters = {};
+    if (category) f.category = category;
+    if (bucket?.min != null) f.minPrice = bucket.min;
+    if (bucket?.max != null) f.maxPrice = bucket.max;
+    if (inStockOnly) f.inStock = true;
+    if (sort !== 'relevance') f.sort = sort;
+    return f;
+  }, [category, priceBucket, inStockOnly, sort]);
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
+
+  // Count of active "sheet" filters (category shows as its own chip row).
+  const activeSheetCount =
+    (priceBucket !== 'any' ? 1 : 0) + (inStockOnly ? 1 : 0) + (sort !== 'relevance' ? 1 : 0);
 
   // ── Load recent searches + current cart on mount ──────────────────────────
 
@@ -204,6 +251,10 @@ export default function SearchScreen({ navigation }: Props) {
         for (const item of data.items) map[item.productId] = item.quantity;
         setCartMap(map);
       })
+      .catch(() => undefined);
+
+    fetchCategories()
+      .then((cats) => { if (alive) setCategories(cats); })
       .catch(() => undefined);
 
     const focusTimer = setTimeout(() => {
@@ -234,25 +285,32 @@ export default function SearchScreen({ navigation }: Props) {
   const runSearch = useCallback(async (term: string) => {
     const q = term.trim();
     if (q.length < MIN_QUERY_LEN) {
-      setProducts([]); setShops([]); setSearched('');
+      setProducts([]); setShops([]); setSearched(''); setTotal(0);
       return;
     }
     const thisId = ++requestIdRef.current;
     setLoading(true);
     try {
-      const result = await api.search(q);
+      const result = await api.search(q, filtersRef.current);
       if (thisId !== requestIdRef.current) return;
       setProducts(result.products);
       setShops(result.shops);
+      setTotal(result.total);
       setSearched(q);
       void saveRecent(q);
     } catch {
       if (thisId !== requestIdRef.current) return;
-      setProducts([]); setShops([]);
+      setProducts([]); setShops([]); setTotal(0);
     } finally {
       if (thisId === requestIdRef.current) setLoading(false);
     }
   }, [saveRecent]);
+
+  // Re-run the current query whenever filters change (only if a query is active).
+  useEffect(() => {
+    if (query.trim().length >= MIN_QUERY_LEN) void runSearch(query);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, priceBucket, inStockOnly, sort]);
 
   const handleQueryChange = useCallback((text: string) => {
     setQuery(text);
@@ -450,6 +508,52 @@ export default function SearchScreen({ navigation }: Props) {
         </View>
       </View>
 
+      {/* Filter row — category chips + Filter button (only while searching) */}
+      {queryActive && (
+        <View style={styles.filterBar}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterChipsContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <TouchableOpacity
+              style={[styles.filterChip, category === null && styles.filterChipActive]}
+              onPress={() => setCategory(null)}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.filterChipText, category === null && styles.filterChipTextActive]}>
+                {t('search.allCategories')}
+              </Text>
+            </TouchableOpacity>
+            {categories.map((c) => {
+              const active = category === c.name;
+              return (
+                <TouchableOpacity
+                  key={c.name}
+                  style={[styles.filterChip, active && styles.filterChipActive]}
+                  onPress={() => setCategory(active ? null : c.name)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.filterChipText, active && styles.filterChipTextActive]} numberOfLines={1}>
+                    {c.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <TouchableOpacity
+            style={[styles.filterBtn, activeSheetCount > 0 && styles.filterBtnActive]}
+            onPress={() => setSheetOpen(true)}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.filterBtnText, activeSheetCount > 0 && styles.filterBtnTextActive]}>
+              ⚙︎ {t('search.filter')}{activeSheetCount > 0 ? ` (${activeSheetCount})` : ''}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Loading shimmer */}
       {loading && (
         <View style={styles.body}>
@@ -482,12 +586,100 @@ export default function SearchScreen({ navigation }: Props) {
             item.type === 'product' ? `prod-${item.item.id}` :
             `${item.type}-${index}`
           }
+          ListHeaderComponent={
+            total > 0 ? (
+              <Text style={styles.resultCount}>
+                {total} {t('search.resultsFound')}
+              </Text>
+            ) : null
+          }
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + Spacing.xxl }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           renderItem={renderItem}
         />
       )}
+
+      {/* ── Filter bottom sheet ───────────────────────────────────────────── */}
+      <Modal
+        visible={sheetOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSheetOpen(false)}
+      >
+        <Pressable style={styles.sheetBackdrop} onPress={() => setSheetOpen(false)}>
+          <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]} onPress={() => {}}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>{t('search.filter')}</Text>
+
+            {/* Price range */}
+            <Text style={styles.sheetSectionTitle}>{t('search.priceRange')}</Text>
+            <View style={styles.sheetChipRow}>
+              {PRICE_BUCKETS.map((b) => {
+                const active = priceBucket === b.id;
+                return (
+                  <TouchableOpacity
+                    key={b.id}
+                    style={[styles.sheetChip, active && styles.sheetChipActive]}
+                    onPress={() => setPriceBucket(b.id)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.sheetChipText, active && styles.sheetChipTextActive]}>{b.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* In-stock toggle */}
+            <View style={styles.sheetToggleRow}>
+              <Text style={styles.sheetSectionTitle}>{t('search.inStockOnly')}</Text>
+              <Switch
+                value={inStockOnly}
+                onValueChange={setInStockOnly}
+                trackColor={{ false: Colors.border, true: Colors.primary }}
+                thumbColor={Colors.white}
+              />
+            </View>
+
+            {/* Sort */}
+            <Text style={styles.sheetSectionTitle}>{t('search.sortBy')}</Text>
+            {SORT_OPTIONS.map((o) => {
+              const active = sort === o.id;
+              return (
+                <TouchableOpacity
+                  key={o.id}
+                  style={styles.sheetRadioRow}
+                  onPress={() => setSort(o.id)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.radioOuter, active && styles.radioOuterActive]}>
+                    {active && <View style={styles.radioInner} />}
+                  </View>
+                  <Text style={styles.sheetRadioLabel}>{o.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+
+            {/* Actions */}
+            <View style={styles.sheetActions}>
+              <TouchableOpacity
+                style={styles.sheetReset}
+                onPress={() => { setPriceBucket('any'); setInStockOnly(false); setSort('relevance'); }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.sheetResetText}>{t('search.reset')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.sheetApply}
+                onPress={() => setSheetOpen(false)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.sheetApplyText}>{t('search.applyFilters')}</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -655,4 +847,74 @@ const makeStyles = (Colors: ColorPalette) =>
 
   // List
   listContent: { paddingBottom: Spacing.xxl },
+  resultCount: {
+    fontSize: FontSize.sm, fontWeight: '600', color: Colors.textSecondary,
+    paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, paddingBottom: Spacing.xs,
+  },
+
+  // Filter bar (category chips + Filter button)
+  filterBar: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+    paddingRight: Spacing.sm,
+  },
+  filterChipsContent: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, gap: Spacing.sm },
+  filterChip: {
+    paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: Radius.full,
+    backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border,
+    maxWidth: 140,
+  },
+  filterChipActive:     { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  filterChipText:       { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textSecondary },
+  filterChipTextActive: { color: Colors.white },
+  filterBtn: {
+    paddingHorizontal: Spacing.md, paddingVertical: 7, borderRadius: Radius.full,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface,
+  },
+  filterBtnActive:     { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  filterBtnText:       { fontSize: FontSize.sm, fontWeight: '700', color: Colors.textSecondary },
+  filterBtnTextActive: { color: Colors.primary },
+
+  // Bottom sheet
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl,
+    paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm,
+  },
+  sheetHandle: {
+    alignSelf: 'center', width: 40, height: 4, borderRadius: 2,
+    backgroundColor: Colors.border, marginBottom: Spacing.md,
+  },
+  sheetTitle: { fontSize: FontSize.lg, fontWeight: '900', color: Colors.textPrimary, marginBottom: Spacing.md },
+  sheetSectionTitle: { fontSize: FontSize.md, fontWeight: '700', color: Colors.textPrimary, marginTop: Spacing.md, marginBottom: Spacing.sm },
+  sheetChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  sheetChip: {
+    paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: Radius.full,
+    backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border,
+  },
+  sheetChipActive:     { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  sheetChipText:       { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textSecondary },
+  sheetChipTextActive: { color: Colors.white },
+  sheetToggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sheetRadioRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingVertical: Spacing.sm },
+  radioOuter: {
+    width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: Colors.border,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  radioOuterActive: { borderColor: Colors.primary },
+  radioInner:       { width: 11, height: 11, borderRadius: 6, backgroundColor: Colors.primary },
+  sheetRadioLabel:  { fontSize: FontSize.md, color: Colors.textPrimary, fontWeight: '500' },
+  sheetActions: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.lg },
+  sheetReset: {
+    flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: MIN_TAP,
+    borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.border,
+  },
+  sheetResetText: { fontSize: FontSize.md, fontWeight: '700', color: Colors.textSecondary },
+  sheetApply: {
+    flex: 2, alignItems: 'center', justifyContent: 'center', minHeight: MIN_TAP,
+    borderRadius: Radius.full, backgroundColor: Colors.primary, ...Shadow.primary,
+  },
+  sheetApplyText: { fontSize: FontSize.md, fontWeight: '800', color: Colors.white },
 });

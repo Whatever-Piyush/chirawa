@@ -17,8 +17,20 @@ export interface SearchShopResult {
   isOpen:  boolean;
 }
 
+export type SearchSort = 'relevance' | 'priceLow' | 'priceHigh' | 'rating';
+
+export interface SearchFilters {
+  category?: string;   // category name
+  shopId?:   string;
+  minPrice?: number;   // paise
+  maxPrice?: number;   // paise
+  inStock?:  boolean;
+  sort?:     SearchSort;
+}
+
 export interface SearchResponse {
   products: SearchProductResult[];
   shops:    SearchShopResult[];
   query:    string;
+  total:    number;   // full count of matching products (results capped at 20)
 }

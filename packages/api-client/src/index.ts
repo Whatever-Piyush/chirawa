@@ -16,6 +16,7 @@ import type {
   CreateAddressRequest,
   AddressResponse,
   SearchResponse,
+  SearchFilters,
 } from '@chirawa/types';
 
 export class ApiError extends Error {
@@ -289,10 +290,17 @@ export class ChirawaApiClient {
 
   // ─── Search ──────────────────────────────────────────────────────────────
 
-  async search(query: string): Promise<SearchResponse> {
+  async search(query: string, filters: SearchFilters = {}): Promise<SearchResponse> {
+    const params = new URLSearchParams({ q: query, limit: '20' });
+    if (filters.category) params.set('category', filters.category);
+    if (filters.shopId)   params.set('shopId', filters.shopId);
+    if (filters.minPrice != null) params.set('minPrice', String(filters.minPrice));
+    if (filters.maxPrice != null) params.set('maxPrice', String(filters.maxPrice));
+    if (filters.inStock) params.set('inStock', 'true');
+    if (filters.sort && filters.sort !== 'relevance') params.set('sort', filters.sort);
     return this.request<SearchResponse>(
       'GET',
-      `/search?q=${encodeURIComponent(query)}&limit=20`,
+      `/search?${params.toString()}`,
       undefined,
       false, // public endpoint — no auth required
     );

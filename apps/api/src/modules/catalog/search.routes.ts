@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { createCatalogService } from './catalog.service';
+import { createCatalogService, parseSearchSort, parsePricePaise, type SearchOpts } from './catalog.service';
 import { ValidationError } from '../../shared/errors/app-errors';
 import { env } from '../../config/env';
 
@@ -21,14 +21,31 @@ export default async function searchRoutes(app: FastifyInstance): Promise<void> 
       },
     },
     async (
-      request: FastifyRequest<{ Querystring: { q?: string; limit?: string } }>,
+      request: FastifyRequest<{
+        Querystring: {
+          q?: string; limit?: string;
+          category?: string; shopId?: string;
+          minPrice?: string; maxPrice?: string;
+          inStock?: string; sort?: string;
+        };
+      }>,
       reply,
     ) => {
-      const q = (request.query.q ?? '').trim();
+      const { query } = request;
+      const q = (query.q ?? '').trim();
       if (q.length < 2) {
         throw new ValidationError('Query must be at least 2 characters');
       }
-      const results = await catalogService.searchCatalog(q);
+      const opts: SearchOpts = { sort: parseSearchSort(query.sort) };
+      if (query.category) opts.category = query.category;
+      if (query.shopId)   opts.shopId   = query.shopId;
+      const minPrice = parsePricePaise(query.minPrice);
+      const maxPrice = parsePricePaise(query.maxPrice);
+      if (minPrice !== undefined) opts.minPrice = minPrice;
+      if (maxPrice !== undefined) opts.maxPrice = maxPrice;
+      if (query.inStock === 'true') opts.inStock = true;
+
+      const results = await catalogService.searchCatalog(q, opts);
       return reply.send(results);
     },
   );

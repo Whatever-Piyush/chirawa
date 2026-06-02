@@ -9,6 +9,35 @@ const ALIAS_CACHE_TTL = 3600;
 // Validate UUIDs before hitting Prisma so a malformed :id returns 404, not 500.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// ─── Search filters & sort (Chunk 4 — Task 4.1) ──────────────────────────────
+export type SearchSort = 'relevance' | 'priceLow' | 'priceHigh' | 'rating';
+
+export interface SearchOpts {
+  category?: string;   // category NAME — categories are per-shop, deduped by name app-wide
+  shopId?:   string;
+  minPrice?: number;   // paise (inclusive)
+  maxPrice?: number;   // paise (inclusive)
+  inStock?:  boolean;  // honored implicitly: search already returns only in-stock products
+  sort?:     SearchSort;
+}
+
+const VALID_SORTS: readonly SearchSort[] = ['relevance', 'priceLow', 'priceHigh', 'rating'];
+
+// Coerce an untrusted ?sort= value to a known sort, defaulting to relevance.
+export function parseSearchSort(raw?: string): SearchSort {
+  return raw != null && (VALID_SORTS as readonly string[]).includes(raw)
+    ? (raw as SearchSort)
+    : 'relevance';
+}
+
+// Parse a price query param (rupees-free, already paise) into a non-negative int,
+// or undefined when absent/invalid so the filter is simply skipped.
+export function parsePricePaise(raw?: string): number | undefined {
+  if (raw == null || raw === '') return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : undefined;
+}
+
 const keys = {
   shopList:    ()           => `catalog:shops:active`,
   shopDetail:  (shopId: string) => `catalog:shop:${shopId}:full`,
@@ -186,12 +215,15 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
     return result;
   }
 
-  // pg_trgm-powered search with alias expansion; returns grouped { products, shops, query }
-  async function searchCatalog(rawQuery: string) {
+  // pg_trgm-powered search with alias expansion + optional filters/sort.
+  // Returns { products, shops, query, total } where total is the full count of
+  // matching products (results themselves are capped at 20 for the list).
+  async function searchCatalog(rawQuery: string, opts: SearchOpts = {}) {
     const q = rawQuery.trim();
-    if (q.length < 2) return { products: [], shops: [], query: q };
+    if (q.length < 2) return { products: [], shops: [], query: q, total: 0 };
 
     const like = `%${q}%`;
+    const sort = parseSearchSort(opts.sort);
 
     // Expand the query via alias table (Redis-backed, 1 hour TTL)
     const expandedTerms = await expandSearchTerms(q);
@@ -209,6 +241,46 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
     const likeParts = expandedTerms.map((t) => Prisma.sql`p.name ILIKE ${'%' + t + '%'}`);
     const aliasFilter = Prisma.join(likeParts, ' OR ');
 
+    // ── Optional filter fragments (each pre-pended with AND) ────────────────
+    const extra: Prisma.Sql[] = [];
+    // shopId — guard the UUID so a malformed value can't blow up the ::uuid cast.
+    if (opts.shopId && UUID_RE.test(opts.shopId)) {
+      extra.push(Prisma.sql`AND p.shop_id = ${opts.shopId}::uuid`);
+    }
+    if (opts.category) extra.push(Prisma.sql`AND c.name = ${opts.category}`);
+    if (opts.minPrice != null) extra.push(Prisma.sql`AND p.price >= ${opts.minPrice}`);
+    if (opts.maxPrice != null) extra.push(Prisma.sql`AND p.price <= ${opts.maxPrice}`);
+    const extraSql = extra.length ? Prisma.join(extra, ' ') : Prisma.empty;
+
+    // Shared joins + WHERE so the list query and the COUNT stay in lockstep.
+    // LEFT JOIN categories so the category filter works without dropping rows.
+    const joins = Prisma.sql`
+      JOIN shops s ON s.id = p.shop_id
+      LEFT JOIN categories c ON c.id = p.category_id
+    `;
+    const whereBody = Prisma.sql`
+      p.is_active        = true
+      AND p.stock_status = 'available'
+      AND s.is_active    = true
+      AND (
+        ${aliasFilter}
+        OR word_similarity(${q}, p.name) > 0.2
+        OR similarity(p.name, ${q})      > 0.15
+        OR similarity(s.name, ${q})      > 0.2
+      )
+      ${extraSql}
+    `;
+
+    // ORDER BY references the inner subquery's output columns (score / shopRating
+    // are projected there even though the outer SELECT doesn't list them).
+    let orderExpr: Prisma.Sql;
+    switch (sort) {
+      case 'priceLow':  orderExpr = Prisma.sql`"pricePaise" ASC, score DESC`;  break;
+      case 'priceHigh': orderExpr = Prisma.sql`"pricePaise" DESC, score DESC`; break;
+      case 'rating':    orderExpr = Prisma.sql`"shopRating" DESC, score DESC`; break;
+      default:          orderExpr = Prisma.sql`score DESC`;
+    }
+
     type ProductRow = {
       id: string; name: string; pricePaise: number | bigint;
       shopId: string; shopName: string; imageUrl: string | null; inStock: boolean;
@@ -217,8 +289,9 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       id: string; name: string; address: string;
       isOpen: boolean; openTime: string; closeTime: string;
     };
+    type CountRow = { count: number | bigint };
 
-    const [productRows, shopRows] = await Promise.all([
+    const [productRows, shopRows, countRows] = await Promise.all([
       prisma.$queryRaw<ProductRow[]>`
         SELECT id, name, "pricePaise", "shopId", "shopName", "imageUrl", "inStock"
         FROM (
@@ -230,27 +303,22 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
             s.name             AS "shopName",
             pi.url             AS "imageUrl",
             (p.stock_status = 'available') AS "inStock",
-            ${scoreExpr}       AS score
+            ${scoreExpr}       AS score,
+            COALESCE((
+              SELECT AVG(o.rating) FROM orders o
+              WHERE o.shop_id = p.shop_id AND o.rating IS NOT NULL
+            ), 0)              AS "shopRating"
           FROM products p
-          JOIN shops s ON s.id = p.shop_id
+          ${joins}
           LEFT JOIN LATERAL (
             SELECT url FROM product_images
             WHERE product_id = p.id
             ORDER BY sort_order ASC
             LIMIT 1
           ) pi ON true
-          WHERE
-            p.is_active       = true
-            AND p.stock_status = 'available'
-            AND s.is_active    = true
-            AND (
-              ${aliasFilter}
-              OR word_similarity(${q}, p.name) > 0.2
-              OR similarity(p.name, ${q})      > 0.15
-              OR similarity(s.name, ${q})      > 0.2
-            )
+          WHERE ${whereBody}
         ) sub
-        ORDER BY score DESC
+        ORDER BY ${orderExpr}
         LIMIT 20
       `,
 
@@ -274,10 +342,19 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
         ORDER BY GREATEST(word_similarity(${q}, name), similarity(name, ${q})) DESC
         LIMIT 5
       `,
+
+      // Full match count (ignores the LIMIT 20) for the "Showing X results" label
+      prisma.$queryRaw<CountRow[]>`
+        SELECT COUNT(*)::int AS count
+        FROM products p
+        ${joins}
+        WHERE ${whereBody}
+      `,
     ]);
 
     return {
       query: q,
+      total: Number(countRows[0]?.count ?? 0),
       products: productRows.map((p) => ({
         id:         p.id,
         name:       p.name,
