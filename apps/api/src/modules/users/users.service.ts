@@ -28,6 +28,43 @@ export function createUsersService(prisma: PrismaClient) {
     };
   }
 
+  // ── Loyalty status (Chunk 7.5) ───────────────────────────────────────────────
+  // Wires the existing order-count tier model (LoyaltyTier.minOrders/maxOrders +
+  // CustomerProfile.totalOrders) into a customer-facing card. Informational only —
+  // no redemption. Tier is derived from totalOrders so it can never drift stale.
+  async function getLoyalty(userId: string) {
+    const profile = await prisma.customerProfile.findUnique({
+      where:  { userId },
+      select: { totalOrders: true },
+    });
+    if (!profile) throw new NotFoundError('Customer profile');
+
+    const tiers = await prisma.loyaltyTier.findMany({ orderBy: { minOrders: 'asc' } });
+    const totalOrders = profile.totalOrders;
+
+    // Current tier = highest tier whose minOrders threshold is met.
+    const current =
+      [...tiers].reverse().find((tr) => totalOrders >= tr.minOrders) ?? tiers[0] ?? null;
+    // Next tier = first tier ranked above the current one.
+    const next = current ? tiers.find((tr) => tr.minOrders > current.minOrders) ?? null : null;
+
+    const ordersToNext = next ? Math.max(0, next.minOrders - totalOrders) : 0;
+    const span         = next && current ? next.minOrders - current.minOrders : 0;
+    const progress     = next && current && span > 0
+      ? Math.min(1, Math.max(0, (totalOrders - current.minOrders) / span))
+      : 1;
+
+    return {
+      tier:           current?.name ?? 'bronze',
+      tierDescription: current?.description ?? '',
+      walletBonusPct: current?.walletBonusPct ?? 0,
+      totalOrders,
+      nextTier:       next?.name ?? null,
+      ordersToNext,
+      progress,       // 0..1 toward next tier (1 when already at top tier)
+    };
+  }
+
   // ── Update profile ─────────────────────────────────────────────────────────
   async function updateProfile(
     userId: string,
@@ -156,7 +193,7 @@ export function createUsersService(prisma: PrismaClient) {
   }
 
   return {
-    getMe, updateProfile,
+    getMe, updateProfile, getLoyalty,
     getAddresses, createAddress, updateAddress,
     deleteAddress, setDefaultAddress,
   };

@@ -35,6 +35,12 @@ export default async function usersRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // GET /api/v1/users/me/loyalty
+  app.get('/me/loyalty', async (request, reply) => {
+    const loyalty = await usersService.getLoyalty(request.auth!.userId);
+    return reply.send(loyalty);
+  });
+
   // GET /api/v1/users/me/addresses
   app.get('/me/addresses', async (request, reply) => {
     const addresses = await usersService.getAddresses(request.auth!.userId);

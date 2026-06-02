@@ -89,37 +89,6 @@ function DeliveryItemRow({
   );
 }
 
-// ─── Payment method card ──────────────────────────────────────────────────────
-interface PayCardProps { icon: string; title: string; hint: string; selected: boolean; badge?: string; onPress: () => void }
-function PayCard({ icon, title, hint, selected, badge, onPress }: PayCardProps) {
-  const { colors: Colors } = useTheme();
-  const styles = useMemo(() => makeStyles(Colors), [Colors]);
-  const checkScale = useRef(new Animated.Value(selected ? 1 : 0)).current;
-  useEffect(() => {
-    Animated.spring(checkScale, { toValue: selected ? 1 : 0, friction: 5, tension: 200, useNativeDriver: true }).start();
-  }, [selected, checkScale]);
-  return (
-    <TouchableOpacity style={[styles.payCard, selected && styles.payCardSelected]} onPress={onPress} activeOpacity={0.85}>
-      <View style={styles.payCardLeft}>
-        <Text style={styles.payCardIcon}>{icon}</Text>
-        <View style={styles.payCardText}>
-          <Text style={[styles.payCardTitle, selected && styles.payCardTitleSelected]}>{title}</Text>
-          <Text style={styles.payCardHint}>{hint}</Text>
-        </View>
-      </View>
-      <View style={styles.payCardRight}>
-        {badge ? (
-          <View style={styles.comingSoonBadge}><Text style={styles.comingSoonBadgeText}>{badge}</Text></View>
-        ) : selected ? (
-          <Animated.Text style={[styles.payCheck, { transform: [{ scale: checkScale }] }]}>✓</Animated.Text>
-        ) : (
-          <View style={styles.radio} />
-        )}
-      </View>
-    </TouchableOpacity>
-  );
-}
-
 // ─── Animated dots loading indicator ──────────────────────────────────────────
 function LoadingDots() {
   const { colors: Colors } = useTheme();
@@ -185,6 +154,13 @@ export default function CheckoutScreen({ navigation }: Props) {
   } | null>(null);
   const [verifying, setVerifying] = useState(false);
 
+  // Promo code (Chunk 7.3). `promoCode` is the applied code; the ref lets every
+  // pricing-preview call site read the current code without re-threading deps.
+  const [promoInput, setPromoInput] = useState('');
+  const [promoCode,  setPromoCode]  = useState('');
+  const [promoBusy,  setPromoBusy]  = useState(false);
+  const promoCodeRef = useRef('');
+
   const placeBtnScale = useRef(new Animated.Value(1)).current;
 
   useLayoutEffect(() => {
@@ -208,6 +184,14 @@ export default function CheckoutScreen({ navigation }: Props) {
   }, []);
 
   useEffect(() => { void loadCart(); }, [loadCart]);
+
+  // Single pricing-preview entry point — always sends the currently applied promo
+  // code (if any). Server soft-fails a bad code into `promoError` and still bills.
+  const fetchPricing = useCallback(
+    (cartId: string, addrId: string) =>
+      api.getPricingPreview({ cartId, addressId: addrId, promoCode: promoCodeRef.current || undefined }),
+    [],
+  );
 
   useEffect(() => { setAddressId(null); setPricing(null); }, [street, area]);
 
@@ -236,16 +220,16 @@ export default function CheckoutScreen({ navigation }: Props) {
   useEffect(() => {
     if (!cart || !addressId || pricing) return;
     void (async () => {
-      try { setPricing(await api.getPricingPreview({ cartId: cart.cartId, addressId })); } catch { /* tolerate */ }
+      try { setPricing(await fetchPricing(cart.cartId, addressId)); } catch { /* tolerate */ }
     })();
-  }, [cart, addressId, pricing]);
+  }, [cart, addressId, pricing, fetchPricing]);
 
   const handleSelectSavedAddress = useCallback(async (addr: AddressResponse) => {
     setAddressId(addr.id);
     setShowAddressForm(false);
     if (!cart) return;
-    try { setPricing(await api.getPricingPreview({ cartId: cart.cartId, addressId: addr.id })); } catch { /* tolerate */ }
-  }, [cart]);
+    try { setPricing(await fetchPricing(cart.cartId, addr.id)); } catch { /* tolerate */ }
+  }, [cart, fetchPricing]);
 
   const handleConfirmAddress = useCallback(async () => {
     if (!street.trim() || !area.trim() || !cart) return;
@@ -258,13 +242,13 @@ export default function CheckoutScreen({ navigation }: Props) {
       });
       setAddressId(addr.id);
       setAddresses((prev) => [addr, ...prev]);
-      setPricing(await api.getPricingPreview({ cartId: cart.cartId, addressId: addr.id }));
+      setPricing(await fetchPricing(cart.cartId, addr.id));
     } catch {
       Alert.alert(t('common.error'), t('common.retry'));
     } finally {
       setConfirming(false);
     }
-  }, [street, area, landmark, label, cart, t]);
+  }, [street, area, landmark, label, cart, t, fetchPricing]);
 
   // Reload cart (+ pricing) after an in-checkout quantity change.
   const reloadCart = useCallback(async (addrId: string | null) => {
@@ -275,9 +259,31 @@ export default function CheckoutScreen({ navigation }: Props) {
     }
     setCart(data);
     if (addrId) {
-      try { setPricing(await api.getPricingPreview({ cartId: data.cartId, addressId: addrId })); } catch { /* tolerate */ }
+      try { setPricing(await fetchPricing(data.cartId, addrId)); } catch { /* tolerate */ }
     }
-  }, [navigation, t]);
+  }, [navigation, t, fetchPricing]);
+
+  // Apply / clear the typed promo code, then refresh the bill.
+  const applyPromo = useCallback(async () => {
+    if (!cart || !addressId) return;
+    const code = promoInput.trim().toUpperCase();
+    if (!code) return;
+    promoCodeRef.current = code;
+    setPromoCode(code);
+    setPromoBusy(true);
+    try { setPricing(await fetchPricing(cart.cartId, addressId)); } catch { /* tolerate */ }
+    finally { setPromoBusy(false); }
+  }, [cart, addressId, promoInput, fetchPricing]);
+
+  const removePromo = useCallback(async () => {
+    promoCodeRef.current = '';
+    setPromoCode('');
+    setPromoInput('');
+    if (!cart || !addressId) return;
+    setPromoBusy(true);
+    try { setPricing(await fetchPricing(cart.cartId, addressId)); } catch { /* tolerate */ }
+    finally { setPromoBusy(false); }
+  }, [cart, addressId, fetchPricing]);
 
   const changeQty = useCallback(async (productId: string, qty: number) => {
     setUpdatingId(productId);
@@ -315,7 +321,10 @@ export default function CheckoutScreen({ navigation }: Props) {
         });
         addrId = addr.id;
       }
-      const result = await api.placeOrder({ cartId: cart.cartId, addressId: addrId, paymentMethod });
+      const result = await api.placeOrder({
+        cartId: cart.cartId, addressId: addrId, paymentMethod,
+        ...(promoCodeRef.current ? { promoCode: promoCodeRef.current } : {}),
+      });
 
       if (paymentMethod === PaymentMethod.COD) {
         navigation.replace('OrderTracking', { orderId: result.orderId });
@@ -373,7 +382,10 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   const subtotalRupees = cart ? Math.round(cart.subtotal / 100) : 0;
   const deliveryRupees = pricing ? Math.round(pricing.deliveryFee / 100) : null;
+  const discountRupees = pricing && pricing.discount > 0 ? Math.round(pricing.discount / 100) : 0;
   const totalRupees    = pricing ? Math.round(pricing.total / 100) : subtotalRupees;
+  // A typed code is "active" only once the server confirms it produced a discount.
+  const promoActive    = !!promoCode && !!pricing?.appliedPromoCode;
   const itemCount      = cart ? cart.items.reduce((s, i) => s + i.quantity, 0) : 0;
   const nudge          = cart ? deliveryNudge(cart.subtotal, t) : null;
   const selectedAddr   = addresses.find((a) => a.id === addressId) ?? null;
@@ -432,6 +444,14 @@ export default function CheckoutScreen({ navigation }: Props) {
             ? <Text style={styles.pricingMuted}>{t('checkout.confirmToSee')}</Text>
             : <Text style={styles.pricingValue}>₹{deliveryRupees}</Text>}
         </View>
+        {discountRupees > 0 && (
+          <View style={styles.pricingRow}>
+            <Text style={[styles.pricingLabel, { color: Colors.success }]}>
+              {t('checkout.discount')}{pricing?.appliedPromoCode ? ` · ${pricing.appliedPromoCode}` : ''}
+            </Text>
+            <Text style={[styles.pricingValue, { color: Colors.success }]}>− ₹{discountRupees}</Text>
+          </View>
+        )}
         <View style={[styles.pricingRow, styles.totalRow]}>
           <Text style={styles.totalLabel}>{t('cart.total')}</Text>
           <Text style={styles.totalValue}>₹{totalRupees}</Text>
@@ -543,11 +563,49 @@ export default function CheckoutScreen({ navigation }: Props) {
         )}
       </View>
 
-      {/* ── Payment Method ───────────────────────────────────────────────── */}
+      {/* ── Promo code (Chunk 7.3) ───────────────────────────────────────── */}
       <View style={styles.section}>
-        <Text style={styles.cardTitle}>{t('checkout.paymentMethod')}</Text>
-        <PayCard icon="💵" title={t('checkout.cod')} hint={t('checkout.codHint')} selected={paymentMethod === PaymentMethod.COD} onPress={() => setPaymentMethod(PaymentMethod.COD)} />
-        <PayCard icon="📱" title={t('checkout.payOnline')} hint={t('checkout.onlineHint')} selected={false} badge={t('common.comingSoon')} onPress={() => Alert.alert('🚀', t('checkout.comingSoon'))} />
+        <Text style={styles.cardTitle}>{t('checkout.promoTitle')}</Text>
+        {promoActive ? (
+          <View style={styles.promoAppliedRow}>
+            <Ionicons name="pricetag" size={18} color={Colors.success} />
+            <Text style={styles.promoAppliedText} numberOfLines={1}>
+              {pricing?.appliedPromoCode} {t('checkout.promoApplied')}
+            </Text>
+            <TouchableOpacity onPress={() => void removePromo()} disabled={promoBusy} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.promoRemove}>{t('checkout.promoRemove')}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.promoRow}>
+            <TextInput
+              style={styles.promoInput}
+              value={promoInput}
+              onChangeText={setPromoInput}
+              placeholder={t('checkout.promoPlaceholder')}
+              placeholderTextColor={Colors.textMuted}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              editable={!!addressId && !promoBusy}
+              returnKeyType="done"
+              onSubmitEditing={() => void applyPromo()}
+            />
+            <TouchableOpacity
+              style={[styles.promoApplyBtn, (!addressId || !promoInput.trim() || promoBusy) && styles.btnDisabled]}
+              onPress={() => void applyPromo()}
+              disabled={!addressId || !promoInput.trim() || promoBusy}
+              activeOpacity={0.85}
+            >
+              {promoBusy ? <ActivityIndicator color={Colors.white} size="small" />
+                : <Text style={styles.promoApplyText}>{t('checkout.apply')}</Text>}
+            </TouchableOpacity>
+          </View>
+        )}
+        {!addressId && <Text style={styles.promoHint}>{t('checkout.confirmToSee')}</Text>}
+        {pricing?.promoError ? <Text style={styles.promoError}>{pricing.promoError}</Text> : null}
+        {!promoCode && pricing?.appliedPromoCode ? (
+          <Text style={styles.promoAutoNote}>🎉 {t('checkout.freeDelivery')}</Text>
+        ) : null}
       </View>
 
       <View style={[styles.bottomSpacer, { height: 190 + insets.bottom }]} />
@@ -824,6 +882,28 @@ const makeStyles = (Colors: ColorPalette) =>
   },
   payRadioSelected: { borderColor: Colors.primary },
   payRadioDot: { width: 11, height: 11, borderRadius: 6, backgroundColor: Colors.primary },
+
+  // Promo code (Chunk 7.3)
+  promoRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  promoInput: {
+    flex: 1, borderWidth: 1.5, borderColor: Colors.border, borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md, height: 48, fontSize: FontSize.md,
+    color: Colors.text, backgroundColor: Colors.surface, letterSpacing: 1,
+  },
+  promoApplyBtn: {
+    backgroundColor: Colors.primary, borderRadius: Radius.md, height: 48,
+    paddingHorizontal: Spacing.lg, alignItems: 'center', justifyContent: 'center', minWidth: 88,
+  },
+  promoApplyText: { color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
+  promoAppliedRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.successLight, borderRadius: Radius.md, padding: Spacing.md,
+  },
+  promoAppliedText: { flex: 1, color: Colors.success, fontWeight: '800', fontSize: FontSize.md },
+  promoRemove: { color: Colors.error, fontWeight: '800', fontSize: FontSize.sm },
+  promoHint: { fontSize: FontSize.sm, color: Colors.textMuted, fontStyle: 'italic' },
+  promoError: { fontSize: FontSize.sm, color: Colors.error, fontWeight: '700' },
+  promoAutoNote: { fontSize: FontSize.sm, color: Colors.success, fontWeight: '800' },
 
   // Verifying-payment overlay
   verifyOverlay: {

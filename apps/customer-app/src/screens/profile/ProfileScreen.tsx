@@ -18,8 +18,17 @@ import { Colors, Spacing } from '../../theme';
 import { useTheme, type ColorPalette, type ThemeMode } from '../../theme/ThemeContext';
 import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
+import { api } from '../../services/api.service';
+import type { LoyaltyResponse } from '@chirawa/types';
 import type { RootStackParamList, TabParamList } from '../../navigation/AppNavigator';
 import { Text, FauxGradient } from '../../components/ui';
+
+// Tier visuals — names match the seeded LoyaltyTier rows (bronze/silver/gold).
+const TIER_META: Record<string, { emoji: string; color: string }> = {
+  bronze: { emoji: '🥉', color: '#CD7F32' },
+  silver: { emoji: '🥈', color: '#9CA3AF' },
+  gold:   { emoji: '🥇', color: '#F59E0B' },
+};
 
 const WHATSAPP_NUMBER = '919999999999';
 
@@ -109,6 +118,21 @@ export default function ProfileScreen() {
   const styles = useMemo(() => makeStyles(c), [c]);
 
   const [themeModalOpen, setThemeModalOpen] = React.useState(false);
+  const [loyalty, setLoyalty] = React.useState<LoyaltyResponse | null>(null);
+
+  React.useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const data = await api.getLoyalty();
+        if (alive) setLoyalty(data);
+      } catch { /* loyalty is non-critical — silently skip the card on failure */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const tierLabel = (name: string) =>
+    t(`profile.tier${name.charAt(0).toUpperCase()}${name.slice(1)}`);
 
   const phone = state.phone ?? '—';
 
@@ -295,6 +319,49 @@ export default function ProfileScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+
+          {/* ── Loyalty status card (Chunk 7.5) ───────────────────────────── */}
+          {loyalty && (
+            <View style={styles.loyaltyCard}>
+              <View style={styles.loyaltyTop}>
+                <Text style={styles.loyaltyEmoji}>{(TIER_META[loyalty.tier] ?? TIER_META.bronze).emoji}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text weight="medium" color={c.textSecondary} style={styles.loyaltyKicker}>
+                    {t('profile.loyaltyTitle')}
+                  </Text>
+                  <Text weight="bold" color={(TIER_META[loyalty.tier] ?? TIER_META.bronze).color} style={styles.loyaltyTier}>
+                    {tierLabel(loyalty.tier)}
+                  </Text>
+                </View>
+                <View style={styles.loyaltyOrdersWrap}>
+                  <Text weight="bold" color={c.textPrimary} style={styles.loyaltyOrdersNum}>
+                    {loyalty.totalOrders}
+                  </Text>
+                  <Text weight="medium" color={c.textSecondary} style={styles.loyaltyOrdersLabel}>
+                    {t('profile.loyaltyOrders')}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.loyaltyTrack}>
+                <View
+                  style={[
+                    styles.loyaltyFill,
+                    {
+                      width: `${Math.round(loyalty.progress * 100)}%`,
+                      backgroundColor: (TIER_META[loyalty.tier] ?? TIER_META.bronze).color,
+                    },
+                  ]}
+                />
+              </View>
+
+              <Text weight="medium" color={c.textSecondary} style={styles.loyaltyHint}>
+                {loyalty.nextTier
+                  ? `${loyalty.ordersToNext} ${t('profile.loyaltyToNext')} ${tierLabel(loyalty.nextTier)}`
+                  : t('profile.loyaltyTopTier')}
+              </Text>
+            </View>
+          )}
 
           {/* ── Appearance row (real theme switcher) ──────────────────────── */}
           <TouchableOpacity
@@ -500,6 +567,30 @@ const makeStyles = (c: ColorPalette) =>
       alignItems: 'center',
     },
     tileLabel: { fontSize: 13.5, letterSpacing: -0.2 },
+
+    // Loyalty card
+    loyaltyCard: {
+      backgroundColor: c.surface,
+      borderRadius: 20,
+      padding: Spacing.lg,
+      marginTop: Spacing.xl,
+      gap: Spacing.md,
+      shadowColor: '#000',
+      shadowOpacity: 0.04,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 2,
+    },
+    loyaltyTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+    loyaltyEmoji: { fontSize: 34, lineHeight: 40 },
+    loyaltyKicker: { fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 },
+    loyaltyTier: { fontSize: 20, letterSpacing: -0.3, marginTop: 1 },
+    loyaltyOrdersWrap: { alignItems: 'flex-end' },
+    loyaltyOrdersNum: { fontSize: 24, lineHeight: 28 },
+    loyaltyOrdersLabel: { fontSize: 11, textAlign: 'right', maxWidth: 80 },
+    loyaltyTrack: { height: 8, borderRadius: 4, backgroundColor: c.surfaceAlt, overflow: 'hidden' },
+    loyaltyFill: { height: 8, borderRadius: 4 },
+    loyaltyHint: { fontSize: 13 },
 
     // Appearance
     appearance: {

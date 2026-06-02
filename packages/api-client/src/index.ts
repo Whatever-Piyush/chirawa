@@ -18,6 +18,7 @@ import type {
   AddressResponse,
   SearchResponse,
   SearchFilters,
+  LoyaltyResponse,
 } from '@chirawa/types';
 
 export class ApiError extends Error {
@@ -225,6 +226,12 @@ export class ChirawaApiClient {
 
   async clearCart(): Promise<void> {
     return this.request<void>('DELETE', '/cart');
+  }
+
+  // ─── Loyalty ─────────────────────────────────────────────────────────────
+
+  async getLoyalty(): Promise<LoyaltyResponse> {
+    return this.request<LoyaltyResponse>('GET', '/users/me/loyalty');
   }
 
   // ─── Addresses ───────────────────────────────────────────────────────────
