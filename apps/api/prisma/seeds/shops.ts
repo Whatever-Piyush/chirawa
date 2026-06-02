@@ -69,7 +69,7 @@ interface SeedShop {
 // everything on Shop 1 instead, just move the product blocks below.
 const SHOPS: SeedShop[] = [
   {
-    phone: '+919001110001', ownerName: 'Ramesh Kumar',
+    phone: '9001110001', ownerName: 'Ramesh Kumar',
     shopName: 'Shop 1 — General Store',
     address: 'Main Bazar, Chirawa, Jhunjhunu, Rajasthan 333026',
     lat: '28.23900000', lng: '75.63900000',
@@ -92,7 +92,7 @@ const SHOPS: SeedShop[] = [
     ],
   },
   {
-    phone: '+919001110002', ownerName: 'Suresh Gupta',
+    phone: '9001110002', ownerName: 'Suresh Gupta',
     shopName: 'Shop 2 — Kirana Store',
     address: 'Station Road, Chirawa, Jhunjhunu, Rajasthan 333026',
     lat: '28.24010000', lng: '75.64010000',
@@ -108,7 +108,7 @@ const SHOPS: SeedShop[] = [
     ],
   },
   {
-    phone: '+919001110003', ownerName: 'Mahesh Sharma',
+    phone: '9001110003', ownerName: 'Mahesh Sharma',
     shopName: 'Shop 3 — Daily Needs',
     address: 'Purani Mandi, Chirawa, Jhunjhunu, Rajasthan 333026',
     lat: '28.24120000', lng: '75.64120000',
@@ -122,7 +122,7 @@ const SHOPS: SeedShop[] = [
     ],
   },
   {
-    phone: '+919001110004', ownerName: 'Dinesh Saini',
+    phone: '9001110004', ownerName: 'Dinesh Saini',
     shopName: 'Shop 4 — Fresh Mart',
     address: 'Nehru Colony, Chirawa, Jhunjhunu, Rajasthan 333026',
     lat: '28.24230000', lng: '75.64230000',
@@ -145,7 +145,7 @@ const SHOPS: SeedShop[] = [
     ],
   },
   {
-    phone: '+919001110005', ownerName: 'Rajesh Agarwal',
+    phone: '9001110005', ownerName: 'Rajesh Agarwal',
     shopName: 'Shop 5 — Super Store',
     address: 'Sabzi Mandi, Chirawa, Jhunjhunu, Rajasthan 333026',
     lat: '28.24340000', lng: '75.64340000',
@@ -156,7 +156,7 @@ const SHOPS: SeedShop[] = [
     ],
   },
   {
-    phone: '+919001110006', ownerName: 'Maturam Halwai',
+    phone: '9001110006', ownerName: 'Maturam Halwai',
     shopName: 'Maturam Misthan Bhandar', featured: true,
     address: 'Purani Mandi, Chirawa, Jhunjhunu 333026',
     lat: '28.24450000', lng: '75.64450000',
@@ -168,7 +168,7 @@ const SHOPS: SeedShop[] = [
     ],
   },
   {
-    phone: '+919001110007', ownerName: 'Lal Chand',
+    phone: '9001110007', ownerName: 'Lal Chand',
     shopName: 'Lal Chand Misthan Bhandar', featured: true,
     address: 'Main Bazar, Chirawa, Jhunjhunu 333026',
     lat: '28.24560000', lng: '75.64560000',
@@ -180,7 +180,7 @@ const SHOPS: SeedShop[] = [
     ],
   },
   {
-    phone: '+919001110008', ownerName: 'Mukesh Sharma',
+    phone: '9001110008', ownerName: 'Mukesh Sharma',
     shopName: 'Sharma Saag Rotta Shop', featured: true,
     address: 'Bazar Road, Chirawa, Jhunjhunu 333026',
     lat: '28.24670000', lng: '75.64670000',
@@ -192,7 +192,7 @@ const SHOPS: SeedShop[] = [
     ],
   },
   {
-    phone: '+919001110009', ownerName: 'Nahar Singh',
+    phone: '9001110009', ownerName: 'Nahar Singh',
     shopName: 'Nahar Singh Misthan Bhandar', featured: true,
     address: 'Station Road, Chirawa, Jhunjhunu 333026',
     lat: '28.24780000', lng: '75.64780000',
@@ -204,7 +204,7 @@ const SHOPS: SeedShop[] = [
     ],
   },
   {
-    phone: '+919001110010', ownerName: 'Bikaner Sweets',
+    phone: '9001110010', ownerName: 'Bikaner Sweets',
     shopName: 'Bikaneri Misthan Bhandar', featured: true,
     address: 'Nehru Colony, Chirawa, Jhunjhunu 333026',
     lat: '28.24890000', lng: '75.64890000',

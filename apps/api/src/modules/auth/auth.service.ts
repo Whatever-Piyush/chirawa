@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import { createOtpService } from './otp.service';
+import { normalizePhone } from '../../shared/utils/phone';
 import {
   signAccessToken,
   generateRefreshToken,
@@ -37,9 +38,10 @@ export function createAuthService(prisma: PrismaClient, redis: Redis) {
 
   // ── Send OTP ───────────────────────────────────────────────────────────────
   async function sendOtp(
-    phone: string,
+    rawPhone: string,
     ipAddress: string,
   ): Promise<{ message: string; expiresInSeconds: number }> {
+    const phone = normalizePhone(rawPhone);
     const result = await otpService.sendOtp(phone, ipAddress);
     return {
       message: 'OTP bhej diya gaya',
@@ -49,10 +51,11 @@ export function createAuthService(prisma: PrismaClient, redis: Redis) {
 
   // ── Verify OTP + Login / Signup ────────────────────────────────────────────
   async function verifyOtp(
-    phone: string,
+    rawPhone: string,
     otp: string,
     referralCode?: string,
   ): Promise<AuthResult> {
+    const phone = normalizePhone(rawPhone);
     await otpService.verifyOtp(phone, otp);
 
     // Find existing user or create new
