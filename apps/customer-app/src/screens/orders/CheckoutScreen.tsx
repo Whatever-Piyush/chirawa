@@ -30,7 +30,12 @@ import { isOpenNow } from '../../utils/operatingHours';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
-import RazorpayCheckout, { type RazorpaySuccess } from '../../components/payment/RazorpayCheckout';
+import { type RazorpaySuccess } from '../../components/payment/RazorpayCheckout';
+
+// Lazy-loaded so `react-native-webview` (a native module) is only required when
+// the Razorpay sheet actually opens. Keeps the app bootable on a dev client that
+// predates the webview native module — only online payment needs the rebuild.
+const RazorpayCheckout = React.lazy(() => import('../../components/payment/RazorpayCheckout'));
 
 type LabelChoice = 'home' | 'work' | 'other';
 const LABEL_VALUE: Record<LabelChoice, string> = { home: 'घर', work: 'दुकान', other: 'अन्य' };
@@ -702,22 +707,30 @@ export default function CheckoutScreen({ navigation }: Props) {
 
       {/* ── Razorpay checkout (online payment) ───────────────────────────── */}
       {rzpData && (
-        <RazorpayCheckout
-          visible
-          keyId={rzpData.keyId}
-          razorpayOrderId={rzpData.razorpayOrderId}
-          amountPaise={rzpData.amountPaise}
-          merchantName="Chirawa"
-          description={t('checkout.title')}
-          themeColor={Colors.primary}
-          prefill={{
-            name:    authState.name ?? undefined,
-            contact: authState.phone ?? undefined,
-          }}
-          onSuccess={handlePaymentSuccess}
-          onDismiss={handlePaymentDismiss}
-          onError={handlePaymentError}
-        />
+        <React.Suspense
+          fallback={
+            <View style={styles.verifyOverlay}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+            </View>
+          }
+        >
+          <RazorpayCheckout
+            visible
+            keyId={rzpData.keyId}
+            razorpayOrderId={rzpData.razorpayOrderId}
+            amountPaise={rzpData.amountPaise}
+            merchantName="Chirawa"
+            description={t('checkout.title')}
+            themeColor={Colors.primary}
+            prefill={{
+              name:    authState.name ?? undefined,
+              contact: authState.phone ?? undefined,
+            }}
+            onSuccess={handlePaymentSuccess}
+            onDismiss={handlePaymentDismiss}
+            onError={handlePaymentError}
+          />
+        </React.Suspense>
       )}
 
       {/* Verifying payment with the server */}
