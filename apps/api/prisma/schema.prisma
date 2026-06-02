@@ -179,6 +179,7 @@ model RiderProfile {
   availability     RiderAvailability?
   assignments      DeliveryAssignment[]
   riderSettlements RiderSettlement[]
+  zones            RiderZone[]
 
   @@map("rider_profiles")
 }
@@ -565,11 +566,29 @@ model DeliveryZone {
   id          String   @id @default(uuid()) @db.Uuid
   name        String   @db.VarChar(100)
   description String?  @db.Text
+  // Ordered ring of { lat, lng } vertices defining the zone boundary (Chunk 5.1).
+  polygon     Json     @default("[]")
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  riderZones  RiderZone[]
+
   @@map("delivery_zones")
+}
+
+// Links a rider to their primary delivery zone(s) (Chunk 5.1).
+model RiderZone {
+  id      String @id @default(uuid()) @db.Uuid
+  riderId String @map("rider_id") @db.Uuid
+  zoneId  String @map("zone_id")  @db.Uuid
+
+  rider RiderProfile @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  zone  DeliveryZone @relation(fields: [zoneId],  references: [id], onDelete: Cascade)
+
+  @@unique([riderId, zoneId])
+  @@index([zoneId])
+  @@map("rider_zones")
 }
 
 // ─── Pricing ──────────────────────────────────────────────────────────────────

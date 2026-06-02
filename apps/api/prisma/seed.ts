@@ -1,6 +1,8 @@
 import { PrismaClient } from '@prisma/client';
 import { seedSearchAliases } from './seeds/search-aliases';
 import { seedShops } from './seeds/shops';
+import { seedZones } from './seeds/zones';
+import { seedRiders } from './seeds/riders';
 
 const prisma = new PrismaClient();
 
@@ -133,6 +135,10 @@ async function main(): Promise<void> {
 
   // ── Shops, Categories & Products ─────────────────────────────────────────────
   await seedShops(prisma);
+
+  await seedZones(prisma);
+
+  await seedRiders(prisma);
 
   // ── Summary counts ───────────────────────────────────────────────────────────
   const [shops, categories, products] = await Promise.all([
