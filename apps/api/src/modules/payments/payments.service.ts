@@ -155,6 +155,47 @@ export function createPaymentsService(prisma: PrismaClient) {
   return { createPaymentOrder, verifyClientPayment, processWebhook, initiateRefund, reconcilePendingPayments };
 }
 
+// ── Auto-refund helper (Chunk 3.5) ──────────────────────────────────────────
+// Refunds a prepaid order's captured payment via Razorpay and records it. Does
+// NOT change order status — the caller (customer cancel / seller reject) owns
+// the status transition. Returns the refunded paise, or null when there is
+// nothing to refund (COD, unpaid, or no captured Razorpay payment).
+export async function refundCapturedOrderPayment(
+  prisma: PrismaClient,
+  orderId: string,
+  reason: string,
+): Promise<number | null> {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId }, include: { payments: true },
+  });
+  if (!order || order.paymentMethod === 'cod') return null;
+
+  const captured = order.payments.find((p) => p.status === 'captured' && p.razorpayPaymentId);
+  if (!captured?.razorpayPaymentId) return null;
+
+  // Hit Razorpay only when configured; in dev-mock mode we still record the
+  // refund so the order/accounting state is consistent.
+  if (isRazorpayConfigured()) {
+    await createRefund(captured.razorpayPaymentId, order.totalAmount, { reason, orderId });
+  }
+
+  await prisma.$transaction([
+    prisma.payment.update({
+      where: { id: captured.id },
+      data:  { status: 'refunded', refundedPaise: order.totalAmount },
+    }),
+    prisma.transaction.create({
+      data: {
+        type: 'refund', amountPaise: order.totalAmount,
+        referenceId: orderId, referenceType: 'order',
+        description: `Auto-refund on cancellation: ${reason}`,
+      },
+    }),
+  ]);
+
+  return order.totalAmount;
+}
+
 export async function markOrderPaid(
   prisma: PrismaClient,
   orderId: string,

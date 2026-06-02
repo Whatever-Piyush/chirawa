@@ -121,7 +121,11 @@ async function notificationsPlugin(app: FastifyInstance): Promise<void> {
 
         // ── Cancelled → FCM + SMS to customer + seller + rider ───────────────
         case 'cancelled': {
-          const notif = CustomerNotifications.orderCancelled();
+          // Prepaid orders that were auto-refunded get a refund-specific message
+          // with the exact amount; everything else gets the generic cancel notice.
+          const notif = payload.refundedPaise && payload.refundedPaise > 0
+            ? CustomerNotifications.paymentRefunded(payload.refundedPaise)
+            : CustomerNotifications.orderCancelled();
           const [token, phone] = await Promise.all([getToken(customerId), getPhone(customerId)]);
 
           if (token) {

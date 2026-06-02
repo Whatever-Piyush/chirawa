@@ -3,6 +3,7 @@ import type Redis from 'ioredis';
 import type { PlaceOrderInput } from './orders.schema';
 import { calculateDeliveryFee, getActiveFeeRuleVersion } from '../pricing/pricing.service';
 import { validatePromo, resolveAutoPromo, type ValidatedPromo } from '../promotions/promotions.service';
+import { refundCapturedOrderPayment } from '../payments/payments.service';
 import {
   NotFoundError, ForbiddenError,
   ValidationError, BusinessRuleError, AppError,
@@ -239,6 +240,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   async function updateOrderStatus(
     orderId: string, newStatus: string,
     changedByRole: string, changedById: string, reason?: string,
+    refundedPaise?: number,
   ) {
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
 
@@ -261,6 +263,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     emitOrderStatusChanged({
       orderId, status: newStatus, shopId: order.shopId,
       sellerId: '', riderId: order.riderId, customerId: order.customerId,
+      ...(refundedPaise != null ? { refundedPaise } : {}),
     });
   }
 
@@ -296,7 +299,14 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     if (!['paid', 'confirmed'].includes(order.status)) {
       throw new BusinessRuleError('Order reject nahi ho sakta');
     }
-    await updateOrderStatus(orderId, 'cancelled', 'seller', sellerUserId, reason);
+    // A seller-rejected prepaid order must be refunded too (Chunk 3.5).
+    const refundedPaise = await refundCapturedOrderPayment(
+      prisma, orderId, `Seller rejected: ${reason}`,
+    );
+    await updateOrderStatus(
+      orderId, 'cancelled', 'seller', sellerUserId, reason,
+      refundedPaise ?? undefined,
+    );
     return { message: 'Order reject ho gaya' };
   }
 
@@ -333,24 +343,17 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       throw new BusinessRuleError('ऑर्डर रद्द नहीं किया जा सकता — यह पहले से आगे बढ़ चुका है');
     }
 
-    // Online order with money actually captured → log a refund for manual Razorpay processing
-    const capturedPayment = order.paymentMethod !== 'cod'
-      ? await prisma.payment.findFirst({ where: { orderId, status: 'captured' } })
-      : null;
+    // Prepaid order → auto-refund via Razorpay before flipping to cancelled, so
+    // the cancelled notification can tell the customer the exact refund amount.
+    // COD / unpaid orders refund nothing (helper returns null).
+    const refundedPaise = await refundCapturedOrderPayment(
+      prisma, orderId, reason ?? 'Customer cancelled',
+    );
 
-    await updateOrderStatus(orderId, 'cancelled', 'customer', userId, reason);
-
-    if (capturedPayment) {
-      await prisma.transaction.create({
-        data: {
-          type:          'refund',
-          amountPaise:   order.totalAmount,
-          referenceId:   order.id,
-          referenceType: 'order',
-          description:   'Auto-refund on cancellation — process via Razorpay dashboard',
-        },
-      });
-    }
+    await updateOrderStatus(
+      orderId, 'cancelled', 'customer', userId, reason,
+      refundedPaise ?? undefined,
+    );
 
     // Notify the seller in real time (service → event bus → socket plugin)
     emitOrderCancelledForSeller({

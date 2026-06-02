@@ -29,6 +29,9 @@ export interface OrderStatusChangedPayload {
   sellerId: string;
   riderId:  string | null;
   customerId: string;
+  // Set on a 'cancelled' transition when a prepaid payment was auto-refunded,
+  // so the notification layer can tell the customer the exact amount (Chunk 3.5).
+  refundedPaise?: number;
 }
 
 export interface NewOrderForSellerPayload {
