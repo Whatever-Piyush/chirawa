@@ -25,6 +25,7 @@ import deliveryRoutes      from './modules/delivery/delivery.routes';
 import adminRoutes         from './modules/admin/admin.routes';
 import loyaltyRoutes       from './modules/loyalty/loyalty.routes';
 import notificationsRoutes from './modules/notifications/notifications.routes';
+import sellersRoutes       from './modules/sellers/sellers.routes';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -143,6 +144,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(adminRoutes,         { prefix: '/api/v1/admin' });
   await app.register(loyaltyRoutes,       { prefix: '/api/v1/loyalty' });
   await app.register(notificationsRoutes, { prefix: '/api/v1/notifications' });
+  await app.register(sellersRoutes,       { prefix: '/api/v1/sellers' });
 
   return app;
 }
