@@ -13,11 +13,19 @@ export interface PlaceOrderRequest {
 
 export interface PlaceOrderResponse {
   orderId: string;
+  orderIds?: string[];
   status: OrderStatus;
-  // Only present for online payment
+  totalAmount: Paise;
+  message?: string;
+  // Present only for online payment (paymentMethod !== 'cod')
   razorpayOrderId?: string;
   razorpayKeyId?: string;
-  amount: Paise;
+  amountPaise?: Paise;
+}
+
+export interface VerifyPaymentResponse {
+  success: boolean;
+  message: string;
 }
 
 export interface VerifyPaymentRequest {

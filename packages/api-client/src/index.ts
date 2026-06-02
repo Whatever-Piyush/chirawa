@@ -10,6 +10,7 @@ import type {
   AddToCartRequest,
   PlaceOrderRequest,
   PlaceOrderResponse,
+  VerifyPaymentResponse,
   PricingPreviewRequest,
   PricingPreviewResponse,
   OrderDetailResponse,
@@ -254,6 +255,15 @@ export class ChirawaApiClient {
 
   async placeOrder(data: PlaceOrderRequest): Promise<PlaceOrderResponse> {
     return this.request<PlaceOrderResponse>('POST', '/orders', data);
+  }
+
+  // Called after the Razorpay checkout sheet returns a successful payment.
+  // The server re-verifies the signature before marking the order paid.
+  async verifyPayment(
+    orderId: string,
+    data: { razorpayOrderId: string; razorpayPaymentId: string; razorpaySignature: string },
+  ): Promise<VerifyPaymentResponse> {
+    return this.request<VerifyPaymentResponse>('POST', `/payments/verify/${orderId}`, data);
   }
 
   async cancelOrder(orderId: string, reason?: string): Promise<{ message: string }> {

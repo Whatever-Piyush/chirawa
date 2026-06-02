@@ -29,6 +29,8 @@ import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { isOpenNow } from '../../utils/operatingHours';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
+import { useAuth } from '../../context/AuthContext';
+import RazorpayCheckout, { type RazorpaySuccess } from '../../components/payment/RazorpayCheckout';
 
 type LabelChoice = 'home' | 'work' | 'other';
 const LABEL_VALUE: Record<LabelChoice, string> = { home: 'घर', work: 'दुकान', other: 'अन्य' };
@@ -151,6 +153,7 @@ export default function CheckoutScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const { state: authState } = useAuth();
 
   const [cart, setCart]               = useState<CartResponse | null>(null);
   const [cartLoading, setCartLoading] = useState(true);
@@ -175,6 +178,12 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PaymentMethod.COD);
   const [placing,       setPlacing]       = useState(false);
+
+  // Razorpay checkout (online payment). Non-null = the sheet is open for this order.
+  const [rzpData, setRzpData] = useState<{
+    orderId: string; keyId: string; razorpayOrderId: string; amountPaise: number;
+  } | null>(null);
+  const [verifying, setVerifying] = useState(false);
 
   const placeBtnScale = useRef(new Animated.Value(1)).current;
 
@@ -293,7 +302,6 @@ export default function CheckoutScreen({ navigation }: Props) {
   const handlePlaceOrder = useCallback(async () => {
     if (!cart) return;
     if (!addressId && !street.trim()) return;
-    if (paymentMethod !== PaymentMethod.COD) { Alert.alert('🚀', t('checkout.comingSoon')); return; }
 
     setPlacing(true);
     try {
@@ -307,14 +315,61 @@ export default function CheckoutScreen({ navigation }: Props) {
         });
         addrId = addr.id;
       }
-      const result = await api.placeOrder({ cartId: cart.cartId, addressId: addrId, paymentMethod: PaymentMethod.COD });
-      navigation.replace('OrderTracking', { orderId: result.orderId });
+      const result = await api.placeOrder({ cartId: cart.cartId, addressId: addrId, paymentMethod });
+
+      if (paymentMethod === PaymentMethod.COD) {
+        navigation.replace('OrderTracking', { orderId: result.orderId });
+        return;
+      }
+
+      // Online payment → open Razorpay checkout for the just-created order.
+      if (result.razorpayOrderId && result.razorpayKeyId) {
+        setRzpData({
+          orderId:         result.orderId,
+          keyId:           result.razorpayKeyId,
+          razorpayOrderId: result.razorpayOrderId,
+          amountPaise:     result.amountPaise ?? result.totalAmount,
+        });
+      } else {
+        Alert.alert(t('common.error'), t('checkout.paymentInitFailed'));
+      }
     } catch (err: unknown) {
       Alert.alert(t('common.error'), err instanceof Error ? err.message : t('common.error'));
     } finally {
       setPlacing(false);
     }
   }, [cart, street, area, landmark, label, addressId, paymentMethod, navigation, t]);
+
+  // Razorpay returned a successful payment → re-verify server-side, then go to
+  // tracking. The order already exists (pending_payment); verify flips it to paid.
+  const handlePaymentSuccess = useCallback(async (r: RazorpaySuccess) => {
+    const data = rzpData;
+    setRzpData(null);
+    if (!data) return;
+    setVerifying(true);
+    try {
+      await api.verifyPayment(data.orderId, {
+        razorpayOrderId:   r.razorpayOrderId,
+        razorpayPaymentId: r.razorpayPaymentId,
+        razorpaySignature: r.razorpaySignature,
+      });
+      navigation.replace('OrderTracking', { orderId: data.orderId });
+    } catch (err: unknown) {
+      Alert.alert(t('checkout.paymentFailed'), err instanceof Error ? err.message : t('checkout.paymentFailed'));
+    } finally {
+      setVerifying(false);
+    }
+  }, [rzpData, navigation, t]);
+
+  const handlePaymentDismiss = useCallback(() => {
+    setRzpData(null);
+    Alert.alert(t('checkout.paymentCancelledTitle'), t('checkout.paymentCancelledBody'));
+  }, [t]);
+
+  const handlePaymentError = useCallback((msg: string) => {
+    setRzpData(null);
+    Alert.alert(t('checkout.paymentFailed'), msg);
+  }, [t]);
 
   const subtotalRupees = cart ? Math.round(cart.subtotal / 100) : 0;
   const deliveryRupees = pricing ? Math.round(pricing.deliveryFee / 100) : null;
@@ -381,6 +436,34 @@ export default function CheckoutScreen({ navigation }: Props) {
           <Text style={styles.totalLabel}>{t('cart.total')}</Text>
           <Text style={styles.totalValue}>₹{totalRupees}</Text>
         </View>
+      </View>
+
+      {/* ── Payment Method ───────────────────────────────────────────────── */}
+      <View style={styles.section}>
+        <Text style={styles.cardTitle}>{t('checkout.paymentMethod')}</Text>
+        {([
+          { method: PaymentMethod.COD, icon: 'cash-outline',  title: t('checkout.cod'),       hint: t('checkout.codHint') },
+          { method: PaymentMethod.UPI, icon: 'card-outline',  title: t('checkout.payOnline'), hint: t('checkout.onlineHint') },
+        ] as const).map((opt) => {
+          const selected = paymentMethod === opt.method;
+          return (
+            <TouchableOpacity
+              key={opt.method}
+              style={[styles.payOption, selected && styles.payOptionSelected]}
+              onPress={() => setPaymentMethod(opt.method)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name={opt.icon} size={22} color={selected ? Colors.primary : Colors.textSecondary} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.payOptionTitle}>{opt.title}</Text>
+                <Text style={styles.payOptionHint}>{opt.hint}</Text>
+              </View>
+              <View style={[styles.payRadio, selected && styles.payRadioSelected]}>
+                {selected && <View style={styles.payRadioDot} />}
+              </View>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* ── Delivery Address ─────────────────────────────────────────────── */}
@@ -536,7 +619,9 @@ export default function CheckoutScreen({ navigation }: Props) {
         <View style={styles.payRow}>
           <View style={styles.payUsing}>
             <Text style={styles.payUsingLabel}>{t('checkout.payUsing')}</Text>
-            <Text style={styles.payUsingValue} numberOfLines={1}>{t('checkout.cod')}</Text>
+            <Text style={styles.payUsingValue} numberOfLines={1}>
+              {paymentMethod === PaymentMethod.COD ? t('checkout.cod') : t('checkout.payOnline')}
+            </Text>
           </View>
           <Animated.View style={{ transform: [{ scale: placeBtnScale }], flex: 1 }}>
             <TouchableOpacity style={[styles.placeOrderBtn, !canPlaceOrder && styles.placeBtnDisabled]} onPress={pulseAndPlace} disabled={!canPlaceOrder} activeOpacity={0.9}>
@@ -556,6 +641,34 @@ export default function CheckoutScreen({ navigation }: Props) {
           </Animated.View>
         </View>
       </View>
+
+      {/* ── Razorpay checkout (online payment) ───────────────────────────── */}
+      {rzpData && (
+        <RazorpayCheckout
+          visible
+          keyId={rzpData.keyId}
+          razorpayOrderId={rzpData.razorpayOrderId}
+          amountPaise={rzpData.amountPaise}
+          merchantName="Chirawa"
+          description={t('checkout.title')}
+          themeColor={Colors.primary}
+          prefill={{
+            name:    authState.name ?? undefined,
+            contact: authState.phone ?? undefined,
+          }}
+          onSuccess={handlePaymentSuccess}
+          onDismiss={handlePaymentDismiss}
+          onError={handlePaymentError}
+        />
+      )}
+
+      {/* Verifying payment with the server */}
+      {verifying && (
+        <View style={styles.verifyOverlay}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.verifyText}>{t('checkout.verifying')}</Text>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -694,4 +807,29 @@ const makeStyles = (Colors: ColorPalette) =>
 
   dotsRow: { flexDirection: 'row', gap: 6, alignSelf: 'center' },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.white },
+
+  // Payment method selector
+  payOption: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
+    paddingVertical: Spacing.md, paddingHorizontal: Spacing.md,
+    borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface, marginTop: Spacing.sm,
+  },
+  payOptionSelected: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  payOptionTitle: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
+  payOptionHint:  { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 1 },
+  payRadio: {
+    width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: Colors.border,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  payRadioSelected: { borderColor: Colors.primary },
+  payRadioDot: { width: 11, height: 11, borderRadius: 6, backgroundColor: Colors.primary },
+
+  // Verifying-payment overlay
+  verifyOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center', alignItems: 'center', gap: Spacing.md,
+  },
+  verifyText: { color: Colors.white, fontSize: FontSize.md, fontWeight: '700' },
 });
