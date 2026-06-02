@@ -12,6 +12,7 @@ import prismaPlugin        from './shared/plugins/prisma.plugin';
 import redisPlugin         from './shared/plugins/redis.plugin';
 import realtimePlugin      from './shared/plugins/realtime.plugin';
 import notificationsPlugin from './modules/notifications/notifications.plugin';
+import dispatchPlugin       from './modules/delivery/dispatch.plugin';
 
 import authRoutes          from './modules/auth/auth.routes';
 import usersRoutes         from './modules/users/users.routes';
@@ -47,6 +48,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(redisPlugin);
   await app.register(realtimePlugin);
   await app.register(notificationsPlugin); // After prisma + redis
+  await app.register(dispatchPlugin);       // Auto-assign confirmed orders to riders
 
   // ── HTTP Plugins ──────────────────────────────────────────────────────────
   await app.register(sensible);
