@@ -13,6 +13,7 @@ declare module 'fastify' {
       cleanup:        Queue;
       referral:       Queue;
       notification:   Queue;
+      assignment:     Queue;
     };
   }
 }
@@ -33,6 +34,7 @@ async function queuePlugin(app: FastifyInstance): Promise<void> {
     cleanup:        new Queue(QueueNames.CLEANUP,        { connection }),
     referral:       new Queue(QueueNames.REFERRAL,       { connection }),
     notification:   new Queue(QueueNames.NOTIFICATION,   { connection }),
+    assignment:     new Queue(QueueNames.ORDER_ASSIGNMENT, { connection }),
   };
 
   app.decorate('queues', queues);

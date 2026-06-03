@@ -4,9 +4,11 @@ export const QueueNames = {
   CLEANUP:         'chirawa-cleanup',
   REFERRAL:        'chirawa-referral',
   NOTIFICATION:    'chirawa-notification',
+  ORDER_ASSIGNMENT: 'chirawa-order-assignment',
 } as const;
 
 export const JobNames = {
+  ASSIGN_ORDER:          'assign-order',
   DAILY_SETTLEMENT:      'daily-settlement',
   SINGLE_SELLER_SETTLE:  'single-seller-settle',
   PAYMENT_RECONCILE:     'payment-reconcile',
@@ -18,6 +20,11 @@ export const JobNames = {
   SEND_PUSH:             'send-push',
   SEND_SMS:              'send-sms',
 } as const;
+
+export interface AssignOrderPayload {
+  orderId: string;
+  attempt: number;   // 1-based retry counter
+}
 
 export interface SingleSellerSettlePayload {
   sellerProfileId: string;

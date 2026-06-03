@@ -10,6 +10,7 @@ import { runDailySettlement, processSingleSellerSettle } from './jobs/settlement
 import { runPaymentReconciliation } from './jobs/reconciliation.job';
 import { runLocationCleanup, runOtpCleanup, runTokenCleanup, runCartCleanup } from './jobs/cleanup.job';
 import { processUnlockReferral } from './jobs/referral.job';
+import { processAssignOrder } from './jobs/assignment.job';
 
 // BullMQ auto-connects — do NOT call .connect() manually
 const redisConnection = new Redis(env.REDIS_URL, {
@@ -27,6 +28,7 @@ const settlementQueue     = new Queue(QueueNames.SETTLEMENT,     { connection: r
 const reconciliationQueue = new Queue(QueueNames.RECONCILIATION, { connection: redisConnection });
 const cleanupQueue        = new Queue(QueueNames.CLEANUP,        { connection: redisConnection });
 const referralQueue       = new Queue(QueueNames.REFERRAL,       { connection: redisConnection });
+const assignmentQueue     = new Queue(QueueNames.ORDER_ASSIGNMENT, { connection: redisConnection });
 
 const settlementWorker = new Worker(
   QueueNames.SETTLEMENT,
@@ -65,7 +67,17 @@ const referralWorker = new Worker(
   { connection: redisConnection, concurrency: 5 },
 );
 
-const workers = [settlementWorker, reconciliationWorker, cleanupWorker, referralWorker];
+const assignmentWorker = new Worker(
+  QueueNames.ORDER_ASSIGNMENT,
+  async (job) => {
+    if (job.name === JobNames.ASSIGN_ORDER) {
+      await processAssignOrder(job, prisma, redisForCleanup, assignmentQueue);
+    }
+  },
+  { connection: redisConnection, concurrency: 3 },
+);
+
+const workers = [settlementWorker, reconciliationWorker, cleanupWorker, referralWorker, assignmentWorker];
 
 workers.forEach((worker) => {
   worker.on('completed', (job) => console.log(`✅ Job completed: ${job.name}`));
@@ -81,6 +93,7 @@ async function start(): Promise<void> {
   console.log('   Reconciliation     : ready');
   console.log('   Cleanup worker     : ready');
   console.log('   Referral worker    : ready');
+  console.log('   Assignment worker  : ready');
 
   await setupSchedules({
     settlement:     settlementQueue,
@@ -98,7 +111,7 @@ async function shutdown(): Promise<void> {
   try {
     await Promise.all(workers.map((w) => w.close()));
     await Promise.all([
-      settlementQueue, reconciliationQueue, cleanupQueue, referralQueue,
+      settlementQueue, reconciliationQueue, cleanupQueue, referralQueue, assignmentQueue,
     ].map((q) => q.close()));
     await prisma.$disconnect();
   } catch {
