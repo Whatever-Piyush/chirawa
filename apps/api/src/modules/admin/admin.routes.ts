@@ -104,6 +104,77 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // ── Dispatch live-ops view (Chunk 5.6) ────────────────────────────────────
+  /*
+   * GET /api/v1/admin/dispatch
+   * Real-time operational snapshot for the founders: active orders (last 24h)
+   * with status + assigned rider (unassigned ones flagged), and online riders
+   * with their current delivery load. JSON only — the full UI is Chunk 9.
+   */
+  app.get(
+    '/dispatch',
+    { preHandler: [authenticate, requireRole('admin')] },
+    async (_req, reply) => {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const ACTIVE = ['paid', 'confirmed', 'preparing', 'ready_for_pickup', 'picked_up', 'out_for_delivery'];
+      // An order needs a rider once it's confirmed but none is assigned yet.
+      const NEEDS_RIDER = ['confirmed', 'preparing', 'ready_for_pickup'];
+
+      const orders = await app.prisma.order.findMany({
+        where:   { status: { in: ACTIVE as never }, createdAt: { gte: since } },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true, status: true, totalAmount: true, deliveryLocality: true,
+          paymentMethod: true, riderId: true, createdAt: true,
+          shop: { select: { name: true } },
+        },
+      });
+
+      // riderId is denormalized (no relation) — resolve names in one batch query.
+      const riderIds = [...new Set(orders.map((o) => o.riderId).filter((id): id is string => !!id))];
+      const riderProfiles = riderIds.length
+        ? await app.prisma.riderProfile.findMany({ where: { id: { in: riderIds } }, select: { id: true, fullName: true } })
+        : [];
+      const riderName = new Map(riderProfiles.map((r) => [r.id, r.fullName]));
+
+      const activeOrders = orders.map((o) => ({
+        id:            o.id,
+        shortId:       o.id.slice(-6).toUpperCase(),
+        status:        o.status,
+        shopName:      o.shop?.name ?? null,
+        riderName:     o.riderId ? riderName.get(o.riderId) ?? null : null,
+        totalAmount:   o.totalAmount,
+        deliveryLocality: o.deliveryLocality,
+        paymentMethod: o.paymentMethod,
+        createdAt:     o.createdAt,
+        unassigned:    !o.riderId && (NEEDS_RIDER as string[]).includes(o.status),
+      }));
+
+      // Online riders + active delivery load.
+      const online = await app.prisma.riderAvailability.findMany({
+        where:  { status: 'online' },
+        select: { riderId: true, lastSeenAt: true, rider: { select: { fullName: true } } },
+      });
+      const riders = await Promise.all(
+        online.map(async (a) => ({
+          riderId:      a.riderId,
+          name:         a.rider?.fullName ?? null,
+          lastSeenAt:   a.lastSeenAt,
+          activeOrders: await app.prisma.deliveryAssignment.count({ where: { riderId: a.riderId, isActive: true } }),
+        })),
+      );
+
+      return reply.send({
+        generatedAt:      new Date().toISOString(),
+        activeOrderCount: activeOrders.length,
+        unassignedCount:  activeOrders.filter((o) => o.unassigned).length,
+        onlineRiderCount: riders.length,
+        activeOrders,
+        riders,
+      });
+    },
+  );
+
   // ── Image management (shop onboarding) ─────────────────────────────────────
 
   /*

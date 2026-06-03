@@ -130,6 +130,16 @@ async function main(): Promise<void> {
   });
   console.log('  ✅ Promo seeded (FIRSTORDER — free first delivery)');
 
+  // ── Founder admin ──────────────────────────────────────────────────────────
+  // One admin account for the live-ops / dispatch view. Logs in via OTP like any
+  // user (dev bypass 123456). Update the phone before launch.
+  await prisma.user.upsert({
+    where:  { phone: '9999900001' },
+    update: { role: 'admin', isActive: true },
+    create: { phone: '9999900001', role: 'admin', isActive: true },
+  });
+  console.log('  ✅ Founder admin seeded (9999900001)');
+
   // ── Search Aliases ─────────────────────────────────────────────────────────
   await seedSearchAliases(prisma);
 
