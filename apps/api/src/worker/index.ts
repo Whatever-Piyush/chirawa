@@ -10,7 +10,7 @@ import { runDailySettlement, processSingleSellerSettle } from './jobs/settlement
 import { runPaymentReconciliation } from './jobs/reconciliation.job';
 import { runLocationCleanup, runOtpCleanup, runTokenCleanup, runCartCleanup } from './jobs/cleanup.job';
 import { processUnlockReferral } from './jobs/referral.job';
-import { processAssignOrder } from './jobs/assignment.job';
+import { processAssignBatch } from './jobs/assignment.job';
 
 // BullMQ auto-connects — do NOT call .connect() manually
 const redisConnection = new Redis(env.REDIS_URL, {
@@ -70,8 +70,8 @@ const referralWorker = new Worker(
 const assignmentWorker = new Worker(
   QueueNames.ORDER_ASSIGNMENT,
   async (job) => {
-    if (job.name === JobNames.ASSIGN_ORDER) {
-      await processAssignOrder(job, prisma, redisForCleanup, assignmentQueue);
+    if (job.name === JobNames.ASSIGN_BATCH) {
+      await processAssignBatch(job, prisma, redisForCleanup, assignmentQueue);
     }
   },
   { connection: redisConnection, concurrency: 3 },

@@ -417,6 +417,7 @@ model Order {
   // Optional references
   promoCodeId String? @map("promo_code_id") @db.Uuid
   addressId   String? @map("address_id") @db.Uuid
+  batchId     String? @map("batch_id") @db.Uuid   // delivery batch (Chunk 5.4)
 
   // Timestamps
   confirmedAt      DateTime? @map("confirmed_at")
@@ -438,6 +439,7 @@ model Order {
   shop                Shop                 @relation(fields: [shopId], references: [id])
   address             Address?             @relation(fields: [addressId], references: [id])
   promoCode           PromoCode?           @relation(fields: [promoCodeId], references: [id])
+  batch               Batch?               @relation(fields: [batchId], references: [id])
   items               OrderItem[]
   statusHistory       OrderStatusHistory[]
   payments            Payment[]
@@ -575,6 +577,25 @@ model DeliveryZone {
   riderZones  RiderZone[]
 
   @@map("delivery_zones")
+}
+
+// A delivery batch — up to 3 nearby same-zone orders grouped to one rider for a
+// single trip (Chunk 5.4). status: open | assigned | completed | cancelled.
+model Batch {
+  id        String   @id @default(uuid()) @db.Uuid
+  zoneId    String?  @map("zone_id") @db.Uuid
+  riderId   String?  @map("rider_id") @db.Uuid     // RiderProfile.id once assigned
+  status    String   @default("open") @db.VarChar(20)
+  anchorLat Decimal  @map("anchor_lat") @db.Decimal(10, 8)  // first order's drop point
+  anchorLng Decimal  @map("anchor_lng") @db.Decimal(11, 8)
+  closesAt  DateTime @map("closes_at")              // accumulation window end
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  orders Order[]
+
+  @@index([status, zoneId])
+  @@map("batches")
 }
 
 // Links a rider to their primary delivery zone(s) (Chunk 5.1).

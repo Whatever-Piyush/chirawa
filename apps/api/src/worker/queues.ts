@@ -8,7 +8,7 @@ export const QueueNames = {
 } as const;
 
 export const JobNames = {
-  ASSIGN_ORDER:          'assign-order',
+  ASSIGN_BATCH:          'assign-batch',
   DAILY_SETTLEMENT:      'daily-settlement',
   SINGLE_SELLER_SETTLE:  'single-seller-settle',
   PAYMENT_RECONCILE:     'payment-reconcile',
@@ -21,8 +21,8 @@ export const JobNames = {
   SEND_SMS:              'send-sms',
 } as const;
 
-export interface AssignOrderPayload {
-  orderId: string;
+export interface AssignBatchPayload {
+  batchId: string;
   attempt: number;   // 1-based retry counter
 }
 
