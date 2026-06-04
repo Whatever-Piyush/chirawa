@@ -59,6 +59,8 @@ export default function AddressListScreen({ navigation }: Props) {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  // Refresh when returning from the GPS address screen.
+  useEffect(() => navigation.addListener('focus', () => { void load(); }), [navigation, load]);
 
   const handleRetry = useCallback(() => {
     setError(false);
@@ -212,7 +214,7 @@ export default function AddressListScreen({ navigation }: Props) {
       {/* FAB */}
       <TouchableOpacity
         accessibilityLabel="Add address"
-        onPress={() => setModalOpen(true)}
+        onPress={() => navigation.navigate('AddressMap')}
         activeOpacity={0.85}
         style={[styles.fab, { bottom: insets.bottom + 20 }]}
       >

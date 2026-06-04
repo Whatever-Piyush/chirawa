@@ -387,6 +387,13 @@ export const translations = {
     deleteConfirm:  { en: 'Delete this address?',           hi: 'यह पता हटाएं?' },
     selectAddress:  { en: 'Select delivery address',        hi: 'डिलीवरी पता चुनें' },
     save:           { en: 'Save Address',                   hi: 'पता सेव करें' },
+    // ── GPS pin (Chunk 2.2) ──────────────────────────────────────────
+    useMyLocation:  { en: '📍 Use my current location',     hi: '📍 मेरी मौजूदा लोकेशन इस्तेमाल करें' },
+    dragToAdjust:   { en: 'Drag the pin to your exact door', hi: 'पिन को अपने दरवाज़े तक खींचें' },
+    gettingLocation:{ en: 'Getting your location…',          hi: 'लोकेशन ली जा रही है…' },
+    locationDenied: { en: 'Location permission needed to pin your address', hi: 'पता पिन करने के लिए लोकेशन अनुमति चाहिए' },
+    outsideChirawa: { en: 'We currently only deliver within Chirawa', hi: 'अभी हम सिर्फ़ चिरावा में डिलीवरी करते हैं' },
+    houseNo:        { en: 'House / Flat no.',               hi: 'मकान / फ्लैट नंबर' },
   },
   cancellation: {
     cancelOrder:    { en: 'Cancel Order',                       hi: 'ऑर्डर रद्द करें' },

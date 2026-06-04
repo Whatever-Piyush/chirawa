@@ -35,6 +35,7 @@ import CategoryProductsScreen from '../screens/categories/CategoryProductsScreen
 import ChirawaSpecialScreen from '../screens/categories/ChirawaSpecialScreen';
 import ProfileScreen from '../screens/profile/ProfileScreen';
 import AddressListScreen from '../screens/profile/AddressListScreen';
+import AddressMapScreen from '../screens/profile/AddressMapScreen';
 import AccountPrivacyScreen from '../screens/profile/AccountPrivacyScreen';
 import ProductDetailScreen from '../screens/product/ProductDetailScreen';
 import SearchScreen from '../screens/search/SearchScreen';
@@ -56,6 +57,7 @@ export type RootStackParamList = {
   Checkout: undefined;
   OrderTracking: { orderId: string };
   AddressList: undefined;
+  AddressMap: undefined;
 };
 
 // Visible tabs: Home · Order Again · Categories · Special. Profile is a real
@@ -211,6 +213,15 @@ export default function AppNavigator() {
                   options={{
                     headerShown: true,
                     headerTitle: 'My Addresses',
+                    headerTintColor: Colors.primary,
+                  }}
+                />
+                <Stack.Screen
+                  name="AddressMap"
+                  component={AddressMapScreen}
+                  options={{
+                    headerShown: true,
+                    headerTitle: 'Pin your address',
                     headerTintColor: Colors.primary,
                   }}
                 />
