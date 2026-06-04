@@ -289,6 +289,31 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     return { message: 'Order accept ho gaya' };
   }
 
+  // Auto-accept on seller timeout (Chunk 8.2). No seller is acting, so ownership
+  // isn't checked — only fires for an order still awaiting acceptance. Runs
+  // in-process (API) so the paid→confirmed transition emits the usual events
+  // (dispatch + customer notification). Tracks the miss on the seller profile.
+  async function autoAcceptOrder(orderId: string) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { shop: { include: { seller: { select: { id: true, userId: true } } } } },
+    });
+    if (!order) return { autoAccepted: false, reason: 'not_found' };
+    if (order.sellerAcceptedAt) return { autoAccepted: false, reason: 'already_accepted' };
+    if (!['paid', 'confirmed'].includes(order.status)) return { autoAccepted: false, reason: 'not_pending' };
+
+    await prisma.order.update({ where: { id: orderId }, data: { sellerAcceptedAt: new Date() } });
+    await prisma.sellerProfile.update({
+      where: { id: order.shop.sellerId },
+      data:  { missedAcceptances: { increment: 1 } },
+    });
+    // Online orders still need paid → confirmed (COD is already confirmed).
+    if (order.status === 'paid') {
+      await updateOrderStatus(orderId, 'confirmed', 'seller', order.shop.seller.userId, 'Auto-accepted (no seller response)');
+    }
+    return { autoAccepted: true, status: 'confirmed' };
+  }
+
   async function sellerRejectOrder(orderId: string, sellerUserId: string, reason: string) {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
@@ -422,7 +447,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   return {
     placeOrder, getOrder, getMyOrders, updateOrderStatus,
     sellerAcceptOrder, sellerRejectOrder, sellerMarkPreparing, sellerMarkReady,
-    cancelOrder, codCollected, rateOrder,
+    cancelOrder, codCollected, rateOrder, autoAcceptOrder,
   };
 }
 

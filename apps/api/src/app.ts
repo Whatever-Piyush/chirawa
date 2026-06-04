@@ -14,6 +14,7 @@ import queuePlugin         from './shared/plugins/queue.plugin';
 import realtimePlugin      from './shared/plugins/realtime.plugin';
 import notificationsPlugin from './modules/notifications/notifications.plugin';
 import dispatchPlugin       from './modules/delivery/dispatch.plugin';
+import sellerTimeoutPlugin  from './modules/orders/seller-timeout.plugin';
 
 import authRoutes          from './modules/auth/auth.routes';
 import usersRoutes         from './modules/users/users.routes';
@@ -51,6 +52,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(realtimePlugin);
   await app.register(notificationsPlugin); // After prisma + redis
   await app.register(dispatchPlugin);       // Auto-assign confirmed orders to riders (after queues)
+  await app.register(sellerTimeoutPlugin);  // Auto-accept orders on seller timeout (after queues)
 
   // ── HTTP Plugins ──────────────────────────────────────────────────────────
   await app.register(sensible);

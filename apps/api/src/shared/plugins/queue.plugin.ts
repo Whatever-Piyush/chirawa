@@ -14,6 +14,7 @@ declare module 'fastify' {
       referral:       Queue;
       notification:   Queue;
       assignment:     Queue;
+      sellerAccept:   Queue;
     };
   }
 }
@@ -35,6 +36,7 @@ async function queuePlugin(app: FastifyInstance): Promise<void> {
     referral:       new Queue(QueueNames.REFERRAL,       { connection }),
     notification:   new Queue(QueueNames.NOTIFICATION,   { connection }),
     assignment:     new Queue(QueueNames.ORDER_ASSIGNMENT, { connection }),
+    sellerAccept:   new Queue(QueueNames.SELLER_ACCEPT,     { connection }),
   };
 
   app.decorate('queues', queues);

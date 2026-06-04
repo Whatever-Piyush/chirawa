@@ -5,10 +5,12 @@ export const QueueNames = {
   REFERRAL:        'chirawa-referral',
   NOTIFICATION:    'chirawa-notification',
   ORDER_ASSIGNMENT: 'chirawa-order-assignment',
+  SELLER_ACCEPT:    'chirawa-seller-accept',
 } as const;
 
 export const JobNames = {
   ASSIGN_BATCH:          'assign-batch',
+  AUTO_ACCEPT:           'auto-accept',
   DAILY_SETTLEMENT:      'daily-settlement',
   SINGLE_SELLER_SETTLE:  'single-seller-settle',
   PAYMENT_RECONCILE:     'payment-reconcile',
@@ -24,6 +26,10 @@ export const JobNames = {
 export interface AssignBatchPayload {
   batchId: string;
   attempt: number;   // 1-based retry counter
+}
+
+export interface AutoAcceptPayload {
+  orderId: string;
 }
 
 export interface SingleSellerSettlePayload {

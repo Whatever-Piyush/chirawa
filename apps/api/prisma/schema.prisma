@@ -149,6 +149,9 @@ model SellerProfile {
   pinHash        String?   @map("pin_hash") @db.VarChar(60)
   pinFailCount   Int       @default(0) @map("pin_fail_count")
   pinLockedUntil DateTime? @map("pin_locked_until")
+  // Times an order was auto-accepted because the seller didn't respond in the
+  // acceptance window (Chunk 8.2) — flags chronically unresponsive sellers.
+  missedAcceptances Int    @default(0) @map("missed_acceptances")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
