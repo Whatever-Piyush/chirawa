@@ -1,10 +1,10 @@
 import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
-import { NotFoundError } from '../../shared/errors/app-errors';
+import { NotFoundError, ForbiddenError, BusinessRuleError } from '../../shared/errors/app-errors';
 import {
   pointInPolygon, polygonCentroid, haversineMeters, type LatLng,
 } from '../../shared/utils/geo';
-import { emitOrderAssignedToRider } from '../../shared/events/event-bus';
+import { emitOrderAssignedToRider, emitOrderStatusChanged } from '../../shared/events/event-bus';
 
 export type AvailabilityStatus = 'online' | 'offline' | 'on_delivery';
 
@@ -131,5 +131,88 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
     return { assigned: true as const, riderId: best.riderProfileId, zone: zone?.name ?? null };
   }
 
-  return { setAvailability, getAvailability, assignOrder };
+  // ── Rider active delivery / batch (Task 5.5) ───────────────────────────────
+
+  // The rider's current trip: every order on an active assignment, grouped as a
+  // batch with distinct pickup shops and per-order dropoffs.
+  async function getActiveDelivery(userId: string) {
+    const rider = await prisma.riderProfile.findUnique({ where: { userId }, select: { id: true } });
+    if (!rider) throw new NotFoundError('Rider profile');
+
+    const assignments = await prisma.deliveryAssignment.findMany({
+      where:   { riderId: rider.id, isActive: true },
+      orderBy: { assignedAt: 'asc' },
+      select:  { orderId: true },
+    });
+    if (assignments.length === 0) return null;
+
+    const orders = await prisma.order.findMany({
+      where:  { id: { in: assignments.map((a) => a.orderId) } },
+      select: {
+        id: true, status: true, paymentMethod: true, totalAmount: true, batchId: true,
+        deliveryStreet: true, deliveryLandmark: true, deliveryLocality: true,
+        deliveryLat: true, deliveryLng: true,
+        shop:  { select: { name: true, lat: true, lng: true, address: true } },
+        items: { select: { productName: true, quantity: true } },
+      },
+    });
+
+    const stops = orders.map((o) => ({
+      id: o.id, status: o.status, paymentMethod: o.paymentMethod, totalAmount: o.totalAmount,
+      shop: { name: o.shop.name, address: o.shop.address ?? '', lat: Number(o.shop.lat), lng: Number(o.shop.lng) },
+      items: o.items,
+      deliveryStreet: o.deliveryStreet, deliveryLandmark: o.deliveryLandmark, deliveryLocality: o.deliveryLocality,
+      deliveryLat: Number(o.deliveryLat), deliveryLng: Number(o.deliveryLng),
+    }));
+
+    const PICKED = ['picked_up', 'out_for_delivery', 'delivered'];
+    return {
+      batchId:     orders[0]?.batchId ?? null,
+      orderCount:  stops.length,
+      allPickedUp: stops.every((s) => PICKED.includes(s.status)),
+      orders:      stops,
+    };
+  }
+
+  // Shared status transition for rider actions — verifies the rider owns the
+  // order (active assignment) then advances status + logs history + emits.
+  async function riderAdvance(userId: string, orderId: string, newStatus: string) {
+    const rider = await prisma.riderProfile.findUnique({ where: { userId }, select: { id: true } });
+    if (!rider) throw new NotFoundError('Rider profile');
+    const assignment = await prisma.deliveryAssignment.findFirst({
+      where: { orderId, riderId: rider.id, isActive: true },
+    });
+    if (!assignment) throw new ForbiddenError('Not your delivery');
+
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+
+    // Can't go out for delivery until every order in the batch is picked up.
+    if (newStatus === 'out_for_delivery' && order.batchId) {
+      const notPicked = await prisma.order.count({
+        where: { batchId: order.batchId, status: { in: ['confirmed', 'preparing', 'ready_for_pickup'] } },
+      });
+      if (notPicked > 0) throw new BusinessRuleError('Pehle batch ke saare orders pickup karein');
+    }
+
+    await prisma.$transaction([
+      prisma.order.update({
+        where: { id: orderId },
+        data:  { status: newStatus as never, ...(newStatus === 'picked_up' ? { pickedUpAt: new Date() } : {}) },
+      }),
+      prisma.orderStatusHistory.create({
+        data: { orderId, status: newStatus as never, changedByRole: 'rider', changedById: userId },
+      }),
+    ]);
+
+    emitOrderStatusChanged({
+      orderId, status: newStatus, shopId: order.shopId,
+      sellerId: '', riderId: rider.id, customerId: order.customerId,
+    });
+    return { status: newStatus };
+  }
+
+  const markPickedUp  = (userId: string, orderId: string) => riderAdvance(userId, orderId, 'picked_up');
+  const startDelivery = (userId: string, orderId: string) => riderAdvance(userId, orderId, 'out_for_delivery');
+
+  return { setAvailability, getAvailability, assignOrder, getActiveDelivery, markPickedUp, startDelivery };
 }

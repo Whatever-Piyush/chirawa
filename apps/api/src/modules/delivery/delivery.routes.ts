@@ -36,6 +36,35 @@ export default async function deliveryRoutes(app: FastifyInstance): Promise<void
     },
   );
 
+  // GET /api/v1/delivery/active — rider's current delivery batch (Task 5.5)
+  app.get(
+    '/active',
+    { preHandler: [authenticate, requireRole('rider')] },
+    async (request, reply) => {
+      return reply.send(await dispatch.getActiveDelivery(request.auth!.userId));
+    },
+  );
+
+  // POST /api/v1/delivery/orders/:orderId/pickup — rider picked the order up
+  app.post(
+    '/orders/:orderId/pickup',
+    { preHandler: [authenticate, requireRole('rider')] },
+    async (request, reply) => {
+      const { orderId } = request.params as { orderId: string };
+      return reply.send(await dispatch.markPickedUp(request.auth!.userId, orderId));
+    },
+  );
+
+  // POST /api/v1/delivery/orders/:orderId/start-delivery — out for delivery
+  app.post(
+    '/orders/:orderId/start-delivery',
+    { preHandler: [authenticate, requireRole('rider')] },
+    async (request, reply) => {
+      const { orderId } = request.params as { orderId: string };
+      return reply.send(await dispatch.startDelivery(request.auth!.userId, orderId));
+    },
+  );
+
   // POST /api/v1/delivery/orders/:orderId/assign — manual / admin trigger of
   // auto-assignment (Task 5.3). The BullMQ worker calls the same service path.
   app.post(

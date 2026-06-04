@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Alert, ActivityIndicator, Linking,
+  Alert, ActivityIndicator, Linking, ScrollView, RefreshControl,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { io, type Socket } from 'socket.io-client';
@@ -12,119 +12,79 @@ import { DEV_HOST } from '../../config/devHost';
 
 const SOCKET_URL = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chirawa.in';
 
-interface ActiveOrder {
-  id: string; status: string; paymentMethod: string;
-  totalAmount: number; deliveryLocality: string;
+interface Stop {
+  id: string; status: string; paymentMethod: string; totalAmount: number;
   shop: { name: string; address: string; lat: number; lng: number };
   items: Array<{ productName: string; quantity: number }>;
+  deliveryStreet: string; deliveryLandmark: string; deliveryLocality: string;
   deliveryLat: number; deliveryLng: number;
-  deliveryStreet: string; deliveryLandmark: string;
+}
+interface ActiveBatch {
+  batchId: string | null; orderCount: number; allPickedUp: boolean; orders: Stop[];
 }
 
-const STEPS = [
-  { key: 'confirmed',        label: 'Shop Pe Pahuncho',    action: 'Shop Pahunch Gaya' },
-  { key: 'ready_for_pickup', label: 'Order Uthao',         action: 'Order Uthaa Liya' },
-  { key: 'picked_up',        label: 'Delivery Shuru Karo', action: 'Delivery Shuru' },
-  { key: 'out_for_delivery', label: 'Deliver Karo',        action: 'Deliver Kar Diya' },
-];
+const PICKED = ['picked_up', 'out_for_delivery', 'delivered'];
+
+function navigate(lat: number, lng: number) {
+  void Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
+}
 
 export default function DeliveryScreen() {
   const { state }                 = useAuth();
-  const [order,   setOrder]       = useState<ActiveOrder | null>(null);
+  const [batch,   setBatch]       = useState<ActiveBatch | null>(null);
   const [loading, setLoading]     = useState(true);
-  const [acting,  setActing]      = useState(false);
-  const socketRef = React.useRef<Socket | null>(null);
-  const locRef    = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [acting,  setActing]      = useState<string | null>(null);
+  const socketRef = useRef<Socket | null>(null);
 
-  const loadActive = useCallback(async () => {
+  const load = useCallback(async () => {
     if (!state.token) return;
     try {
-      const data = await RiderApi.getActiveDelivery(state.token) as ActiveOrder | null;
-      setOrder(data);
-    } catch { setOrder(null); }
-    finally { setLoading(false); }
+      const data = await RiderApi.getActiveDelivery(state.token) as ActiveBatch | null;
+      setBatch(data && data.orders?.length ? data : null);
+    } catch { setBatch(null); }
+    finally { setLoading(false); setRefreshing(false); }
   }, [state.token]);
 
-  useEffect(() => { void loadActive(); }, [loadActive]);
+  useEffect(() => { void load(); }, [load]);
 
-  // Socket.io — receive status updates
   useEffect(() => {
     if (!state.token) return;
     const socket = io(SOCKET_URL, { auth: { token: state.token }, transports: ['websocket'] });
-    socket.on('order:status', () => void loadActive());
+    socket.on('order:status', () => void load());
+    socket.on('order:assigned', () => void load());
     socketRef.current = socket;
-    return () => socket.disconnect();
-  }, [state.token, loadActive]);
+    return () => { socket.disconnect(); };
+  }, [state.token, load]);
 
-  // Location push every 8 seconds when out_for_delivery
-  useEffect(() => {
-    if (order?.status !== 'out_for_delivery' || !state.token) return;
-
-    void (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
-
-      locRef.current = setInterval(async () => {
-        if (!socketRef.current || !order) return;
-        try {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-          socketRef.current.emit('rider:location', {
-            orderId:   order.id,
-            lat:       loc.coords.latitude,
-            lng:       loc.coords.longitude,
-            timestamp: Date.now(),
-          });
-        } catch {}
-      }, 8000);
-    })();
-
-    return () => { if (locRef.current) clearInterval(locRef.current); };
-  }, [order?.status, order?.id, state.token]);
-
-  async function handleAction(action: string) {
-    if (!order || !state.token) return;
-    setActing(true);
+  async function act(stop: Stop, kind: 'pickup' | 'start' | 'deliver') {
+    if (!state.token) return;
+    setActing(stop.id);
     try {
-      if (action === 'pickup')         await RiderApi.pickup(order.id, state.token);
-      else if (action === 'start')     await RiderApi.startDelivery(order.id, state.token);
-      else if (action === 'delivered') {
-        // COD collection
-        if (order.paymentMethod === 'cod') {
-          Alert.alert(
-            '💵 Cash Collect Karein',
-            `₹${Math.round(order.totalAmount / 100)} cash lena hai`,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Cash Mila',
-                onPress: async () => {
-                  await RiderApi.collectCod(order.id, order.totalAmount, state.token!);
-                  await loadActive();
-                },
-              },
-            ],
-          );
-          setActing(false);
-          return;
-        }
-        await RiderApi.collectCod(order.id, order.totalAmount, state.token);
+      if (kind === 'pickup')      await RiderApi.pickup(stop.id, state.token);
+      else if (kind === 'start')  await RiderApi.startDelivery(stop.id, state.token);
+      else if (kind === 'deliver') {
+        const confirmMsg = stop.paymentMethod === 'cod'
+          ? `₹${Math.round(stop.totalAmount / 100)} cash collect karein`
+          : 'Deliver mark karein?';
+        await new Promise<void>((resolve) => {
+          Alert.alert(stop.paymentMethod === 'cod' ? '💵 Cash Collect' : '✅ Deliver', confirmMsg, [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
+            { text: 'Done', onPress: async () => { await RiderApi.collectCod(stop.id, stop.totalAmount, state.token!); resolve(); } },
+          ]);
+        });
       }
-      await loadActive();
+      await load();
     } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Action failed');
+      Alert.alert('Error', e instanceof Error ? e.message : 'Action fail hua');
     } finally {
-      setActing(false);
+      setActing(null);
     }
-  }
-
-  function openNavigation(lat: number, lng: number, label: string) {
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&destination_place_id=${label}`;
-    void Linking.openURL(url);
   }
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.primary} size="large" /></View>;
 
-  if (!order) {
+  if (!batch) {
     return (
       <View style={styles.container}>
         <View style={styles.header}><Text style={styles.headerTitle}>Active Delivery</Text></View>
@@ -137,76 +97,65 @@ export default function DeliveryScreen() {
     );
   }
 
-  const currentStep = STEPS.findIndex((s) => s.key === order.status);
+  const pickups  = batch.orders.filter((o) => !PICKED.includes(o.status));
+  const dropoffs = batch.orders.filter((o) => PICKED.includes(o.status));
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Active Delivery</Text>
-        <Text style={styles.headerStatus}>{order.paymentMethod === 'cod' ? '💵 COD' : '💳 Online'}</Text>
+        {batch.orderCount > 1 && <Text style={styles.batchTag}>📦 {batch.orderCount} orders</Text>}
       </View>
 
-      <View style={styles.orderCard}>
-        {/* Shop info */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>📍 Pickup From</Text>
-          <Text style={styles.shopName}>{order.shop.name}</Text>
-          <Text style={styles.shopAddr}>{order.shop.address}</Text>
-          <TouchableOpacity
-            style={styles.navBtn}
-            onPress={() => openNavigation(Number(order.shop.lat), Number(order.shop.lng), order.shop.name)}
-          >
-            <Text style={styles.navBtnText}>🗺 Navigate to Shop</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Delivery address */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>🏠 Deliver To</Text>
-          <Text style={styles.shopName}>{order.deliveryStreet}</Text>
-          <Text style={styles.shopAddr}>{order.deliveryLandmark}</Text>
-          <TouchableOpacity
-            style={styles.navBtn}
-            onPress={() => openNavigation(Number(order.deliveryLat), Number(order.deliveryLng), order.deliveryLocality)}
-          >
-            <Text style={styles.navBtnText}>🗺 Navigate to Customer</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Items */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>📦 Items</Text>
-          {order.items.map((item, i) => (
-            <Text key={i} style={styles.itemText}>• {item.productName} × {item.quantity}</Text>
-          ))}
-          <Text style={styles.amountText}>₹{Math.round(order.totalAmount / 100)}</Text>
-        </View>
-
-        {/* Action button based on current status */}
-        {currentStep >= 0 && currentStep < STEPS.length && (
-          <TouchableOpacity
-            style={styles.actionBtn}
-            onPress={() => {
-              const actions = ['', 'pickup', 'start', 'delivered'];
-              void handleAction(actions[currentStep + 1] ?? 'delivered');
-            }}
-            disabled={acting}
-          >
-            {acting
-              ? <ActivityIndicator color={Colors.white} />
-              : <Text style={styles.actionBtnText}>
-                  {STEPS[currentStep]?.action ?? 'Next Step'}
-                </Text>
-            }
-          </TouchableOpacity>
-        )}
-
-        {order.status === 'delivered' && (
-          <View style={styles.deliveredBanner}>
-            <Text style={styles.deliveredText}>✅ Delivered! Bahut badhiya!</Text>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={Colors.primary} />}
+      >
+        {/* PICKUPS */}
+        {pickups.length > 0 && <Text style={styles.groupTitle}>🏪 Pickup ({pickups.length})</Text>}
+        {pickups.map((o) => (
+          <View key={o.id} style={styles.card}>
+            <Text style={styles.shopName}>{o.shop.name}</Text>
+            <Text style={styles.addr}>{o.shop.address}</Text>
+            {o.items.map((it, i) => <Text key={i} style={styles.item}>• {it.productName} × {it.quantity}</Text>)}
+            <TouchableOpacity style={styles.navBtn} onPress={() => navigate(o.shop.lat, o.shop.lng)}>
+              <Text style={styles.navBtnText}>🗺 Navigate to Shop</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionBtn} onPress={() => void act(o, 'pickup')} disabled={acting === o.id}>
+              {acting === o.id ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.actionBtnText}>Order Uthaa Liya</Text>}
+            </TouchableOpacity>
           </View>
-        )}
-      </View>
+        ))}
+
+        {/* DROPOFFS */}
+        {dropoffs.length > 0 && <Text style={styles.groupTitle}>🏠 Deliver ({dropoffs.length})</Text>}
+        {dropoffs.map((o) => (
+          <View key={o.id} style={styles.card}>
+            <Text style={styles.shopName}>{o.deliveryStreet}</Text>
+            <Text style={styles.addr}>{o.deliveryLandmark} · {o.deliveryLocality}</Text>
+            <Text style={styles.amount}>₹{Math.round(o.totalAmount / 100)} {o.paymentMethod === 'cod' ? '· 💵 COD' : '· 💳 Online'}</Text>
+            <TouchableOpacity style={styles.navBtn} onPress={() => navigate(o.deliveryLat, o.deliveryLng)}>
+              <Text style={styles.navBtnText}>🗺 Navigate to Customer</Text>
+            </TouchableOpacity>
+            {o.status === 'delivered' ? (
+              <View style={styles.doneBanner}><Text style={styles.doneText}>✅ Delivered</Text></View>
+            ) : o.status === 'out_for_delivery' ? (
+              <TouchableOpacity style={styles.actionBtn} onPress={() => void act(o, 'deliver')} disabled={acting === o.id}>
+                {acting === o.id ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.actionBtnText}>Deliver Kar Diya</Text>}
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.actionBtn, !batch.allPickedUp && styles.actionBtnDisabled]}
+                onPress={() => void act(o, 'start')}
+                disabled={acting === o.id || !batch.allPickedUp}
+              >
+                {acting === o.id ? <ActivityIndicator color={Colors.white} />
+                  : <Text style={styles.actionBtnText}>{batch.allPickedUp ? 'Delivery Shuru' : 'Pehle sab pickup karein'}</Text>}
+              </TouchableOpacity>
+            )}
+          </View>
+        ))}
+      </ScrollView>
     </View>
   );
 }
@@ -214,28 +163,25 @@ export default function DeliveryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   center:    { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingTop: 56, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md,
-    backgroundColor: Colors.primary,
-  },
-  headerTitle:  { flex: 1, fontSize: FontSize.xl, fontWeight: '800', color: Colors.white },
-  headerStatus: { fontSize: FontSize.md, color: 'rgba(255,255,255,0.8)', fontWeight: '600' },
+  header: { flexDirection: 'row', alignItems: 'center', paddingTop: 56, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md, backgroundColor: Colors.primary },
+  headerTitle: { flex: 1, fontSize: FontSize.xl, fontWeight: '800', color: Colors.white },
+  batchTag: { fontSize: FontSize.md, color: Colors.white, fontWeight: '700' },
   empty:     { flex: 1, justifyContent: 'center', alignItems: 'center', gap: Spacing.md },
   emptyEmoji: { fontSize: 64 },
   emptyText:  { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text },
   emptySub:   { fontSize: FontSize.md, color: Colors.textMuted, textAlign: 'center' },
-  orderCard: { margin: Spacing.lg, gap: Spacing.md },
-  section:   { backgroundColor: Colors.card, borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.sm, ...Shadow.card },
-  sectionLabel: { fontSize: FontSize.sm, color: Colors.textMuted, fontWeight: '600', textTransform: 'uppercase' },
-  shopName:  { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text },
-  shopAddr:  { fontSize: FontSize.sm, color: Colors.textLight },
-  navBtn:    { backgroundColor: Colors.background, borderRadius: Radius.md, padding: Spacing.md, alignItems: 'center', marginTop: Spacing.sm },
-  navBtnText: { fontSize: FontSize.md, color: Colors.primary, fontWeight: '600' },
-  itemText:  { fontSize: FontSize.md, color: Colors.text },
-  amountText: { fontSize: FontSize.xl, fontWeight: '800', color: Colors.primary, marginTop: Spacing.sm },
-  actionBtn: { backgroundColor: Colors.primary, borderRadius: Radius.lg, padding: Spacing.xl, alignItems: 'center' },
-  actionBtnText: { color: Colors.white, fontSize: FontSize.xl, fontWeight: '900' },
-  deliveredBanner: { backgroundColor: Colors.success, borderRadius: Radius.lg, padding: Spacing.xl, alignItems: 'center' },
-  deliveredText:   { color: Colors.white, fontSize: FontSize.xl, fontWeight: '800' },
+  scroll: { padding: Spacing.lg, gap: Spacing.md },
+  groupTitle: { fontSize: FontSize.md, fontWeight: '800', color: Colors.text, marginTop: Spacing.sm },
+  card:   { backgroundColor: Colors.card, borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.xs, ...Shadow.card },
+  shopName: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text },
+  addr:   { fontSize: FontSize.sm, color: Colors.textLight },
+  item:   { fontSize: FontSize.sm, color: Colors.text },
+  amount: { fontSize: FontSize.md, fontWeight: '800', color: Colors.primary, marginTop: 2 },
+  navBtn: { backgroundColor: Colors.background, borderRadius: Radius.md, padding: Spacing.sm, alignItems: 'center', marginTop: Spacing.sm },
+  navBtnText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '700' },
+  actionBtn: { backgroundColor: Colors.primary, borderRadius: Radius.md, padding: Spacing.md, alignItems: 'center', marginTop: Spacing.sm },
+  actionBtnDisabled: { backgroundColor: Colors.textMuted },
+  actionBtnText: { color: Colors.white, fontSize: FontSize.md, fontWeight: '900' },
+  doneBanner: { backgroundColor: Colors.success, borderRadius: Radius.md, padding: Spacing.md, alignItems: 'center', marginTop: Spacing.sm },
+  doneText: { color: Colors.white, fontSize: FontSize.md, fontWeight: '800' },
 });
