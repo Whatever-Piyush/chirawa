@@ -28,6 +28,9 @@ import { StorageService } from '../../services/storage.service';
 import { useT } from '@chirawa/i18n';
 import { useToast } from '../../components/ui';
 import { DEV_HOST } from '../../config/devHost';
+import TrackingMap from '../../components/tracking/TrackingMap';
+
+const LOCATION_STALE_MS = 60_000; // rider location older than this → fallback message
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'OrderTracking'>;
@@ -411,6 +414,8 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
   const [order,      setOrder]      = useState<OrderDetailResponse | null>(null);
   const [loading,    setLoading]    = useState(true);
   const [riderPos,   setRiderPos]   = useState<{ lat: number; lng: number } | null>(null);
+  const [riderPosTs, setRiderPosTs] = useState<number | null>(null);
+  const [nowTick,    setNowTick]    = useState<number>(0);
   const [cancelling, setCancelling] = useState(false);
   const [cancelSheetVisible, setCancelSheetVisible] = useState(false);
   const [selectedReason,     setSelectedReason]     = useState<string | null>(null);
@@ -457,6 +462,7 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
       socket.on('order:location', (data: { orderId: string; lat: number; lng: number }) => {
         if (data.orderId !== orderId) return;
         setRiderPos({ lat: data.lat, lng: data.lng });
+        setRiderPosTs(Date.now());
       });
 
       socketRef.current = socket;
@@ -464,7 +470,16 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
 
     void connectSocket();
 
+    // Initial paint: last-known rider location (before the first socket tick).
+    void (async () => {
+      try {
+        const { location } = await api.getRiderLocation(orderId);
+        if (location) { setRiderPos({ lat: location.lat, lng: location.lng }); setRiderPosTs(Date.now() - location.ageMs); }
+      } catch { /* tolerate */ }
+    })();
+
     pollRef.current = setInterval(() => { void fetchOrder(); }, POLL_MS);
+    const tick = setInterval(() => setNowTick(Date.now()), 10_000);
 
     return () => {
       if (socketRef.current) {
@@ -478,6 +493,7 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
         clearInterval(pollRef.current);
         pollRef.current = null;
       }
+      clearInterval(tick);
     };
   }, [orderId, fetchOrder]);
 
@@ -537,10 +553,17 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
     deliveryStreet?: string;
     deliveryLocality?: string;
     deliveryCity?: string;
+    deliveryLat?: number | string;
+    deliveryLng?: number | string;
     paymentMethod?: string;
     rating?: number | null;
     ratingComment?: string | null;
   };
+  const custLat = orderPrisma.deliveryLat != null ? Number(orderPrisma.deliveryLat) : null;
+  const custLng = orderPrisma.deliveryLng != null ? Number(orderPrisma.deliveryLng) : null;
+  const showMap = custLat != null && custLng != null &&
+    (order.status === OrderStatus.PICKED_UP || order.status === OrderStatus.OUT_FOR_DELIVERY);
+  const riderStale = riderPosTs == null || (Math.max(nowTick, Date.now()) - riderPosTs) > LOCATION_STALE_MS;
   const currentStep  = STATUS_STEP[order.status] ?? 0;
   const isDelivered  = order.status === OrderStatus.DELIVERED;
   const isCancelled  = order.status === OrderStatus.CANCELLED;
@@ -576,6 +599,19 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
       {!isCancelled && (
         <View style={[styles.card, styles.stepperCard]}>
           <ProgressStepper currentStep={currentStep} t={t} />
+        </View>
+      )}
+
+      {/* ── A2. Live tracking map (Chunk 6) ─────────────────────────────── */}
+      {showMap && custLat != null && custLng != null && (
+        <View style={[styles.card, styles.mapCard]}>
+          <Text style={styles.sectionTitle}>📍 {t('tracking.liveTracking')}</Text>
+          <TrackingMap
+            customer={{ lat: custLat, lng: custLng }}
+            rider={riderPos}
+            stale={riderStale}
+            t={t}
+          />
         </View>
       )}
 
@@ -752,6 +788,7 @@ const makeStyles = (Colors: ColorPalette) =>
     padding: Spacing.lg, gap: Spacing.sm, ...Shadow.card,
   },
   stepperCard:   { paddingVertical: Spacing.xl },
+  mapCard:       { padding: Spacing.md, gap: Spacing.sm },
   cancelledCard: { backgroundColor: Colors.errorLight, borderWidth: 1, borderColor: Colors.error },
 
   // Progress stepper

@@ -65,6 +65,16 @@ export default async function deliveryRoutes(app: FastifyInstance): Promise<void
     },
   );
 
+  // GET /api/v1/delivery/orders/:orderId/rider-location — customer live-map paint (6.3)
+  app.get(
+    '/orders/:orderId/rider-location',
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      const { orderId } = request.params as { orderId: string };
+      return reply.send(await dispatch.getRiderLocationForOrder(orderId, request.auth!.userId));
+    },
+  );
+
   // POST /api/v1/delivery/orders/:orderId/assign — manual / admin trigger of
   // auto-assignment (Task 5.3). The BullMQ worker calls the same service path.
   app.post(

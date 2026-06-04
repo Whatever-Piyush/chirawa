@@ -22,7 +22,12 @@
       },
       "package": "com.chirawa.customer",
       "versionCode": 1,
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "config": {
+        "googleMaps": {
+          "apiKey": "REPLACE_WITH_GOOGLE_MAPS_ANDROID_API_KEY"
+        }
+      }
     },
     "plugins": [
       "expo-secure-store",
@@ -32,6 +37,12 @@
         {
           "color": "#FF3E6C",
           "sounds": []
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Bringly aapki delivery location dikhane ke liye location use karti hai."
         }
       ]
     ],

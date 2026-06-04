@@ -228,6 +228,15 @@ export class ChirawaApiClient {
     return this.request<void>('DELETE', '/cart');
   }
 
+  // ─── Delivery tracking ─────────────────────────────────────────────────────
+
+  // Last-known rider location for the live tracking map (initial paint + fallback).
+  async getRiderLocation(
+    orderId: string,
+  ): Promise<{ location: { lat: number; lng: number; ageMs: number } | null }> {
+    return this.request('GET', `/delivery/orders/${orderId}/rider-location`);
+  }
+
   // ─── Loyalty ─────────────────────────────────────────────────────────────
 
   async getLoyalty(): Promise<LoyaltyResponse> {

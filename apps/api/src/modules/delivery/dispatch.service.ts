@@ -214,5 +214,29 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
   const markPickedUp  = (userId: string, orderId: string) => riderAdvance(userId, orderId, 'picked_up');
   const startDelivery = (userId: string, orderId: string) => riderAdvance(userId, orderId, 'out_for_delivery');
 
-  return { setAvailability, getAvailability, assignOrder, getActiveDelivery, markPickedUp, startDelivery };
+  // Last-known rider location for an order (Chunk 6.3) — used for the initial
+  // map paint and the stale fallback. Reads the Redis key the socket layer
+  // writes (rider:{userId}:location, 30s TTL). Returns null if unknown/stale.
+  async function getRiderLocationForOrder(orderId: string, requesterId: string) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId }, select: { customerId: true, riderId: true },
+    });
+    if (!order) throw new NotFoundError('Order');
+    if (order.customerId !== requesterId) throw new ForbiddenError('Not your order');
+    if (!order.riderId) return { location: null as null | { lat: number; lng: number; ageMs: number } };
+
+    const rp = await prisma.riderProfile.findUnique({ where: { id: order.riderId }, select: { userId: true } });
+    if (!rp) return { location: null };
+
+    const raw = await redis.get(`rider:${rp.userId}:location`);
+    if (!raw) return { location: null };
+    try {
+      const { lat, lng, ts } = JSON.parse(raw) as { lat: number; lng: number; ts: number };
+      return { location: { lat, lng, ageMs: Math.max(0, Date.now() - ts) } };
+    } catch {
+      return { location: null };
+    }
+  }
+
+  return { setAvailability, getAvailability, assignOrder, getActiveDelivery, markPickedUp, startDelivery, getRiderLocationForOrder };
 }

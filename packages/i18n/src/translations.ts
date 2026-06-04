@@ -207,6 +207,11 @@ export const translations = {
     rateExperience:  { en: 'Rate Your Experience',              hi: 'अपना अनुभव बताएं' },
     riderOnWay:      { en: 'On the way',                        hi: 'रास्ते में है' },
     rateHow:         { en: 'How was your experience?',          hi: 'अनुभव कैसा रहा?' },
+    // ── Live map tracking (Chunk 6) ──────────────────────────────────
+    liveTracking:        { en: 'Live tracking',                     hi: 'लाइव ट्रैकिंग' },
+    arrivingIn:          { en: 'Arriving in',                       hi: 'पहुँच रहा है' },
+    minutes:             { en: 'min',                               hi: 'मिनट' },
+    locationUnavailable: { en: 'Rider on the way — live location temporarily unavailable', hi: 'राइडर रास्ते में है — लाइव लोकेशन अभी उपलब्ध नहीं' },
   },
   orders: {
     confirmed:    { en: 'Order Confirmed',       hi: 'ऑर्डर कन्फर्म हुआ' },
