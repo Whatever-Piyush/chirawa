@@ -11,6 +11,7 @@ import { runPaymentReconciliation } from './jobs/reconciliation.job';
 import { runLocationCleanup, runOtpCleanup, runTokenCleanup, runCartCleanup } from './jobs/cleanup.job';
 import { processUnlockReferral } from './jobs/referral.job';
 import { processAssignBatch } from './jobs/assignment.job';
+import { closeEventBus } from '../shared/events/event-bus';
 
 // BullMQ auto-connects — do NOT call .connect() manually
 const redisConnection = new Redis(env.REDIS_URL, {
@@ -113,6 +114,7 @@ async function shutdown(): Promise<void> {
     await Promise.all([
       settlementQueue, reconciliationQueue, cleanupQueue, referralQueue, assignmentQueue,
     ].map((q) => q.close()));
+    await closeEventBus();
     await prisma.$disconnect();
   } catch {
     // Ignore cleanup errors

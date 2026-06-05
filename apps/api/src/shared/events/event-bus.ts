@@ -1,16 +1,111 @@
 import { EventEmitter } from 'events';
+import { randomUUID } from 'crypto';
+import Redis from 'ioredis';
+import { env } from '../../config/env';
 
 /**
  * Internal event bus — decouples business logic from real-time transport.
  *
  * Services (orders, payments) EMIT events here.
- * The Socket.io plugin LISTENS and broadcasts to connected clients.
+ * The Socket.io + notification plugins LISTEN and act (broadcast / push).
  *
  * This means: services never import Socket.io, Socket.io never imports services.
- * If Socket.io is down, events are just dropped — never affects the request path.
+ *
+ * ── Cross-process delivery ──────────────────────────────────────────────────
+ * The listeners (Socket.io, FCM) only ever run inside the API process, but some
+ * emitters run in the WORKER process (e.g. batching.service assigns a rider).
+ * A plain EventEmitter is in-process only, so worker-emitted events used to be
+ * silently dropped — the rider got no socket update and no push.
+ *
+ * To fix that, every emit is ALSO published to a Redis pub/sub channel. Each
+ * process that cares (the API) subscribes via `startEventBusBridge()` and
+ * re-emits remote events onto its local bus. Messages are tagged with the
+ * emitting process's id so a process never re-handles its own event twice.
  */
 export const eventBus = new EventEmitter();
 eventBus.setMaxListeners(20);
+
+// Unique id for THIS process — lets the bridge ignore the echo of our own
+// publishes (we already delivered them to local listeners synchronously).
+const PROCESS_ID = randomUUID();
+
+// Single Redis channel all event-bus traffic flows through.
+const EVENT_CHANNEL = 'chirawa:events:v1';
+
+interface BridgeMessage {
+  origin:  string;
+  event:   string;
+  payload: unknown;
+}
+
+// Lazy publisher connection (created on first emit, in whichever process emits).
+let publisher: Redis | null = null;
+function getPublisher(): Redis {
+  if (!publisher) {
+    publisher = new Redis(env.REDIS_URL, {
+      maxRetriesPerRequest: null,
+      retryStrategy: (times) => Math.min(times * 100, 3000),
+    });
+    publisher.on('error', (err) => console.error('event-bus publisher error:', err.message));
+  }
+  return publisher;
+}
+
+let subscriber: Redis | null = null;
+
+/**
+ * Emit locally AND publish to Redis so other processes' bridges receive it.
+ * The Redis publish is fire-and-forget: a pub/sub hiccup must never block or
+ * fail the request/job path that triggered the event.
+ */
+function dispatch(event: string, payload: unknown): void {
+  // 1. Local, synchronous delivery — unchanged behaviour for same-process listeners.
+  eventBus.emit(event, payload);
+
+  // 2. Cross-process fan-out via Redis.
+  const message: BridgeMessage = { origin: PROCESS_ID, event, payload };
+  getPublisher()
+    .publish(EVENT_CHANNEL, JSON.stringify(message))
+    .catch((err) => console.error(`event-bus publish failed (${event}):`, err.message));
+}
+
+/**
+ * Subscribe this process to remote events. Call once during startup in any
+ * process that has local listeners (the API). Idempotent.
+ */
+export async function startEventBusBridge(): Promise<void> {
+  if (subscriber) return;
+
+  subscriber = new Redis(env.REDIS_URL, {
+    maxRetriesPerRequest: null,
+    retryStrategy: (times) => Math.min(times * 100, 3000),
+  });
+  subscriber.on('error', (err) => console.error('event-bus subscriber error:', err.message));
+
+  subscriber.on('message', (channel, raw) => {
+    if (channel !== EVENT_CHANNEL) return;
+    try {
+      const msg = JSON.parse(raw) as BridgeMessage;
+      // Skip our own echo — those listeners already fired in dispatch().
+      if (msg.origin === PROCESS_ID) return;
+      eventBus.emit(msg.event, msg.payload);
+    } catch (err) {
+      console.error('event-bus bridge: bad message', (err as Error).message);
+    }
+  });
+
+  await subscriber.subscribe(EVENT_CHANNEL);
+}
+
+/** Tear down Redis connections on shutdown. */
+export async function closeEventBus(): Promise<void> {
+  await Promise.allSettled([
+    subscriber?.quit(),
+    publisher?.quit(),
+  ]);
+  subscriber = null;
+  publisher  = null;
+}
 
 // ── Event names ───────────────────────────────────────────────────────────────
 export const Events = {
@@ -61,18 +156,19 @@ export interface OrderAssignedToRiderPayload {
 }
 
 // ── Type-safe emit helpers ────────────────────────────────────────────────────
+// Each goes through dispatch(): local delivery + Redis fan-out to other processes.
 export function emitOrderStatusChanged(payload: OrderStatusChangedPayload): void {
-  eventBus.emit(Events.ORDER_STATUS_CHANGED, payload);
+  dispatch(Events.ORDER_STATUS_CHANGED, payload);
 }
 
 export function emitNewOrderForSeller(payload: NewOrderForSellerPayload): void {
-  eventBus.emit(Events.NEW_ORDER_FOR_SELLER, payload);
+  dispatch(Events.NEW_ORDER_FOR_SELLER, payload);
 }
 
 export function emitOrderCancelledForSeller(payload: OrderCancelledForSellerPayload): void {
-  eventBus.emit(Events.ORDER_CANCELLED_FOR_SELLER, payload);
+  dispatch(Events.ORDER_CANCELLED_FOR_SELLER, payload);
 }
 
 export function emitOrderAssignedToRider(payload: OrderAssignedToRiderPayload): void {
-  eventBus.emit(Events.ORDER_ASSIGNED_TO_RIDER, payload);
+  dispatch(Events.ORDER_ASSIGNED_TO_RIDER, payload);
 }
