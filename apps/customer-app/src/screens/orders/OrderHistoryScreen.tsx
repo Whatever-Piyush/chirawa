@@ -280,7 +280,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
               for (const item of full.items) {
                 await api.addToCart({ productId: item.productId, quantity: item.quantity });
               }
-              navigation.navigate('Cart');
+              navigation.navigate('Checkout');
             } catch (err: unknown) {
               const msg = err instanceof Error ? err.message : t('common.error');
               Alert.alert(t('common.error'), msg);

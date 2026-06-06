@@ -24,13 +24,31 @@ import type {
 } from '@chirawa/types';
 import { PaymentMethod } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { FontSize, FontWeight, Gradients, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { FauxGradient } from '../../components/ui';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { isOpenNow } from '../../utils/operatingHours';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
 import { type RazorpaySuccess } from '../../components/payment/RazorpayCheckout';
+import ProductCard, { type ProductCardData } from '../../components/product/ProductCard';
+import { fetchProducts, toProductCard } from '../../services/catalog';
+
+// Tip presets for the delivery partner (UI selection; wired to the charge in the
+// backend phase). Amounts in rupees, each with a little delight emoji.
+const TIP_PRESETS = [
+  { amt: 20, emoji: '🙂' },
+  { amt: 30, emoji: '😄' },
+  { amt: 50, emoji: '🤩' },
+] as const;
+
+// Multi-select delivery instructions.
+const DELIVERY_INSTRUCTIONS = [
+  { key: 'avoid_calling',  icon: 'call-outline',          labelKey: 'checkout.instrAvoidCalling' },
+  { key: 'dont_ring',      icon: 'notifications-off-outline', labelKey: 'checkout.instrDontRing' },
+  { key: 'leave_at_door',  icon: 'home-outline',          labelKey: 'checkout.instrLeaveAtDoor' },
+] as const;
 
 // Lazy-loaded so `react-native-webview` (a native module) is only required when
 // the Razorpay sheet actually opens. Keeps the app bootable on a dev client that
@@ -43,6 +61,15 @@ function labelEmoji(label?: string | null): string {
   if (label === 'घर')   return '🏠';
   if (label === 'दुकान') return '🏪';
   return '📍';
+}
+
+// Addresses store their label as a Hindi string ('घर'); show it in the active
+// language (and without the emoji, since the card already renders an icon tile).
+function labelDisplay(label: string | null | undefined, t: (k: string) => string): string {
+  if (label === 'घर')   return t('address.typeHome');
+  if (label === 'दुकान') return t('address.typeWork');
+  if (label === 'अन्य')  return t('address.typeOther');
+  return label ?? t('address.typeOther');
 }
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Checkout'> };
@@ -165,6 +192,28 @@ export default function CheckoutScreen({ navigation }: Props) {
   const [promoCode,  setPromoCode]  = useState('');
   const [promoBusy,  setPromoBusy]  = useState(false);
   const promoCodeRef = useRef('');
+
+  // ── Phase B extras (UI; charge/persistence wired in the backend phase) ──────
+  const [alsoLike,    setAlsoLike]    = useState<ProductCardData[]>([]);
+  const [tip,         setTip]         = useState<number | null>(null);
+  const [customTipOpen, setCustomTipOpen] = useState(false);
+  const [instructions, setInstructions] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let active = true;
+    fetchProducts({ limit: 6 })
+      .then((p) => { if (active) setAlsoLike(p.map(toProductCard)); })
+      .catch(() => { /* tolerate — section hides */ });
+    return () => { active = false; };
+  }, []);
+
+  const toggleInstruction = useCallback((key: string) => {
+    setInstructions((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
 
   const placeBtnScale = useRef(new Animated.Value(1)).current;
 
@@ -332,7 +381,7 @@ export default function CheckoutScreen({ navigation }: Props) {
       });
 
       if (paymentMethod === PaymentMethod.COD) {
-        navigation.replace('OrderTracking', { orderId: result.orderId });
+        navigation.replace('OrderPlaced', { orderId: result.orderId });
         return;
       }
 
@@ -367,7 +416,7 @@ export default function CheckoutScreen({ navigation }: Props) {
         razorpayPaymentId: r.razorpayPaymentId,
         razorpaySignature: r.razorpaySignature,
       });
-      navigation.replace('OrderTracking', { orderId: data.orderId });
+      navigation.replace('OrderPlaced', { orderId: data.orderId });
     } catch (err: unknown) {
       Alert.alert(t('checkout.paymentFailed'), err instanceof Error ? err.message : t('checkout.paymentFailed'));
     } finally {
@@ -401,6 +450,26 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   const ListHeader = (
     <>
+      {/* ── Order for {name}, {phone} ────────────────────────────────────── */}
+      <View style={[styles.section, styles.orderForCard]}>
+        <View style={styles.orderForIcon}>
+          <Ionicons name="person" size={18} color={Colors.primary} />
+        </View>
+        <Text style={styles.orderForText} numberOfLines={1}>
+          {t('checkout.orderFor')}{' '}
+          <Text style={styles.orderForName}>
+            {authState.name ?? 'You'}{authState.phone ? `, ${authState.phone}` : ''}
+          </Text>
+        </Text>
+        <TouchableOpacity
+          onPress={() => navigation.navigate('EditProfile')}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.orderForChange}>{t('checkout.change')}</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* ── Best deal on your cart — delivery savings nudge ──────────────── */}
       {nudge && (
         <View style={styles.section}>
@@ -436,30 +505,57 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   const ListFooter = (
     <>
-      {/* ── Bill summary ─────────────────────────────────────────────────── */}
-      <View style={[styles.section, styles.sectionNoTopPad]}>
-        <View style={styles.divider} />
-        <View style={styles.pricingRow}>
-          <Text style={styles.pricingLabel}>{t('cart.subtotal')}</Text>
-          <Text style={styles.pricingValue}>₹{subtotalRupees}</Text>
+      {/* ── You might also like ──────────────────────────────────────────── */}
+      {alsoLike.length > 0 && (
+        <View style={styles.alsoSection}>
+          <Text style={styles.cardTitle}>{t('product.frequentlyBought')}</Text>
+          <View style={styles.alsoGrid}>
+            {alsoLike.map((p) => <ProductCard key={p.productId} product={p} size="compact" />)}
+          </View>
         </View>
-        <View style={styles.pricingRow}>
-          <Text style={styles.pricingLabel}>{t('cart.deliveryFee')}</Text>
+      )}
+
+      {/* ── Bill details ─────────────────────────────────────────────────── */}
+      <View style={styles.section}>
+        <Text style={styles.cardTitle}>{t('checkout.billDetails')}</Text>
+
+        <View style={styles.billRow}>
+          <View style={styles.billLabelWrap}>
+            <Ionicons name="receipt-outline" size={16} color={Colors.textSecondary} />
+            <Text style={styles.billLabel}>{t('checkout.itemsTotal')}</Text>
+          </View>
+          <Text style={styles.billValue}>₹{subtotalRupees}</Text>
+        </View>
+
+        <View style={styles.billRow}>
+          <View style={styles.billLabelWrap}>
+            <Ionicons name="bicycle-outline" size={17} color={Colors.textSecondary} />
+            <Text style={styles.billLabel}>{t('cart.deliveryFee')}</Text>
+          </View>
           {deliveryRupees === null
             ? <Text style={styles.pricingMuted}>{t('checkout.confirmToSee')}</Text>
-            : <Text style={styles.pricingValue}>₹{deliveryRupees}</Text>}
+            : deliveryRupees === 0
+              ? <Text style={styles.billFree}>FREE</Text>
+              : <Text style={styles.billValue}>₹{deliveryRupees}</Text>}
         </View>
+        {nudge && !nudge.done && <Text style={styles.billNudge}>{nudge.text}</Text>}
+
         {discountRupees > 0 && (
-          <View style={styles.pricingRow}>
-            <Text style={[styles.pricingLabel, { color: Colors.success }]}>
-              {t('checkout.discount')}{pricing?.appliedPromoCode ? ` · ${pricing.appliedPromoCode}` : ''}
-            </Text>
-            <Text style={[styles.pricingValue, { color: Colors.success }]}>− ₹{discountRupees}</Text>
+          <View style={styles.billRow}>
+            <View style={styles.billLabelWrap}>
+              <Ionicons name="pricetag-outline" size={16} color={Colors.success} />
+              <Text style={[styles.billLabel, { color: Colors.success }]}>
+                {t('checkout.discount')}{pricing?.appliedPromoCode ? ` · ${pricing.appliedPromoCode}` : ''}
+              </Text>
+            </View>
+            <Text style={[styles.billValue, { color: Colors.success }]}>− ₹{discountRupees}</Text>
           </View>
         )}
-        <View style={[styles.pricingRow, styles.totalRow]}>
-          <Text style={styles.totalLabel}>{t('cart.total')}</Text>
-          <Text style={styles.totalValue}>₹{totalRupees}</Text>
+
+        <View style={styles.billDivider} />
+        <View style={styles.billTotalRow}>
+          <Text style={styles.billTotalLabel}>{t('checkout.grandTotal')}</Text>
+          <Text style={styles.billTotalValue}>₹{totalRupees}</Text>
         </View>
       </View>
 
@@ -491,6 +587,96 @@ export default function CheckoutScreen({ navigation }: Props) {
         })}
       </View>
 
+      {/* ── Delivery instructions ────────────────────────────────────────── */}
+      <View style={styles.section}>
+        <Text style={styles.cardTitle}>{t('checkout.deliveryInstructions')}</Text>
+        <View style={styles.instrRow}>
+          {DELIVERY_INSTRUCTIONS.map((d) => {
+            const on = instructions.has(d.key);
+            return (
+              <TouchableOpacity
+                key={d.key}
+                activeOpacity={0.85}
+                onPress={() => toggleInstruction(d.key)}
+                style={[styles.instrCard, on && styles.instrCardOn]}
+              >
+                {on && (
+                  <View style={styles.instrCheck}>
+                    <Ionicons name="checkmark" size={11} color={Colors.white} />
+                  </View>
+                )}
+                <View style={[styles.instrIconCircle, on && styles.instrIconCircleOn]}>
+                  <Ionicons name={d.icon as never} size={20} color={on ? Colors.primary : Colors.textSecondary} />
+                </View>
+                <Text style={[styles.instrLabel, on && styles.instrLabelOn]}>{t(d.labelKey)}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      {/* ── Tip your delivery partner ────────────────────────────────────── */}
+      <View style={styles.tipSection}>
+        <FauxGradient from={Gradients.warm[0]} to={Gradients.warm[1]} steps={10} style={styles.tipBanner}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.tipTitle}>{t('checkout.tipTitle')}</Text>
+            <Text style={styles.tipSub}>{t('checkout.tipSub')}</Text>
+          </View>
+          <View style={styles.tipScooter}>
+            <Ionicons name="bicycle" size={30} color={Colors.white} />
+          </View>
+        </FauxGradient>
+
+        <View style={styles.tipBody}>
+          <View style={styles.tipChips}>
+            {TIP_PRESETS.map(({ amt, emoji }) => {
+              const on = tip === amt && !customTipOpen;
+              return (
+                <TouchableOpacity
+                  key={amt}
+                  activeOpacity={0.85}
+                  onPress={() => { setCustomTipOpen(false); setTip(on ? null : amt); }}
+                  style={[styles.tipChip, on && styles.tipChipOn]}
+                >
+                  <Text style={styles.tipEmoji}>{emoji}</Text>
+                  <Text style={[styles.tipChipText, on && styles.tipChipTextOn]}>₹{amt}</Text>
+                </TouchableOpacity>
+              );
+            })}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => { setCustomTipOpen((v) => !v); setTip(null); }}
+              style={[styles.tipChip, customTipOpen && styles.tipChipOn]}
+            >
+              <Text style={styles.tipEmoji}>✨</Text>
+              <Text style={[styles.tipChipText, customTipOpen && styles.tipChipTextOn]}>{t('checkout.tipCustom')}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {customTipOpen && (
+            <View style={styles.tipCustomRow}>
+              <Text style={styles.tipCustomRupee}>₹</Text>
+              <TextInput
+                style={styles.tipCustomInput}
+                keyboardType="number-pad"
+                value={tip != null ? String(tip) : ''}
+                onChangeText={(v) => setTip(v ? Math.max(0, parseInt(v.replace(/[^0-9]/g, ''), 10) || 0) : null)}
+                placeholder="0"
+                placeholderTextColor={Colors.textMuted}
+                maxLength={4}
+              />
+            </View>
+          )}
+
+          {tip != null && tip > 0 && (
+            <View style={styles.tipThanksRow}>
+              <Ionicons name="heart" size={14} color={Colors.success} />
+              <Text style={styles.tipThanks}>{t('checkout.tipThanks')}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+
       {/* ── Delivery Address ─────────────────────────────────────────────── */}
       <View style={styles.section}>
         <View style={styles.addressHeader}>
@@ -506,24 +692,40 @@ export default function CheckoutScreen({ navigation }: Props) {
             {addresses.map((a) => {
               const selected = addressId === a.id;
               return (
-                <TouchableOpacity key={a.id} onPress={() => void handleSelectSavedAddress(a)} activeOpacity={0.85}
+                <TouchableOpacity key={a.id} onPress={() => void handleSelectSavedAddress(a)} activeOpacity={0.9}
                   style={[styles.addressCard, selected && styles.addressCardSelected]}>
+                  {selected && <View style={styles.addrAccent} />}
+
+                  <View style={[styles.addrTypeTile, selected && styles.addrTypeTileOn]}>
+                    <Text style={styles.addrTypeEmoji}>{labelEmoji(a.label)}</Text>
+                  </View>
+
                   <View style={styles.addressCardLeft}>
-                    <Text style={styles.addressLabel} numberOfLines={1}>
-                      {labelEmoji(a.label)} {a.label ?? 'पता'}
-                      {a.isDefault ? '  ·  ' : ''}
-                      {a.isDefault ? <Text style={styles.addressDefaultInline}>{t('address.defaultBadge')}</Text> : null}
-                    </Text>
+                    <View style={styles.addrLabelRow}>
+                      <Text style={styles.addressLabel} numberOfLines={1}>{labelDisplay(a.label, t)}</Text>
+                      {a.isDefault && (
+                        <View style={styles.defaultPill}>
+                          <Text style={styles.defaultPillText}>{t('address.defaultBadge')}</Text>
+                        </View>
+                      )}
+                    </View>
                     <Text style={styles.addressStreet} numberOfLines={1}>{a.street}</Text>
                     <Text style={styles.addressArea} numberOfLines={1}>{a.locality}{a.city ? `, ${a.city}` : ''} — {a.pincode}</Text>
                   </View>
-                  {selected ? <Text style={styles.addressCheck}>✓</Text> : null}
+
+                  <View style={[styles.addrRadio, selected && styles.addrRadioOn]}>
+                    {selected && <Ionicons name="checkmark" size={14} color={Colors.white} />}
+                  </View>
                 </TouchableOpacity>
               );
             })}
             {!showAddressForm && (
-              <TouchableOpacity style={styles.addAddressBtn} onPress={() => setShowAddressForm(true)} activeOpacity={0.7}>
+              <TouchableOpacity style={styles.addAddressBtn} onPress={() => setShowAddressForm(true)} activeOpacity={0.8}>
+                <View style={styles.addPlusCircle}>
+                  <Ionicons name="add" size={20} color={Colors.primary} />
+                </View>
                 <Text style={styles.addAddressBtnText}>{t('address.addNew')}</Text>
+                <Ionicons name="chevron-forward" size={16} color={Colors.primary} />
               </TouchableOpacity>
             )}
           </View>
@@ -613,6 +815,15 @@ export default function CheckoutScreen({ navigation }: Props) {
         ) : null}
       </View>
 
+      {/* ── Cancellation policy ──────────────────────────────────────────── */}
+      <View style={styles.section}>
+        <View style={styles.cancelHeader}>
+          <Ionicons name="shield-checkmark-outline" size={20} color={Colors.textSecondary} />
+          <Text style={styles.cardTitle}>{t('checkout.cancellationTitle')}</Text>
+        </View>
+        <Text style={styles.cancelBody}>{t('checkout.cancellationBody')}</Text>
+      </View>
+
       <View style={[styles.bottomSpacer, { height: 190 + insets.bottom }]} />
     </>
   );
@@ -649,62 +860,73 @@ export default function CheckoutScreen({ navigation }: Props) {
         keyboardShouldPersistTaps="handled"
       />
 
-      {/* ── Sticky bottom: address summary + PAY USING + Place Order ──────── */}
+      {/* ── Sticky bottom: Delivering-to + full-width Place Order ─────────── */}
       <View style={[styles.stickyBottom, { paddingBottom: Spacing.md + insets.bottom }]}>
-        {/* address summary bar */}
+        {/* Delivering-to summary */}
         <TouchableOpacity
-          style={styles.addrBar}
-          activeOpacity={0.7}
+          style={styles.deliverRow}
+          activeOpacity={0.8}
           onPress={() => setShowAddressForm(true)}
         >
-          <Ionicons name="home" size={20} color={Colors.primary} />
+          <View style={styles.deliverHomeCircle}>
+            <Ionicons name="location" size={18} color={Colors.primary} />
+          </View>
           <View style={{ flex: 1 }}>
             {selectedAddr ? (
               <>
-                <Text style={styles.addrBarTitle} numberOfLines={1}>
-                  {t('checkout.deliveringTo')} <Text style={styles.addrBarBold}>{selectedAddr.label ?? 'Home'}</Text>
+                <Text style={styles.deliverLabel} numberOfLines={1}>
+                  {t('checkout.deliveringTo')}{' '}
+                  <Text style={styles.deliverBold}>{authState.name ?? labelDisplay(selectedAddr.label, t)}</Text>
                 </Text>
-                <Text style={styles.addrBarSub} numberOfLines={1}>{selectedAddr.street}, {selectedAddr.locality}</Text>
+                <Text style={styles.deliverSub} numberOfLines={1}>{selectedAddr.street}, {selectedAddr.locality}</Text>
               </>
             ) : (
-              <Text style={styles.addrBarTitle} numberOfLines={1}>{t('address.selectAddress')}</Text>
+              <Text style={styles.deliverLabel} numberOfLines={1}>{t('address.selectAddress')}</Text>
             )}
           </View>
-          <Text style={styles.addrChange}>{t('checkout.change')}</Text>
+          <View style={styles.changePill}>
+            <Text style={styles.changePillText}>{t('checkout.change')}</Text>
+          </View>
         </TouchableOpacity>
 
-        {/* Closed-hours notice — Place Order is disabled outside 8 AM – 9 PM */}
-        {!withinHours && (
-          <Text style={[styles.payUsingValue, { color: Colors.error }]}>
-            {t('checkout.closedNotice')}
-          </Text>
-        )}
+        <View style={styles.stickyDivider} />
 
-        {/* pay using + place order */}
-        <View style={styles.payRow}>
-          <View style={styles.payUsing}>
-            <Text style={styles.payUsingLabel}>{t('checkout.payUsing')}</Text>
-            <Text style={styles.payUsingValue} numberOfLines={1}>
-              {paymentMethod === PaymentMethod.COD ? t('checkout.cod') : t('checkout.payOnline')}
+        {/* Pay-method caption + closed notice */}
+        {!withinHours ? (
+          <Text style={styles.closedNotice}>{t('checkout.closedNotice')}</Text>
+        ) : (
+          <View style={styles.payCaptionRow}>
+            <Ionicons
+              name={paymentMethod === PaymentMethod.COD ? 'cash-outline' : 'flash-outline'}
+              size={14}
+              color={Colors.textSecondary}
+            />
+            <Text style={styles.payCaption}>
+              {t('checkout.payUsing')}{' '}
+              <Text style={styles.payCaptionBold}>
+                {paymentMethod === PaymentMethod.COD ? t('checkout.cod') : t('checkout.payOnline')}
+              </Text>
             </Text>
           </View>
-          <Animated.View style={{ transform: [{ scale: placeBtnScale }], flex: 1 }}>
-            <TouchableOpacity style={[styles.placeOrderBtn, !canPlaceOrder && styles.placeBtnDisabled]} onPress={pulseAndPlace} disabled={!canPlaceOrder} activeOpacity={0.9}>
-              {placing ? <LoadingDots /> : (
-                <>
-                  <View>
-                    <Text style={styles.placeTotalRs}>₹{totalRupees}</Text>
-                    <Text style={styles.placeTotalLabel}>{t('cart.total')}</Text>
-                  </View>
-                  <View style={styles.placeCta}>
-                    <Text style={styles.placeOrderBtnText}>{t('checkout.placeOrder')}</Text>
-                    <Ionicons name="chevron-forward" size={18} color={Colors.white} />
-                  </View>
-                </>
-              )}
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
+        )}
+
+        {/* Place Order — full width */}
+        <Animated.View style={{ transform: [{ scale: placeBtnScale }] }}>
+          <TouchableOpacity style={[styles.placeOrderBtn, !canPlaceOrder && styles.placeBtnDisabled]} onPress={pulseAndPlace} disabled={!canPlaceOrder} activeOpacity={0.9}>
+            {placing ? <LoadingDots /> : (
+              <>
+                <View>
+                  <Text style={styles.placeTotalRs}>₹{totalRupees}</Text>
+                  <Text style={styles.placeTotalLabel}>{t('cart.total')}</Text>
+                </View>
+                <View style={styles.placeCta}>
+                  <Text style={styles.placeOrderBtnText}>{t('checkout.placeOrder')}</Text>
+                  <Ionicons name="arrow-forward" size={18} color={Colors.white} />
+                </View>
+              </>
+            )}
+          </TouchableOpacity>
+        </Animated.View>
       </View>
 
       {/* ── Razorpay checkout (online payment) ───────────────────────────── */}
@@ -763,6 +985,16 @@ const makeStyles = (Colors: ColorPalette) =>
   cardTitle: { fontSize: FontSize.lg, fontWeight: '800', color: Colors.text, letterSpacing: -0.3 },
   sectionSub: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '700', marginTop: 2 },
 
+  // Order-for bar
+  orderForCard: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingVertical: Spacing.md },
+  orderForIcon: {
+    width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  orderForText: { flex: 1, fontSize: FontSize.sm, color: Colors.textSecondary },
+  orderForName: { fontWeight: '800', color: Colors.textPrimary },
+  orderForChange: { fontSize: FontSize.sm, fontWeight: '800', color: Colors.primary },
+
   // Savings nudge
   nudgeBox: { backgroundColor: Colors.primaryLight, borderRadius: Radius.md, padding: Spacing.md, gap: Spacing.sm },
   nudgeBoxDone: { backgroundColor: Colors.successLight },
@@ -799,16 +1031,48 @@ const makeStyles = (Colors: ColorPalette) =>
   pinCircle: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primaryLight, justifyContent: 'center', alignItems: 'center' },
 
   addressList: { gap: 10, marginTop: 2 },
-  addressCard: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.lg, padding: 14, backgroundColor: Colors.surface, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, ...Shadow.xs },
-  addressCardSelected: { borderWidth: 2, borderColor: Colors.primary, backgroundColor: Colors.primaryLight, ...Shadow.sm },
+  addressCard: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
+    borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.lg,
+    paddingVertical: 14, paddingHorizontal: 14, paddingLeft: 16,
+    backgroundColor: Colors.surface, overflow: 'hidden', ...Shadow.xs,
+  },
+  addressCardSelected: { borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: Colors.primaryLight, ...Shadow.sm },
+  // Left accent bar revealed on the selected card.
+  addrAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, backgroundColor: Colors.primary },
+
+  addrTypeTile: {
+    width: 44, height: 44, borderRadius: Radius.md, backgroundColor: Colors.surfaceAlt,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  addrTypeTileOn: { backgroundColor: Colors.white },
+  addrTypeEmoji: { fontSize: 20 },
+
   addressCardLeft: { flex: 1, gap: 2 },
-  addressLabel: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textPrimary, marginBottom: 2 },
-  addressDefaultInline: { fontSize: FontSize.xs, color: Colors.success, fontWeight: FontWeight.semibold },
-  addressStreet: { fontSize: FontSize.md, fontWeight: FontWeight.semibold, color: Colors.textPrimary },
-  addressArea: { fontSize: FontSize.sm, color: Colors.textSecondary },
-  addressCheck: { fontSize: FontSize.xl, color: Colors.primary, fontWeight: FontWeight.bold, marginLeft: 'auto' },
-  addAddressBtn: { borderWidth: 1.5, borderColor: Colors.primary, borderStyle: 'dashed', borderRadius: Radius.lg, padding: 14, alignItems: 'center', marginTop: 4 },
-  addAddressBtnText: { color: Colors.primary, fontWeight: FontWeight.semibold, fontSize: FontSize.md },
+  addrLabelRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: 1 },
+  addressLabel: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.textPrimary, flexShrink: 1 },
+  defaultPill: { backgroundColor: Colors.successLight, borderRadius: Radius.full, paddingHorizontal: 8, paddingVertical: 2 },
+  defaultPillText: { fontSize: 10, color: Colors.success, fontWeight: FontWeight.bold, letterSpacing: 0.3 },
+  addressStreet: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold, color: Colors.textPrimary },
+  addressArea: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 16 },
+
+  addrRadio: {
+    width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: Colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  addrRadioOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+
+  addAddressBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
+    backgroundColor: Colors.primaryLight, borderRadius: Radius.lg,
+    borderWidth: 1, borderColor: 'rgba(255,107,53,0.18)',
+    paddingVertical: 12, paddingHorizontal: 14, marginTop: 2,
+  },
+  addPlusCircle: {
+    width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.white,
+    alignItems: 'center', justifyContent: 'center', ...Shadow.xs,
+  },
+  addAddressBtnText: { flex: 1, color: Colors.primary, fontWeight: FontWeight.bold, fontSize: FontSize.md },
 
   chipRow: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap', marginBottom: 2 },
   chip: { paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },
@@ -838,6 +1102,18 @@ const makeStyles = (Colors: ColorPalette) =>
   totalLabel: { fontSize: FontSize.xl, fontWeight: '900', color: Colors.text, letterSpacing: -0.3 },
   totalValue: { fontSize: FontSize.xxl, fontWeight: '900', color: Colors.primary, letterSpacing: -0.5 },
 
+  // Bill details
+  billRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: Spacing.sm },
+  billLabelWrap: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flex: 1 },
+  billLabel: { fontSize: FontSize.md, color: Colors.textSecondary },
+  billValue: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
+  billFree: { fontSize: FontSize.md, fontWeight: '900', color: Colors.success, letterSpacing: 0.3 },
+  billNudge: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: '700', marginTop: 4, marginLeft: 24 },
+  billDivider: { height: 1, backgroundColor: Colors.border, marginTop: Spacing.md },
+  billTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: Spacing.md },
+  billTotalLabel: { fontSize: FontSize.lg, fontWeight: '900', color: Colors.textPrimary, letterSpacing: -0.3 },
+  billTotalValue: { fontSize: FontSize.xl, fontWeight: '900', color: Colors.textPrimary, letterSpacing: -0.3 },
+
   // Payment cards
   payCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, backgroundColor: Colors.surface, padding: Spacing.md, minHeight: 72 },
   payCardSelected: { borderWidth: 2, borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
@@ -859,14 +1135,29 @@ const makeStyles = (Colors: ColorPalette) =>
   stickyBottom: {
     position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: Colors.white,
     borderTopLeftRadius: Radius.xxl, borderTopRightRadius: Radius.xxl,
-    paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg, gap: Spacing.md,
+    paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg, gap: Spacing.sm,
     shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.14, shadowRadius: 18, elevation: 16,
   },
-  addrBar: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  addrBarTitle: { fontSize: FontSize.sm, color: Colors.text },
-  addrBarBold: { fontWeight: '800' },
-  addrBarSub: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 1 },
-  addrChange: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '800' },
+
+  // Delivering-to summary (redesigned bottom bar)
+  deliverRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  deliverHomeCircle: {
+    width: 38, height: 38, borderRadius: 19, backgroundColor: Colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  deliverLabel: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  deliverBold: { fontWeight: '900', color: Colors.textPrimary },
+  deliverSub: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 1 },
+  changePill: {
+    backgroundColor: Colors.primaryLight, borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md, paddingVertical: 6,
+  },
+  changePillText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '800' },
+  stickyDivider: { height: 1, backgroundColor: Colors.divider, marginTop: 2 },
+  payCaptionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  payCaption: { fontSize: FontSize.xs, color: Colors.textSecondary },
+  payCaptionBold: { fontWeight: '800', color: Colors.textPrimary },
+  closedNotice: { fontSize: FontSize.sm, color: Colors.error, fontWeight: '700' },
 
   payRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   payUsing: { width: 96 },
@@ -923,6 +1214,73 @@ const makeStyles = (Colors: ColorPalette) =>
   promoHint: { fontSize: FontSize.sm, color: Colors.textMuted, fontStyle: 'italic' },
   promoError: { fontSize: FontSize.sm, color: Colors.error, fontWeight: '700' },
   promoAutoNote: { fontSize: FontSize.sm, color: Colors.success, fontWeight: '800' },
+
+  // Phase B — "you might also like". Lives at the page margin (16px sides, no
+  // card padding) so the 3-up compact-card math lines up exactly — same as the
+  // Order Again grid. Inside a padded section the third card would wrap off.
+  alsoSection: { marginHorizontal: Spacing.lg, marginTop: Spacing.md, gap: Spacing.md },
+  alsoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+
+  // Delivery instructions (multi-select)
+  instrRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.xs },
+  instrCard: {
+    flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0,
+    alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: Spacing.md, paddingHorizontal: Spacing.xs,
+    borderRadius: Radius.lg, borderWidth: 1.5, borderColor: Colors.border,
+    backgroundColor: Colors.surface, minHeight: 78,
+  },
+  instrCardOn: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight, ...Shadow.xs },
+  instrCheck: {
+    position: 'absolute', top: 6, right: 6, width: 18, height: 18, borderRadius: 9,
+    backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center', zIndex: 2,
+  },
+  instrIconCircle: {
+    width: 38, height: 38, borderRadius: 19, backgroundColor: Colors.surfaceAlt,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  instrIconCircleOn: { backgroundColor: Colors.white },
+  instrLabel: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.textSecondary, textAlign: 'center', lineHeight: 14 },
+  instrLabelOn: { color: Colors.primary },
+
+  // Tip your delivery partner — gradient banner + white body
+  tipSection: {
+    marginHorizontal: Spacing.lg, marginTop: Spacing.md, borderRadius: Radius.xl,
+    overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(0,0,0,0.04)', ...Shadow.md,
+  },
+  tipBanner: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.lg },
+  tipTitle: { fontSize: FontSize.lg, fontWeight: '900', color: Colors.white, letterSpacing: -0.3 },
+  tipSub: { fontSize: FontSize.xs, color: 'rgba(255,255,255,0.92)', marginTop: 3, lineHeight: 16 },
+  tipScooter: {
+    width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(255,255,255,0.22)',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.5)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  tipBody: { backgroundColor: Colors.surface, padding: Spacing.lg, gap: Spacing.md },
+  tipChips: { flexDirection: 'row', gap: Spacing.sm },
+  tipChip: {
+    // Explicit flex basis + minWidth:0 so all four chips shrink to share one row
+    // (RN flex items default to min-width:auto and otherwise refuse to shrink).
+    flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0,
+    alignItems: 'center', justifyContent: 'center', gap: 2, height: 60,
+    borderRadius: Radius.lg, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surface,
+  },
+  tipChipOn: { borderColor: Colors.primary, backgroundColor: Colors.primary, ...Shadow.xs },
+  tipEmoji: { fontSize: 17, lineHeight: 21 },
+  tipChipText: { fontSize: FontSize.sm, fontWeight: '800', color: Colors.text },
+  tipChipTextOn: { color: Colors.white },
+  tipCustomRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.background,
+    borderRadius: Radius.md, borderWidth: 1.5, borderColor: Colors.primary, paddingHorizontal: Spacing.md, height: 50,
+  },
+  tipCustomRupee: { fontSize: FontSize.lg, fontWeight: '900', color: Colors.text },
+  tipCustomInput: { flex: 1, fontSize: FontSize.md, color: Colors.text, height: 50, fontWeight: '700' },
+  tipThanksRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  tipThanks: { fontSize: FontSize.sm, fontWeight: '800', color: Colors.success },
+
+  // Cancellation policy
+  cancelHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  cancelBody: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20 },
 
   // Verifying-payment overlay
   verifyOverlay: {

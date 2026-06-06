@@ -27,7 +27,6 @@ import SetupProfileScreen from '../screens/auth/SetupProfileScreen'; // 🔴 NEW
 // Main Screens
 import HomeScreen from '../screens/home/HomeScreen';
 import ShopDetailScreen from '../screens/shop/ShopDetailScreen';
-import CartScreen from '../screens/cart/CartScreen';
 import CheckoutScreen from '../screens/orders/CheckoutScreen';
 import OrderTrackingScreen from '../screens/orders/OrderTrackingScreen';
 import OrderHistoryScreen from '../screens/orders/OrderHistoryScreen';
@@ -42,6 +41,7 @@ import ProductDetailScreen from '../screens/product/ProductDetailScreen';
 import SearchScreen from '../screens/search/SearchScreen';
 import ShareAddressScreen from '../screens/profile/ShareAddressScreen';
 import ReceiveAddressScreen from '../screens/profile/ReceiveAddressScreen';
+import OrderPlacedScreen from '../screens/orders/OrderPlacedScreen';
 
 export type RootStackParamList = {
   // Auth
@@ -56,9 +56,9 @@ export type RootStackParamList = {
   ShopDetail: { shopId: string; shopName: string };
   ProductDetail: { productId: string };
   CategoryProducts: { category: string };
-  Cart: undefined;
   Checkout: undefined;
   OrderTracking: { orderId: string };
+  OrderPlaced: { orderId: string };
   AddressList: undefined;
   AddressMap: undefined;
   // Address-sharing deep links (bringly://share-address, bringly://receive-address)
@@ -200,15 +200,6 @@ export default function AppNavigator() {
                   options={{ headerShown: true, headerTintColor: Colors.primary }}
                 />
                 <Stack.Screen
-                  name="Cart"
-                  component={CartScreen}
-                  options={{
-                    headerShown: true,
-                    headerTitle: 'Cart',
-                    headerTintColor: Colors.primary,
-                  }}
-                />
-                <Stack.Screen
                   name="Checkout"
                   component={CheckoutScreen}
                   options={{
@@ -246,6 +237,11 @@ export default function AppNavigator() {
                 />
                 <Stack.Screen name="ShareAddress" component={ShareAddressScreen} />
                 <Stack.Screen name="ReceiveAddress" component={ReceiveAddressScreen} />
+                <Stack.Screen
+                  name="OrderPlaced"
+                  component={OrderPlacedScreen}
+                  options={{ gestureEnabled: false, animation: 'fade' }}
+                />
               </>
             )
           ) : (

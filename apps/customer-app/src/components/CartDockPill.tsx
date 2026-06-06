@@ -63,7 +63,7 @@ export default function CartDockPill() {
       <TouchableOpacity
         activeOpacity={0.9}
         style={styles.pill}
-        onPress={() => navigation.navigate('Cart')}
+        onPress={() => navigation.navigate('Checkout')}
         accessibilityRole="button"
         accessibilityLabel={t('cart.viewCart')}
       >

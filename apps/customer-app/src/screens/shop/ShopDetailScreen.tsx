@@ -325,7 +325,7 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
           <Text style={styles.headerIconText}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{shopName}</Text>
-        <PressableScale onPress={() => navigation.navigate('Cart')} style={styles.headerIcon}>
+        <PressableScale onPress={() => navigation.navigate('Checkout')} style={styles.headerIcon}>
           <Text style={styles.headerIconText}>🛒</Text>
           {totalCartCount > 0 && (
             <View style={styles.headerCartBadge}>
@@ -459,7 +459,7 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
         pointerEvents={totalCartCount > 0 ? 'auto' : 'none'}
       >
         <TouchableOpacity
-          onPress={() => navigation.navigate('Cart')}
+          onPress={() => navigation.navigate('Checkout')}
           activeOpacity={0.9}
           style={styles.cartBarInner}
         >
