@@ -10,15 +10,20 @@ import {
   ActivityIndicator,
   Animated,
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { AddressResponse } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
+import { fetchProducts, toProductCard } from '../../services/catalog';
 import { useT } from '@chirawa/i18n';
-import { useToast } from '../../components/ui';
-import ProductCard, { PRODUCT_CARD_WIDTH, type ProductCardData } from '../../components/product/ProductCard';
+import { useAuth } from '../../context/AuthContext';
+import ProductCard, { type ProductCardData } from '../../components/product/ProductCard';
+import BringlyBag from '../../components/illustrations/BringlyBag';
+import Header from '../home/Header';
+import SearchBar from '../home/SearchBar';
+import LocationSheet from '../../components/location/LocationSheet';
 
 // Rotating pastel placeholders for re-order product thumbnails (no images yet).
 const REORDER_TILE_COLORS = ['#FFF0E9', '#E8F5E9', '#FFF0F5', '#EDE7F6', '#FFF8E1', '#E6F7F4'];
@@ -54,9 +59,6 @@ interface FullOrderItem {
 
 // Statuses that should NOT show the Track button
 const FINAL_STATUSES = new Set(['delivered', 'cancelled']);
-
-// Statuses where the customer can still cancel (must match backend)
-const CANCELLABLE_STATUSES = new Set(['pending_payment', 'paid']);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -111,21 +113,34 @@ function SkeletonCard() {
   );
 }
 
-// ─── Empty state (v2 §Feature 1) ───────────────────────────────────────────────
+// ─── Hero illustration card ("Reordering will be easy") ────────────────────────
+// Cream-on-orange card matching the reference, but in Bringly's warm palette.
+// The grocery bag is composed from icon + emoji produce so it needs no asset.
 
-function EmptyState({ onBrowse, t }: { onBrowse: () => void; t: (k: string) => string }) {
+function ReorderHero({ t }: { t: (k: string) => string }) {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
-    <View style={styles.emptyContainer}>
-      <View style={styles.emptyIllustration}>
-        <MaterialCommunityIcons name="shopping-outline" size={80} color={Colors.primary} />
-      </View>
-      <Text style={styles.emptyTitle}>{t('history.reorderEmptyTitle')}</Text>
-      <Text style={styles.emptySub}>{t('history.reorderEmptySub')}</Text>
-      <TouchableOpacity style={styles.browseBtn} onPress={onBrowse} activeOpacity={0.85}>
-        <Text style={styles.browseText}>{t('history.browseProducts')}</Text>
-      </TouchableOpacity>
+    <View style={styles.hero}>
+      <BringlyBag size={132} />
+      <Text style={styles.heroTitle}>{t('history.reorderEmptyTitle')}</Text>
+      <Text style={styles.heroSub}>{t('history.reorderEmptySub')}</Text>
+    </View>
+  );
+}
+
+// ─── Big faded footer tagline ("Chirawa's last minute app ❤️") ─────────────────
+
+function TaglineFooter({ t }: { t: (k: string) => string }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  return (
+    <View style={styles.tagline}>
+      <Text style={styles.taglineText}>
+        {t('history.lastMinuteApp')} <Text style={styles.taglineHeart}>❤️</Text>
+      </Text>
+      <View style={styles.taglineRule} />
+      <Text style={styles.taglineMark}>chirawa</Text>
     </View>
   );
 }
@@ -134,18 +149,23 @@ function EmptyState({ onBrowse, t }: { onBrowse: () => void; t: (k: string) => s
 
 export default function OrderHistoryScreen({ navigation }: Props) {
   const t = useT();
-  const toast = useToast();
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const { state } = useAuth();
 
   const [orders,      setOrders]      = useState<OrderListItem[]>([]);
   const [shopMap,     setShopMap]     = useState<Map<string, string>>(new Map());
+  const [bestsellers, setBestsellers] = useState<ProductCardData[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
   const [error,       setError]       = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [reorderingId, setReorderingId] = useState<string | null>(null);
-  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  // Delivery address shown in the header + edited via the location sheet.
+  const [addresses, setAddresses] = useState<AddressResponse[]>([]);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const headerOpacity = useRef(new Animated.Value(0)).current;
 
   // ─── Header ────────────────────────────────────────────────────────────────
 
@@ -153,17 +173,44 @@ export default function OrderHistoryScreen({ navigation }: Props) {
     navigation.setOptions({ headerTitle: t('history.title') });
   }, [navigation, t]);
 
-  // ─── Load data (orders + shops in parallel) ────────────────────────────────
+  useEffect(() => {
+    Animated.timing(headerOpacity, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+  }, [headerOpacity]);
+
+  const loadAddresses = useCallback(async () => {
+    try {
+      const data = await api.getAddresses();
+      data.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+      setAddresses(data);
+    } catch {
+      /* tolerate — header falls back to "Set your delivery location" */
+    }
+  }, []);
+
+  useEffect(() => { void loadAddresses(); }, [loadAddresses]);
+  useEffect(
+    () => navigation.addListener('focus', () => { void loadAddresses(); }),
+    [navigation, loadAddresses],
+  );
+
+  const activeAddress = addresses.find((a) => a.isDefault) ?? addresses[0] ?? null;
+  const addressLine = activeAddress
+    ? `${activeAddress.street}, ${activeAddress.locality}`
+    : null;
+
+  // ─── Load data (orders + shops + bestsellers in parallel) ──────────────────
 
   const loadData = useCallback(async () => {
     setError(false);
     try {
-      const [ordersRaw, shopsRaw] = await Promise.all([
+      const [ordersRaw, shopsRaw, productsRaw] = await Promise.all([
         api.getMyOrders({ page: 1, limit: PAGE_SIZE }) as unknown as Promise<OrderListItem[]>,
         api.getShops() as Promise<ShopLite[]>,
+        fetchProducts({ limit: 10 }).catch(() => []),
       ]);
       setOrders(ordersRaw);
       setShopMap(new Map(shopsRaw.map((s) => [s.id, s.name])));
+      setBestsellers(productsRaw.map(toProductCard));
     } catch {
       setError(true);
     } finally {
@@ -320,104 +367,128 @@ export default function OrderHistoryScreen({ navigation }: Props) {
         </View>
       </View>
     );
-  }, [shopMap, t, reorderingId, navigation, handleReorder]);
+  }, [Colors, styles, shopMap, t, reorderingId, navigation, handleReorder]);
 
-  // ─── Render: loading skeleton ──────────────────────────────────────────────
-
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        {[1, 2, 3].map((k) => <SkeletonCard key={k} />)}
-      </View>
-    );
-  }
-
-  // ─── Render: error state ───────────────────────────────────────────────────
-
-  if (error && orders.length === 0) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorEmoji}>😕</Text>
-          <Text style={styles.errorTitle}>इंटरनेट नहीं है</Text>
-          <Text style={styles.errorSubtext}>कनेक्शन चेक करें और दोबारा कोशिश करें</Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={handleRetry}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.retryText}>🔄 दोबारा कोशिश करें</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  // ─── Render: empty state ───────────────────────────────────────────────────
-
-  if (orders.length === 0) {
-    return (
-      <View style={styles.container}>
-        <EmptyState onBrowse={() => navigation.navigate('MainTabs', { screen: 'Categories' })} t={t} />
-      </View>
-    );
-  }
-
-  // ─── Render: list ──────────────────────────────────────────────────────────
+  // ─── Body: skeleton / error / Blinkit-style list ───────────────────────────
+  // Hero/order-again grid + bestsellers live in the list header; past orders are
+  // the (possibly empty) virtualised list; the faded tagline is the footer. We
+  // never early-return on empty so the hero + bestsellers always greet the user.
 
   const visibleOrders = orders.slice(0, visibleCount);
   const hasMore       = visibleCount < orders.length;
 
-  return (
-    <FlatList
-      data={visibleOrders}
-      keyExtractor={(item) => item.id}
-      renderItem={renderOrder}
-      ListHeaderComponent={
-        <OrderAgainHeader products={reorderProducts} t={t} hasOrders={orders.length > 0} />
-      }
-      contentContainerStyle={styles.listContent}
-      style={styles.container}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={handleRefresh}
-          colors={[Colors.primary]}
-          tintColor={Colors.primary}
-        />
-      }
-      onEndReached={handleLoadMore}
-      onEndReachedThreshold={0.4}
-      ListFooterComponent={hasMore ? (
-        <View style={styles.footerLoader}>
-          <ActivityIndicator color={Colors.primary} />
+  const renderBody = () => {
+    if (loading) {
+      return (
+        <View style={styles.bodyPad}>
+          {[1, 2, 3].map((k) => <SkeletonCard key={k} />)}
         </View>
-      ) : null}
-      showsVerticalScrollIndicator={false}
-    />
-  );
-}
+      );
+    }
 
-// ─── Order Again grid (header above the past-orders list) ──────────────────────
+    if (error && orders.length === 0) {
+      return (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorEmoji}>😕</Text>
+          <Text style={styles.errorTitle}>इंटरनेट नहीं है</Text>
+          <Text style={styles.errorSubtext}>कनेक्शन चेक करें और दोबारा कोशिश करें</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={handleRetry} activeOpacity={0.8}>
+            <Text style={styles.retryText}>🔄 दोबारा कोशिश करें</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
 
-function OrderAgainHeader({
-  products, t, hasOrders,
-}: { products: ProductCardData[]; t: (k: string) => string; hasOrders: boolean }) {
-  const { colors: Colors } = useTheme();
-  const styles = useMemo(() => makeStyles(Colors), [Colors]);
-  return (
-    <View>
-      {products.length > 0 && (
-        <>
-          <Text style={styles.sectionHeading}>{t('history.orderAgain')}</Text>
-          <View style={styles.grid}>
-            {products.map((p) => (
-              <ProductCard key={p.productId} product={p} />
-            ))}
+    return (
+      <FlatList
+        data={visibleOrders}
+        keyExtractor={(item) => item.id}
+        renderItem={renderOrder}
+        ListHeaderComponent={
+          <View>
+            {/* Order-again grid when the user has history; hero card otherwise */}
+            {reorderProducts.length > 0 ? (
+              <View style={styles.grid}>
+                {reorderProducts.map((p) => (
+                  <ProductCard key={p.productId} product={p} size="compact" />
+                ))}
+              </View>
+            ) : (
+              <ReorderHero t={t} />
+            )}
+
+            {/* Bestsellers — real products, compact 3-up grid */}
+            {bestsellers.length > 0 && (
+              <>
+                <Text style={styles.sectionHeading}>{t('history.bestsellers')}</Text>
+                <View style={styles.grid}>
+                  {bestsellers.map((p) => (
+                    <ProductCard key={p.productId} product={p} size="compact" />
+                  ))}
+                </View>
+              </>
+            )}
+
+            {orders.length > 0 && (
+              <Text style={styles.sectionHeading}>{t('history.pastOrders')}</Text>
+            )}
           </View>
-        </>
-      )}
-      {hasOrders && <Text style={styles.sectionHeading}>{t('history.pastOrders')}</Text>}
+        }
+        ListFooterComponent={
+          <View>
+            {hasMore && (
+              <View style={styles.footerLoader}>
+                <ActivityIndicator color={Colors.primary} />
+              </View>
+            )}
+            <TaglineFooter t={t} />
+          </View>
+        }
+        contentContainerStyle={styles.listContent}
+        style={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[Colors.primary]}
+            tintColor={Colors.primary}
+          />
+        }
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.4}
+        showsVerticalScrollIndicator={false}
+      />
+    );
+  };
+
+  return (
+    <View style={styles.container}>
+      {/* Same delivery-ETA + address header as Home / Categories */}
+      <Header
+        entranceOpacity={headerOpacity}
+        addressLine={addressLine}
+        onProfilePress={() => navigation.navigate('MainTabs', { screen: 'Profile' })}
+        onLocationPress={() => setSheetOpen(true)}
+      />
+
+      {/* Sticky search bar — straddles the orange/cream boundary */}
+      <View style={styles.searchOverlap}>
+        <SearchBar
+          entranceOpacity={headerOpacity}
+          onPress={() => navigation.navigate('Search')}
+        />
+      </View>
+
+      {renderBody()}
+
+      <LocationSheet
+        visible={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        addresses={addresses}
+        userName={state.name}
+        userPhone={state.phone}
+        onChanged={loadAddresses}
+      />
     </View>
   );
 }
@@ -427,7 +498,11 @@ function OrderAgainHeader({
 const makeStyles = (Colors: ColorPalette) =>
   StyleSheet.create({
   container:   { flex: 1, backgroundColor: Colors.background },
-  listContent: { padding: Spacing.lg, gap: Spacing.md },
+  listContent: { padding: Spacing.lg, gap: Spacing.md, paddingBottom: Spacing.huge },
+
+  // Sticky search straddles the orange header bottom (matches Home / Categories).
+  searchOverlap: { marginTop: -20 },
+  bodyPad:       { padding: Spacing.lg, gap: Spacing.md },
 
   // Card
   card: {
@@ -475,34 +550,50 @@ const makeStyles = (Colors: ColorPalette) =>
   // Skeleton
   skeletonLine: { height: 14, backgroundColor: Colors.border, borderRadius: Radius.sm },
 
-  // Order Again grid + section headings
+  // Section headings + grids
   sectionHeading: {
-    fontSize: 20, fontWeight: '700', color: Colors.textPrimary,
-    marginTop: Spacing.sm, marginBottom: Spacing.md,
+    fontSize: FontSize.xl, fontWeight: '800', color: Colors.textPrimary,
+    marginTop: Spacing.lg, marginBottom: Spacing.md,
   },
   grid: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: Spacing.lg,
+    flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: Spacing.sm,
+  },
+  bestsellerRow: { gap: 12, paddingRight: Spacing.lg, paddingBottom: Spacing.xs },
+
+  // Hero card ("Reordering will be easy")
+  hero: {
+    backgroundColor: Colors.primaryLight,
+    borderRadius:    Radius.xl,
+    paddingVertical: Spacing.xxl,
+    paddingHorizontal: Spacing.xl,
+    alignItems:      'center',
+    gap:             Spacing.xs,
+    marginBottom:    Spacing.sm,
+  },
+  heroTitle: {
+    fontSize: FontSize.xl, fontWeight: '800', color: Colors.textPrimary,
+    textAlign: 'center', marginTop: Spacing.md,
+  },
+  heroSub: {
+    fontSize: FontSize.sm, color: Colors.textSecondary,
+    textAlign: 'center', lineHeight: 20,
   },
 
-  // Empty state (v2 §Feature 1)
-  emptyContainer: {
-    flex: 1, justifyContent: 'center', alignItems: 'center',
-    gap: Spacing.sm, paddingHorizontal: Spacing.xxl,
+  // Big faded tagline footer ("Chirawa's last minute app ❤️")
+  tagline: { marginTop: Spacing.xxl, paddingHorizontal: Spacing.xs },
+  taglineText: {
+    fontSize: FontSize.xxxl, lineHeight: 38, fontWeight: '800',
+    color: Colors.primaryMid,
   },
-  emptyIllustration: {
-    width: 200, height: 200, borderRadius: 20,
-    backgroundColor: '#FFF0E9',
-    justifyContent: 'center', alignItems: 'center',
-    marginBottom: Spacing.lg,
+  taglineHeart: { fontSize: FontSize.xxl },
+  taglineRule: {
+    height: 1, backgroundColor: Colors.border,
+    marginTop: Spacing.lg, marginBottom: Spacing.md,
   },
-  emptyTitle: { fontSize: 20, fontWeight: '600', color: Colors.textPrimary, textAlign: 'center' },
-  emptySub:   { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', lineHeight: 22 },
-  browseBtn: {
-    marginTop: Spacing.lg, backgroundColor: Colors.primary, borderRadius: 24,
-    paddingHorizontal: 28, paddingVertical: 12,
-    minHeight: MIN_TAP, justifyContent: 'center', alignItems: 'center',
+  taglineMark: {
+    fontSize: FontSize.xl, fontWeight: '800',
+    color: Colors.border, letterSpacing: 1,
   },
-  browseText: { color: Colors.white, fontSize: 14, fontWeight: '600' },
 
   // Error state
   errorContainer: {

@@ -275,6 +275,9 @@ model Product {
   isActive    Boolean     @default(true) @map("is_active")
   sortOrder   Int         @default(0) @map("sort_order")
   unit        String?     @db.VarChar(50)
+  // Free-form product highlights shown as chips on the detail page, e.g.
+  // [{ "label": "Shelf Life", "value": "150 days" }, { "label": "Flavour", "value": "Spicy" }]
+  attributes  Json?       @map("attributes")
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @updatedAt @map("updated_at")
 

@@ -681,8 +681,8 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
       {/* ── C. Order items ──────────────────────────────────────────────── */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>{t('tracking.orderItems')}</Text>
-        {order.items.map((item) => (
-          <ItemRow key={item.productId} item={item} />
+        {order.items.map((item, i) => (
+          <ItemRow key={`${item.productId}-${i}`} item={item} />
         ))}
       </View>
 

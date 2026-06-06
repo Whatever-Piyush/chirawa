@@ -631,7 +631,9 @@ export default function CheckoutScreen({ navigation }: Props) {
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={88}>
       <FlatList
         data={cart.items}
-        keyExtractor={(item) => item.productId}
+        // Variant-aware: a product can have two lines (e.g. 500ml + 1L), so the
+        // bare productId is not unique. Mirrors cartKey() from CartContext.
+        keyExtractor={(item) => (item.variantId ? `${item.productId}::${item.variantId}` : item.productId)}
         renderItem={({ item, index }) => (
           <DeliveryItemRow
             item={item}

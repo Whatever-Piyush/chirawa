@@ -88,7 +88,7 @@ export default function CartDockPill() {
 
         {/* Right — circular chevron */}
         <View style={styles.chevron}>
-          <Ionicons name="chevron-forward" size={20} color={Colors.primary} />
+          <Ionicons name="chevron-forward" size={18} color={Colors.primary} />
         </View>
       </TouchableOpacity>
     </Animated.View>
@@ -106,28 +106,28 @@ const styles = StyleSheet.create({
     flexDirection:   'row',
     alignItems:      'center',
     alignSelf:       'center',
-    minWidth:        240,
-    height:          58,
-    borderRadius:    29,
+    minWidth:        190,              // shorter, content-hugging
+    height:          48,
+    borderRadius:    24,
     backgroundColor: Colors.primary,   // brand orange — matches header/banner
-    paddingLeft:     8,
-    paddingRight:    8,
+    paddingLeft:     6,
+    paddingRight:    6,
     shadowColor:   Colors.primary,
     shadowOpacity: 0.40,
-    shadowRadius:  14,
-    shadowOffset:  { width: 0, height: 6 },
+    shadowRadius:  12,
+    shadowOffset:  { width: 0, height: 5 },
     elevation:     12,
   },
-  thumb: { width: 42, height: 42 },
+  thumb: { width: 34, height: 34 },
   thumbImg: {
-    width: 42, height: 42, borderRadius: 12,
+    width: 34, height: 34, borderRadius: 10,
     borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.5)',
   },
-  center: { flex: 1, marginLeft: Spacing.md, marginRight: Spacing.md },
-  title:   { fontSize: 16, lineHeight: 20 },
-  summary: { fontSize: 12, lineHeight: 16, color: 'rgba(255,255,255,0.9)', marginTop: 1 },
+  center: { flex: 1, marginLeft: Spacing.sm, marginRight: Spacing.sm },
+  title:   { fontSize: 14, lineHeight: 18 },
+  summary: { fontSize: 11, lineHeight: 14, color: 'rgba(255,255,255,0.9)', marginTop: 1 },
   chevron: {
-    width: 36, height: 36, borderRadius: 18,
+    width: 30, height: 30, borderRadius: 15,
     backgroundColor: Colors.white,
     justifyContent: 'center', alignItems: 'center',
   },

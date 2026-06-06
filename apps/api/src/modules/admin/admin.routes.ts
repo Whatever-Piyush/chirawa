@@ -263,6 +263,173 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  /*
+   * PUT /api/v1/admin/products/:id/images  { urls: string[] }
+   * Replaces ALL images for a product with the given ordered list (first = primary).
+   * Powers the multi-image carousel on the product card + detail page.
+   */
+  app.put(
+    '/products/:id/images',
+    { preHandler: [authenticate, requireRole('admin')] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      if (!UUID_RE.test(id)) throw new NotFoundError('Product');
+
+      const body = request.body as { urls?: unknown };
+      if (!Array.isArray(body.urls) || body.urls.length === 0) {
+        throw new ValidationError('urls (non-empty array) is required');
+      }
+      const urls = body.urls.filter(
+        (u): u is string => typeof u === 'string' && /^https?:\/\//.test(u),
+      );
+      if (urls.length === 0) throw new ValidationError('No valid image urls provided');
+
+      const product = await app.prisma.product.findUnique({
+        where: { id }, select: { shopId: true },
+      });
+      if (!product) throw new NotFoundError('Product');
+
+      await app.prisma.$transaction([
+        app.prisma.productImage.deleteMany({ where: { productId: id } }),
+        app.prisma.productImage.createMany({
+          data: urls.map((url, i) => ({ productId: id, url, sortOrder: i })),
+        }),
+      ]);
+      await app.redis.del(`catalog:shop:${product.shopId}:full`).catch(() => {});
+      return reply.send({ productId: id, images: urls });
+    },
+  );
+
+  /*
+   * POST /api/v1/admin/products/import   { products: ProductImportRow[] }
+   * Bulk create/update products. Idempotent on (shopId, name): re-running updates
+   * the existing product rather than duplicating. Per row you can pass price, mrp,
+   * unit, description, categoryName, attributes, imageUrls and variants — so a
+   * whole catalog can be poured in from a spreadsheet export.
+   */
+  app.post(
+    '/products/import',
+    { preHandler: [authenticate, requireRole('admin')] },
+    async (request, reply) => {
+      const body = request.body as { products?: unknown };
+      if (!Array.isArray(body.products) || body.products.length === 0) {
+        throw new ValidationError('products (non-empty array) is required');
+      }
+      if (body.products.length > 500) {
+        throw new ValidationError('Max 500 products per import batch');
+      }
+
+      type Row = {
+        shopId?: string; name?: string; pricePaise?: number; mrpPaise?: number;
+        unit?: string; description?: string; categoryName?: string;
+        attributes?: { label: string; value: string }[];
+        imageUrls?: string[];
+        variants?: { name: string; pricePaise: number; mrpPaise?: number; stockQty?: number }[];
+      };
+
+      const rows = body.products as Row[];
+      const results: { name: string; status: 'created' | 'updated' | 'error'; id?: string; error?: string }[] = [];
+      const touchedShops = new Set<string>();
+
+      // Cache shop + category lookups across the batch.
+      const categoryCache = new Map<string, string>(); // `${shopId}::${name}` -> categoryId
+
+      for (const row of rows) {
+        try {
+          if (!row.shopId || !UUID_RE.test(row.shopId)) throw new Error('valid shopId required');
+          if (!row.name || typeof row.name !== 'string') throw new Error('name required');
+          if (typeof row.pricePaise !== 'number' || row.pricePaise < 0) throw new Error('pricePaise (number) required');
+
+          const shop = await app.prisma.shop.findUnique({ where: { id: row.shopId }, select: { id: true } });
+          if (!shop) throw new Error('shop not found');
+
+          // Resolve (find-or-create) category within the shop.
+          let categoryId: string | undefined;
+          if (row.categoryName) {
+            const key = `${row.shopId}::${row.categoryName.toLowerCase()}`;
+            categoryId = categoryCache.get(key);
+            if (!categoryId) {
+              const existing = await app.prisma.category.findFirst({
+                where: { shopId: row.shopId, name: row.categoryName }, select: { id: true },
+              });
+              categoryId = existing?.id ?? (await app.prisma.category.create({
+                data: { shopId: row.shopId, name: row.categoryName }, select: { id: true },
+              })).id;
+              categoryCache.set(key, categoryId);
+            }
+          }
+
+          const attributes = Array.isArray(row.attributes)
+            ? row.attributes.filter((a) => a && typeof a.label === 'string' && typeof a.value === 'string')
+            : undefined;
+
+          const scalars = {
+            name:        row.name,
+            price:       row.pricePaise,
+            mrpPaise:    typeof row.mrpPaise === 'number' ? row.mrpPaise : null,
+            unit:        row.unit ?? null,
+            description: row.description ?? null,
+            categoryId:  categoryId ?? null,
+            ...(attributes ? { attributes } : {}),
+          };
+
+          // Idempotent on (shopId, name).
+          const existing = await app.prisma.product.findFirst({
+            where: { shopId: row.shopId, name: row.name }, select: { id: true },
+          });
+
+          const product = existing
+            ? await app.prisma.product.update({ where: { id: existing.id }, data: scalars, select: { id: true } })
+            : await app.prisma.product.create({ data: { shopId: row.shopId, ...scalars }, select: { id: true } });
+
+          // Replace images (ordered) when provided.
+          if (Array.isArray(row.imageUrls)) {
+            const urls = row.imageUrls.filter((u) => typeof u === 'string' && /^https?:\/\//.test(u));
+            await app.prisma.productImage.deleteMany({ where: { productId: product.id } });
+            if (urls.length > 0) {
+              await app.prisma.productImage.createMany({
+                data: urls.map((url, i) => ({ productId: product.id, url, sortOrder: i })),
+              });
+            }
+          }
+
+          // Replace variants when provided.
+          if (Array.isArray(row.variants)) {
+            await app.prisma.productVariant.deleteMany({ where: { productId: product.id } });
+            if (row.variants.length > 0) {
+              await app.prisma.productVariant.createMany({
+                data: row.variants
+                  .filter((v) => v && typeof v.name === 'string' && typeof v.pricePaise === 'number')
+                  .map((v, i) => ({
+                    productId: product.id,
+                    name:      v.name,
+                    price:     v.pricePaise,
+                    mrpPaise:  typeof v.mrpPaise === 'number' ? v.mrpPaise : null,
+                    stockQty:  typeof v.stockQty === 'number' ? v.stockQty : 0,
+                    sortOrder: i,
+                  })),
+              });
+            }
+          }
+
+          touchedShops.add(row.shopId);
+          results.push({ name: row.name, status: existing ? 'updated' : 'created', id: product.id });
+        } catch (err) {
+          results.push({ name: row.name ?? '(unknown)', status: 'error', error: (err as Error).message });
+        }
+      }
+
+      // Invalidate affected shop catalog caches.
+      const cacheKeys = [...touchedShops].map((s) => `catalog:shop:${s}:full`);
+      if (cacheKeys.length > 0) await app.redis.del(...cacheKeys, 'catalog:shops:active').catch(() => {});
+
+      const created = results.filter((r) => r.status === 'created').length;
+      const updated = results.filter((r) => r.status === 'updated').length;
+      const failed  = results.filter((r) => r.status === 'error').length;
+      return reply.status(201).send({ created, updated, failed, total: results.length, results });
+    },
+  );
+
   // Invalidate Redis alias-expansion cache for a list of terms
   async function invalidateAliasCaches(terms: string[]): Promise<void> {
     const cacheKeys = [...new Set(terms)].map(aliasExpandKey);

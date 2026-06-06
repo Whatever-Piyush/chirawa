@@ -1,52 +1,30 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
 import { View, TouchableOpacity, StyleSheet, Animated, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../../components/ui';
 import { Colors, Spacing } from '../../theme';
+import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
 
-// Taglines updated for maximum psychological impact and speed
-const TAGLINES = [
-  'Chirawa ka apna bazar 🛍️',
-  'Need it now? Bringly it. ⚡',
-  'The Best of Chirawa, at Your Fingertips. ✨',
-] as const;
-
-const ROTATE_MS = 3000; // dwell time per tagline
-const FADE_MS = 150; // out + in
 const HEADER_BLEED = 28; // bottom padding so the SearchBar can overlap upward
 
 interface Props {
-  onProfilePress: () => void;
-  style?: ViewStyle;
+  onProfilePress:  () => void;
+  onLocationPress: () => void;
+  addressLine?:    string | null;
+  style?:          ViewStyle;
   entranceOpacity?: Animated.Value;
 }
 
-export default function Header({ onProfilePress, style, entranceOpacity }: Props) {
+export default function Header({
+  onProfilePress, onLocationPress, addressLine, style, entranceOpacity,
+}: Props) {
   const insets = useSafeAreaInsets();
+  const t = useT();
   const { state } = useAuth();
-  const [tagIndex, setTagIndex] = useState(0);
-  const tagOpacity = useRef(new Animated.Value(1)).current;
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      Animated.timing(tagOpacity, {
-        toValue: 0,
-        duration: FADE_MS,
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (!finished) return;
-        setTagIndex((i) => (i + 1) % TAGLINES.length);
-        Animated.timing(tagOpacity, {
-          toValue: 1,
-          duration: FADE_MS,
-          useNativeDriver: true,
-        }).start();
-      });
-    }, ROTATE_MS);
-    return () => clearInterval(id);
-  }, [tagOpacity]);
+  const name = state.name ?? '';
 
   return (
     <Animated.View
@@ -57,14 +35,21 @@ export default function Header({ onProfilePress, style, entranceOpacity }: Props
         style,
       ]}
     >
+      {/* Row 1 — delivery promise + profile avatar */}
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
-          <Text color={Colors.white} weight="bold" style={styles.brand}>
-            Bringly
+          <Text color="rgba(255,255,255,0.8)" weight="medium" style={styles.brandIn}>
+            {t('home.brandInLabel')}
           </Text>
-          <Animated.Text style={[styles.tagline, { opacity: tagOpacity }]} numberOfLines={1}>
-            {TAGLINES[tagIndex]}
-          </Animated.Text>
+          <View style={styles.etaRow}>
+            <Text color={Colors.white} weight="bold" style={styles.eta}>
+              {t('home.etaMinutes')}
+            </Text>
+            <View style={styles.etaChip}>
+              <Ionicons name="flash" size={11} color={Colors.white} />
+              <Text color={Colors.white} weight="bold" style={styles.etaChipText}>24×7</Text>
+            </View>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -74,15 +59,32 @@ export default function Header({ onProfilePress, style, entranceOpacity }: Props
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityLabel="Profile"
         >
-          {/* 🔴 Dynamic Typographic Avatar applied here */}
           <Text style={styles.avatarText}>
             {state.name ? state.name.charAt(0).toUpperCase() : '?'}
           </Text>
-
-          {/* Premium "Live/Active" Notification Dot */}
           <View style={styles.activeDot} />
         </TouchableOpacity>
       </View>
+
+      {/* Row 2 — tappable delivery address → opens the location sheet */}
+      <TouchableOpacity
+        onPress={onLocationPress}
+        activeOpacity={0.7}
+        style={styles.addrRow}
+        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+        accessibilityLabel="Change delivery location"
+      >
+        <Ionicons name="location-sharp" size={16} color={Colors.white} />
+        <Text color={Colors.white} weight="bold" style={styles.addrName} numberOfLines={1}>
+          {name ? `${name}` : t('home.setLocation')}
+          {name && addressLine ? (
+            <Text color="rgba(255,255,255,0.8)" weight="regular" style={styles.addrText}>
+              {`  ·  ${addressLine}`}
+            </Text>
+          ) : null}
+        </Text>
+        <Ionicons name="chevron-down" size={16} color={Colors.white} />
+      </TouchableOpacity>
     </Animated.View>
   );
 }
@@ -98,18 +100,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.md,
   },
-  brand: {
-    fontSize: 24,
-    lineHeight: 30,
-    letterSpacing: -0.5,
-  },
-  tagline: {
+  brandIn: {
     fontSize: 12.5,
     lineHeight: 16,
-    marginTop: 2,
-    color: 'rgba(255,255,255,0.75)',
-    fontFamily: 'Poppins_400Regular',
     letterSpacing: 0.2,
+  },
+  etaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  eta: {
+    fontSize: 26,
+    lineHeight: 32,
+    letterSpacing: -0.5,
+  },
+  etaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    marginTop: 4,
+  },
+  etaChipText: {
+    fontSize: 11,
+    letterSpacing: 0.3,
   },
   profileBtn: {
     width: 46,
@@ -137,5 +155,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#34C759',
     borderWidth: 2.5,
     borderColor: Colors.primary,
+  },
+  addrRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: Spacing.md,
+  },
+  addrName: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  addrText: {
+    fontSize: 13,
+    lineHeight: 19,
   },
 });

@@ -1,12 +1,16 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, ScrollView, Animated } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { AddressResponse } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { useT } from '@chirawa/i18n';
 import { Text } from '../../components/ui';
 import { isOpenNow } from '../../utils/operatingHours';
+import { api } from '../../services/api.service';
+import { useAuth } from '../../context/AuthContext';
+import LocationSheet from '../../components/location/LocationSheet';
 import Header from './Header';
 import SearchBar from './SearchBar';
 import CategoryTabs from './CategoryTabs';
@@ -25,6 +29,32 @@ export default function HomeScreen({ navigation }: Props) {
   const t = useT();
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const { state } = useAuth();
+
+  // Delivery address shown in the header + edited via the location sheet.
+  const [addresses, setAddresses] = useState<AddressResponse[]>([]);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  const loadAddresses = useCallback(async () => {
+    try {
+      const data = await api.getAddresses();
+      data.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+      setAddresses(data);
+    } catch {
+      /* tolerate — header falls back to "Set your delivery location" */
+    }
+  }, []);
+
+  useEffect(() => { void loadAddresses(); }, [loadAddresses]);
+  useEffect(
+    () => navigation.addListener('focus', () => { void loadAddresses(); }),
+    [navigation, loadAddresses],
+  );
+
+  const activeAddress = addresses.find((a) => a.isDefault) ?? addresses[0] ?? null;
+  const addressLine = activeAddress
+    ? `${activeAddress.street}, ${activeAddress.locality}`
+    : null;
 
   // Entrance animations: header fades in, search + banner slide up just after.
   const headerOpacity   = useRef(new Animated.Value(0)).current;
@@ -46,10 +76,12 @@ export default function HomeScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      {/* ── 1. Header — Bringly + cycling tagline + profile icon ─────────── */}
+      {/* ── 1. Header — delivery ETA + tappable address + profile icon ────── */}
       <Header
         entranceOpacity={headerOpacity}
+        addressLine={addressLine}
         onProfilePress={() => navigation.navigate('MainTabs', { screen: 'Profile' })}
+        onLocationPress={() => setSheetOpen(true)}
       />
 
       {/* ── 2. Search bar — outside the ScrollView; marginTop:-20 straddles
@@ -105,6 +137,16 @@ export default function HomeScreen({ navigation }: Props) {
 
         <View style={{ height: Spacing.huge }} />
       </ScrollView>
+
+      {/* Delivery-location bottom sheet (opens from the header address row) */}
+      <LocationSheet
+        visible={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        addresses={addresses}
+        userName={state.name}
+        userPhone={state.phone}
+        onChanged={loadAddresses}
+      />
     </View>
   );
 }

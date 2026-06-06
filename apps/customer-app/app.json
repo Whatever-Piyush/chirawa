@@ -2,6 +2,7 @@
   "expo": {
     "name": "Bringly",
     "slug": "bringly-customer",
+    "scheme": "bringly",
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",

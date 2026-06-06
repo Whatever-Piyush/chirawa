@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Image, TouchableOpacity, StyleSheet, Animated, Dimensions,
+  View, Image, TouchableOpacity, StyleSheet, Animated, Dimensions, ScrollView,
+  type NativeSyntheticEvent, type NativeScrollEvent,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -14,9 +15,11 @@ import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// 2-column grid card width: screen minus 16-px page padding each side minus
-// the 12-px inter-column gap, halved.
-export const PRODUCT_CARD_WIDTH = (SCREEN_WIDTH - 32 - 12) / 2;
+// 2-column grid card (regular) and 3-column (compact, Blinkit-style smaller tiles).
+export const PRODUCT_CARD_WIDTH         = (SCREEN_WIDTH - 32 - 12) / 2;
+export const PRODUCT_CARD_WIDTH_COMPACT = (SCREEN_WIDTH - 32 - 24) / 3;
+
+export type ProductCardSize = 'regular' | 'compact';
 
 export interface ProductCardData {
   productId:   string;
@@ -25,24 +28,42 @@ export interface ProductCardData {
   mrpPaise?:   number | null;
   weightLabel?: string | null;   // "250 g"
   imageUrl?:   string | null;
+  images?:     string[];         // full set for the swipeable carousel
   imageColor?: string;           // placeholder fill until real images land
   isNonVeg?:   boolean;
   hasVariants?: boolean;         // multi-variant products open the PDP to choose a size
 }
 
-const ADD_W      = 72;
-const STEPPER_W  = 104;
+// Per-size layout dimensions.
+const DIMS: Record<ProductCardSize, {
+  width: number; imageHeight: number; addW: number; stepperW: number;
+  nameSize: number; priceSize: number; pad: number;
+}> = {
+  regular: { width: PRODUCT_CARD_WIDTH,         imageHeight: 120, addW: 72, stepperW: 104, nameSize: 13, priceSize: 16, pad: 10 },
+  compact: { width: PRODUCT_CARD_WIDTH_COMPACT, imageHeight: 88,  addW: 54, stepperW: 80,  nameSize: 11, priceSize: 13, pad: 7 },
+};
 
-export default function ProductCard({ product }: { product: ProductCardData }) {
+export default function ProductCard({
+  product, size = 'regular',
+}: { product: ProductCardData; size?: ProductCardSize }) {
   const { quantities, addItem, setQuantity } = useCart();
   const fly = useFlyToCart();
   const imageRef = useRef<View>(null);
   const qty = quantities[product.productId] ?? 0;
   const inCart = qty > 0;
   const { colors: Colors } = useTheme();
-  const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const dims = DIMS[size];
+  const styles = useMemo(() => makeStyles(Colors, dims), [Colors, dims]);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const [imgError, setImgError] = useState(false);
+  const [activeImg, setActiveImg] = useState(0);
+
+  // Image set for the carousel — fall back to the single imageUrl.
+  const images = useMemo(() => {
+    if (product.images && product.images.length > 0) return product.images;
+    return product.imageUrl ? [product.imageUrl] : [];
+  }, [product.images, product.imageUrl]);
+
+  const pageWidth = dims.width - dims.pad * 2;
 
   // Morph the ADD button into a stepper: animate width + crossfade contents.
   const morph = useRef(new Animated.Value(inCart ? 1 : 0)).current;
@@ -54,7 +75,7 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
     }).start();
   }, [inCart, morph]);
 
-  const width = morph.interpolate({ inputRange: [0, 1], outputRange: [ADD_W, STEPPER_W] });
+  const width = morph.interpolate({ inputRange: [0, 1], outputRange: [dims.addW, dims.stepperW] });
 
   const vegColor = product.isNonVeg ? '#B71C1C' : '#1A7A2A';
   const rupees   = Math.round(product.pricePaise / 100);
@@ -66,7 +87,6 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
       navigation.navigate('ProductDetail', { productId: product.productId });
       return;
     }
-    // Fly a copy of the product image to the cart capsule, then add.
     imageRef.current?.measureInWindow((x, y, w, h) => {
       fly.trigger({ x: x + w / 2, y: y + h / 2, color: product.imageColor ?? '#FFE0CC' });
     });
@@ -74,6 +94,10 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
   };
   const onInc = () => { void setQuantity(product.productId, qty + 1); };
   const onDec = () => { void setQuantity(product.productId, qty - 1); };
+
+  const onCarouselScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    setActiveImg(Math.round(e.nativeEvent.contentOffset.x / pageWidth));
+  };
 
   return (
     <TouchableOpacity
@@ -86,15 +110,35 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
         <View style={[styles.vegDot, { backgroundColor: vegColor }]} />
       </View>
 
-      {/* image area */}
+      {/* image area — swipeable carousel + dots */}
       <View ref={imageRef} collapsable={false} style={styles.imageArea}>
-        {product.imageUrl && !imgError ? (
-          <Image
-            source={{ uri: product.imageUrl }}
-            style={styles.image}
-            resizeMode="contain"
-            onError={() => setImgError(true)}
-          />
+        {images.length > 0 ? (
+          <>
+            <ScrollView
+              horizontal
+              pagingEnabled
+              scrollEnabled={images.length > 1}
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={onCarouselScroll}
+            >
+              {images.map((uri, i) => (
+                <Image
+                  key={`${uri}-${i}`}
+                  source={{ uri }}
+                  style={{ width: pageWidth, height: dims.imageHeight }}
+                  resizeMode="contain"
+                />
+              ))}
+            </ScrollView>
+
+            {images.length > 1 && (
+              <View style={styles.dotsRow} pointerEvents="none">
+                {images.map((_, i) => (
+                  <View key={i} style={[styles.dot, i === activeImg && styles.dotActive]} />
+                ))}
+              </View>
+            )}
+          </>
         ) : (
           <View style={[styles.placeholder, { backgroundColor: product.imageColor ?? '#FFF0E9' }]} />
         )}
@@ -110,11 +154,11 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
           {inCart ? (
             <View style={styles.stepper}>
               <TouchableOpacity onPress={onDec} style={styles.stepBtn} hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
-                <Ionicons name="remove" size={16} color={Colors.white} />
+                <Ionicons name="remove" size={size === 'compact' ? 13 : 16} color={Colors.white} />
               </TouchableOpacity>
               <Text weight="bold" color={Colors.white} style={styles.stepCount}>{qty}</Text>
               <TouchableOpacity onPress={onInc} style={styles.stepBtn} hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
-                <Ionicons name="add" size={16} color={Colors.white} />
+                <Ionicons name="add" size={size === 'compact' ? 13 : 16} color={Colors.white} />
               </TouchableOpacity>
             </View>
           ) : (
@@ -141,19 +185,19 @@ export default function ProductCard({ product }: { product: ProductCardData }) {
   );
 }
 
-const makeStyles = (Colors: ColorPalette) =>
+const makeStyles = (Colors: ColorPalette, dims: typeof DIMS[ProductCardSize]) =>
   StyleSheet.create({
   card: {
-    width:           PRODUCT_CARD_WIDTH,
+    width:           dims.width,
     backgroundColor: Colors.surface,
     borderRadius:    14,
     borderWidth:     1,
     borderColor:     Colors.border,
-    padding:         10,
+    padding:         dims.pad,
     ...Shadow.sm,
   },
   veg: {
-    position: 'absolute', top: 8, left: 8, zIndex: 2,
+    position: 'absolute', top: 8, left: 8, zIndex: 3,
     width: 14, height: 14, borderRadius: 2, borderWidth: 1.5,
     backgroundColor: '#FFFFFF',
     justifyContent: 'center', alignItems: 'center',
@@ -161,27 +205,40 @@ const makeStyles = (Colors: ColorPalette) =>
   vegDot: { width: 8, height: 8, borderRadius: 4 },
 
   imageArea: {
-    height: 120,
+    height: dims.imageHeight,
     borderRadius: 12,
     backgroundColor: '#F8F8F8',
     overflow: 'hidden',
     justifyContent: 'center', alignItems: 'center',
   },
-  image:       { width: '100%', height: '100%' },
   placeholder: { width: '70%', height: '70%', borderRadius: Radius.md },
+
+  // Carousel dots
+  dotsRow: {
+    position: 'absolute', bottom: 6, left: 0, right: 0,
+    flexDirection: 'row', justifyContent: 'center', gap: 4,
+  },
+  dot: {
+    width: 5, height: 5, borderRadius: 3,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+  },
+  dotActive: {
+    width: 7,
+    backgroundColor: Colors.primary,
+  },
 
   midRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 10,
-    minHeight: 32,
+    marginTop: 8,
+    minHeight: 30,
   },
-  weight: { flex: 1, fontSize: 12, marginRight: 6 },
+  weight: { flex: 1, fontSize: dims.nameSize, marginRight: 4 },
 
   addWrap: {
-    height: 32,
-    borderRadius: 20,
+    height: 30,
+    borderRadius: 18,
     borderWidth: 1.5,
     borderColor: Colors.primary,
     backgroundColor: Colors.surface,
@@ -192,21 +249,21 @@ const makeStyles = (Colors: ColorPalette) =>
   addBtn: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
   },
-  addText: { fontSize: 14, letterSpacing: 0.5 },
+  addText: { fontSize: dims.nameSize + 1, letterSpacing: 0.5 },
 
   stepper: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
   },
-  stepBtn:   { width: 24, alignItems: 'center', justifyContent: 'center' },
-  stepCount: { fontSize: 14, minWidth: 18, textAlign: 'center' },
+  stepBtn:   { width: 22, alignItems: 'center', justifyContent: 'center' },
+  stepCount: { fontSize: dims.nameSize + 1, minWidth: 16, textAlign: 'center' },
 
-  priceRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: 8 },
-  price:    { fontSize: 16, lineHeight: 20 },
-  mrp:      { fontSize: 12, color: '#999', textDecorationLine: 'line-through' },
+  priceRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 5, marginTop: 6 },
+  price:    { fontSize: dims.priceSize, lineHeight: dims.priceSize + 4 },
+  mrp:      { fontSize: dims.nameSize, color: '#999', textDecorationLine: 'line-through' },
 
-  name: { fontSize: 13, lineHeight: 17, marginTop: 4 },
+  name: { fontSize: dims.nameSize, lineHeight: dims.nameSize + 4, marginTop: 3 },
 });

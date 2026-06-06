@@ -26,6 +26,7 @@ export interface ApiProduct {
   mrpPaise:    number | null;
   unit:        string | null;
   imageUrl:    string | null;
+  images?:     string[];          // all card images (swipeable carousel)
   inStock:     boolean;
   shopId:      string;
   shopName:    string;
@@ -59,6 +60,7 @@ export interface ApiProductDetail {
   shopName:    string;
   imageUrl:    string | null;
   images:      string[];
+  attributes?: { label: string; value: string }[];   // Shelf Life, Flavour, Type… (added in Phase 3)
   variants:    ApiVariant[];
   related:     ApiProduct[];
 }
@@ -127,6 +129,10 @@ export async function fetchProductDetail(productId: string): Promise<ApiProductD
 }
 
 export function toProductCard(p: ApiProduct): ProductCardData {
+  // Prefer the full images array; fall back to the single imageUrl.
+  const images = p.images && p.images.length > 0
+    ? p.images
+    : (p.imageUrl ? [p.imageUrl] : []);
   return {
     productId:   p.id,
     name:        p.name,
@@ -134,6 +140,7 @@ export function toProductCard(p: ApiProduct): ProductCardData {
     mrpPaise:    p.mrpPaise,
     weightLabel: p.unit,
     imageUrl:    p.imageUrl,
+    images,
     hasVariants: p.hasVariants ?? false,
   };
 }

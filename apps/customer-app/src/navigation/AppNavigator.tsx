@@ -3,6 +3,7 @@ import {
   NavigationContainer,
   DefaultTheme as NavDefaultTheme,
   type NavigatorScreenParams,
+  type LinkingOptions,
 } from '@react-navigation/native';
 import { navigationRef } from './ref';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -39,6 +40,8 @@ import AddressMapScreen from '../screens/profile/AddressMapScreen';
 import AccountPrivacyScreen from '../screens/profile/AccountPrivacyScreen';
 import ProductDetailScreen from '../screens/product/ProductDetailScreen';
 import SearchScreen from '../screens/search/SearchScreen';
+import ShareAddressScreen from '../screens/profile/ShareAddressScreen';
+import ReceiveAddressScreen from '../screens/profile/ReceiveAddressScreen';
 
 export type RootStackParamList = {
   // Auth
@@ -58,6 +61,22 @@ export type RootStackParamList = {
   OrderTracking: { orderId: string };
   AddressList: undefined;
   AddressMap: undefined;
+  // Address-sharing deep links (bringly://share-address, bringly://receive-address)
+  ShareAddress: { from?: string; phone?: string } | undefined;
+  ReceiveAddress: { payload?: string } | undefined;
+};
+
+// Maps incoming deep links to screens. A bringly:// custom scheme works in the
+// dev/standalone build (app.json "scheme"); https prefixes are listed for when
+// universal-link hosting is added on the domain later.
+const linking: LinkingOptions<RootStackParamList> = {
+  prefixes: ['bringly://', 'https://bringly.in', 'https://www.bringly.in'],
+  config: {
+    screens: {
+      ShareAddress:   'share-address',
+      ReceiveAddress: 'receive-address',
+    },
+  },
 };
 
 // Visible tabs: Home · Order Again · Categories · Special. Profile is a real
@@ -140,7 +159,7 @@ export default function AppNavigator() {
   };
 
   return (
-    <NavigationContainer ref={navigationRef} theme={navTheme}>
+    <NavigationContainer ref={navigationRef} theme={navTheme} linking={linking}>
       <CartProvider>
         <Stack.Navigator
           screenOptions={{
@@ -225,6 +244,8 @@ export default function AppNavigator() {
                     headerTintColor: Colors.primary,
                   }}
                 />
+                <Stack.Screen name="ShareAddress" component={ShareAddressScreen} />
+                <Stack.Screen name="ReceiveAddress" component={ReceiveAddressScreen} />
               </>
             )
           ) : (

@@ -388,7 +388,9 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       take:    limit,
       include: {
         shop:     { select: { id: true, name: true } },
-        images:   { orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true } },
+        // Up to 8 images per card so the customer card can show a swipeable
+        // carousel (Blinkit-style). imageUrl stays as the first for back-compat.
+        images:   { orderBy: { sortOrder: 'asc' }, take: 8, select: { url: true } },
         variants: { where: { isActive: true }, take: 1, select: { id: true } },
       },
     });
@@ -403,6 +405,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       inStock:     p.stockStatus === 'available',
       hasVariants: p.variants.length > 0,
       imageUrl:    p.images[0]?.url ?? null,
+      images:      p.images.map((i) => i.url),
       shopId:      p.shopId,
       shopName:    p.shop.name,
     }));
@@ -483,6 +486,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       shopName:    p.shop.name,
       imageUrl:    p.images[0]?.url ?? null,
       images:      p.images.map((i) => i.url),
+      attributes:  Array.isArray(p.attributes) ? p.attributes : undefined,
       variants: p.variants.map((v) => ({
         id:       v.id,
         name:     v.name,
