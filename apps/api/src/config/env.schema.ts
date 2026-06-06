@@ -42,6 +42,10 @@ export const envSchema = z
     RAZORPAY_KEY_ID: z.string().default('rzp_test_placeholder'),
     RAZORPAY_KEY_SECRET: z.string().default('placeholder'),
     RAZORPAY_WEBHOOK_SECRET: z.string().default('placeholder'),
+    // RazorpayX source account number for seller payouts (0.3). Payouts only run
+    // when this is set AND the Razorpay keys are real; otherwise settlements stay
+    // pending rather than faking a payout.
+    RAZORPAYX_ACCOUNT_NUMBER: z.string().default('placeholder'),
     FCM_SERVICE_ACCOUNT_JSON: z.string().default('{}'),
     FAST2SMS_API_KEY: z.string().default('placeholder'),
     GOOGLE_MAPS_API_KEY: z.string().default('placeholder'),

@@ -99,3 +99,90 @@ export async function fetchPaymentsByOrderId(
     method: String(p['method'] ?? 'unknown'), amount: Number(p['amount']),
   }));
 }
+
+// ── RazorpayX Payouts (seller settlements — 0.3) ──────────────────────────────
+// The razorpay-node SDK doesn't wrap the RazorpayX payouts/contacts/fund-account
+// endpoints, so we call the REST API directly with Basic auth. A payout actually
+// moves money, so callers must treat a thrown error / non-"processed" status as
+// "NOT paid" and never write the ledger until status === 'processed'.
+
+const RAZORPAYX_BASE = 'https://api.razorpay.com/v1';
+
+// Payouts only run when the Razorpay keys are real AND a source account number is
+// configured. Otherwise the caller leaves the settlement pending (never faked).
+export function isPayoutConfigured(): boolean {
+  return isRazorpayConfigured() && !env.RAZORPAYX_ACCOUNT_NUMBER.includes('placeholder');
+}
+
+function authHeader(): string {
+  return 'Basic ' + Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString('base64');
+}
+
+async function razorpayXPost<T>(
+  path: string, body: unknown, extraHeaders: Record<string, string> = {},
+): Promise<T> {
+  const res = await fetch(`${RAZORPAYX_BASE}${path}`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: authHeader(), ...extraHeaders },
+    body:    JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = json['error'] as { description?: string; code?: string } | undefined;
+    throw new Error(`RazorpayX ${path} ${res.status}: ${err?.description ?? err?.code ?? res.statusText}`);
+  }
+  return json as T;
+}
+
+export interface SellerFundAccountIds { contactId: string; fundAccountId: string }
+
+// Ensure the seller has a RazorpayX contact + VPA fund account, creating only the
+// missing pieces. Returns the ids so the caller can persist them for reuse.
+export async function ensureSellerFundAccount(input: {
+  contactId: string | null; fundAccountId: string | null;
+  sellerProfileId: string; name: string; upiId: string;
+}): Promise<SellerFundAccountIds> {
+  let contactId = input.contactId;
+  if (!contactId) {
+    const contact = await razorpayXPost<{ id: string }>('/contacts', {
+      name: input.name.slice(0, 50), type: 'vendor', reference_id: input.sellerProfileId,
+    });
+    contactId = contact.id;
+  }
+
+  let fundAccountId = input.fundAccountId;
+  if (!fundAccountId) {
+    const fa = await razorpayXPost<{ id: string }>('/fund_accounts', {
+      contact_id: contactId, account_type: 'vpa', vpa: { address: input.upiId },
+    });
+    fundAccountId = fa.id;
+  }
+
+  return { contactId, fundAccountId };
+}
+
+export interface PayoutResult { payoutId: string; status: string; utr: string | null }
+
+// Create a UPI payout. `idempotencyKey` (the settlement id) makes retries safe:
+// RazorpayX returns the original payout instead of creating a duplicate.
+export async function createPayout(input: {
+  fundAccountId: string; amountPaise: number; referenceId: string;
+  narration: string; idempotencyKey: string;
+}): Promise<PayoutResult> {
+  const payout = await razorpayXPost<{ id: string; status: string; utr: string | null }>(
+    '/payouts',
+    {
+      account_number:       env.RAZORPAYX_ACCOUNT_NUMBER,
+      fund_account_id:      input.fundAccountId,
+      amount:               input.amountPaise,
+      currency:             'INR',
+      mode:                 'UPI',
+      purpose:              'payout',
+      queue_if_low_balance: true,
+      reference_id:         input.referenceId,
+      narration:            input.narration.replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 30) || 'Bringly payout',
+    },
+    { 'X-Payout-Idempotency': input.idempotencyKey },
+  );
+  return { payoutId: payout.id, status: payout.status, utr: payout.utr ?? null };
+}

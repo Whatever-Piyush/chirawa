@@ -87,5 +87,68 @@ specified.
 
 ---
 
-_Next per `fixme.MD`: **0.3** — rewrite `settlement.job.ts` `initiatePayout` (real RazorpayX payouts;
-never mark paid unless payout succeeded; no-UPI ⇒ pending + admin flag, not failed)._
+## ✅ 0.3 — Real RazorpayX payouts in `settlement.job.ts`
+
+**Commit:** _(committed with this worklog entry)_ · **Migration:** `20260606175525_settlement_payout_tracking`
+
+**Problem:** `initiatePayout` was a stub. It **logged a fake `DEV_<ts>` UTR and marked the settlement
+`paid` + wrote the ledger without any money moving** — so every settlement looked paid while sellers
+got nothing. Worse, a seller with **no UPI** was marked `failed` (wrong: it's a fixable data gap, not
+a payment failure).
+
+**Fix — real RazorpayX integration + a strict money state machine:**
+- New REST payout layer in `razorpay.service.ts` (`razorpay-node` doesn't wrap payouts): `isPayoutConfigured()`,
+  `ensureSellerFundAccount()` (contact + VPA fund-account, created once and cached), `createPayout()`
+  (Basic auth + **`X-Payout-Idempotency` header** keyed on settlement id).
+- `initiatePayout` state machine:
+  | Situation | Result |
+  |---|---|
+  | payout `processed` | `paid` + `payoutId` + `upiRef=UTR` + **ledger row** (atomic `$transaction`) |
+  | payout `queued/pending/processing` | `processing` + `payoutId`, **no ledger, not paid** |
+  | payout `rejected/cancelled/reversed` | `failed` + `needsAttention` + reason, **no ledger** |
+  | API/network throw | `failed` + `needsAttention` + reason, **no ledger** (safe to retry — idempotent) |
+  | **no UPI** on seller | stays **`pending`** + `needsAttention` + reason — **not `failed`**, no ledger |
+  | RazorpayX unconfigured (dev/test) | stays `pending` with a note — **never a fake paid** (0.2 keeps prod from hitting this) |
+- **Idempotency:** DB guard (skip if already `paid`/`processing`/has `payoutId`) + the idempotency header.
+- **Invariants held:** ledger `Transaction` and `status='paid'` happen **only** on `processed`. Money
+  sums still from order-item snapshots.
+
+**Migration (additive, no backfill):** `settlements` += `payout_id`, `failure_reason`,
+`needs_attention BOOL default false`; `seller_profiles` += `razorpay_contact_id`,
+`razorpay_fund_account_id`. New env var **`RAZORPAYX_ACCOUNT_NUMBER`** added to `env.schema.ts`
+(default `placeholder`). ⚠️ **Action for you:** set `RAZORPAYX_ACCOUNT_NUMBER` (and real `rzp_live_*`
+keys) in `apps/api/.env` before payouts run — I did **not** touch `.env` files per your instruction.
+
+**Files:** `prisma/schema.prisma` + migration, `config/env.schema.ts`, `payments/razorpay.service.ts`,
+`worker/jobs/settlement.job.ts`, `worker/jobs/__tests__/settlement.job.test.ts` (new).
+
+**Tests:** ✅ 8/8 new (processed→paid+ledger; queued→processing+no ledger; rejected→failed+flag;
+throw→failed+flag; no-UPI→pending+flag+no API call; unconfigured→no fake paid; idempotent skip;
+caches new fund-account ids). Full suite: ✅ **66/66**. Typecheck: no new errors in 0.3 files (the one
+`razorpay.service:97` error is the pre-existing `RazorpayPayment` index-signature issue in unchanged code).
+
+**Working?** State machine fully unit-verified. The **live HTTP path can't be E2E-verified without a
+funded RazorpayX test account** — verify in staging with real creds.
+
+**Verify on device / staging:**
+1. Set real `rzp_live_*` keys + `RAZORPAYX_ACCOUNT_NUMBER` in `.env`; fund the RazorpayX account.
+2. Create a delivered order for a seller **with** a `upiId`; trigger settlement (`DAILY_SETTLEMENT`
+   job or the single-seller job). Expect a `payout` in the RazorpayX dashboard; settlement →
+   `processing` then `paid` once RazorpayX reports `processed`; one `seller_settlement` ledger row.
+3. Seller **without** UPI → settlement stays `pending`, `needsAttention=true`, no payout.
+4. Re-run the job → no duplicate payout (idempotent).
+
+**Known follow-ups (flagged, not in scope):**
+- **No payout webhook yet** → a `processing` payout won't auto-flip to `paid`. Need a
+  `payout.processed`/`payout.failed` webhook handler **or** a reconcile sweep that fetches payout
+  status and finishes the transition (+ writes the ledger then). High priority before relying on payouts.
+- `processSingleSellerSettle` `upsert` returns `status` from `create` only; on an existing row it
+  returns `{}`-updated record — current `if (settlement.status === 'pending')` still works because
+  upsert returns the row, but worth a glance when the webhook lands.
+- Consider extending 0.2's prod hard-fail to `RAZORPAYX_ACCOUNT_NUMBER` once provisioned.
+
+---
+
+_Next per `fixme.MD`: **0.4** — in `reconciliation.job.ts`, after `markOrderPaid` (worker context),
+notify the seller via FCM directly + enqueue the seller auto-accept job (event bus can't cross the
+worker→API process boundary)._

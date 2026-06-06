@@ -1,6 +1,9 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Job } from 'bullmq';
 import type { SingleSellerSettlePayload } from '../queues';
+import {
+  isPayoutConfigured, ensureSellerFundAccount, createPayout,
+} from '../../modules/payments/razorpay.service';
 
 /**
  * Daily seller settlement — runs at 11 AM every day.
@@ -8,11 +11,26 @@ import type { SingleSellerSettlePayload } from '../queues';
  * For each active seller:
  * 1. Find all delivered orders from the previous day
  * 2. Sum item amounts (unit_price × quantity — SNAPSHOT values)
- * 3. Create settlement record
- * 4. Initiate UPI payout via Razorpay Payouts (or mock in dev)
- * 5. Log to transactions ledger
- * 6. Notify seller via FCM + SMS
+ * 3. Create settlement record (status: pending)
+ * 4. Initiate a real RazorpayX UPI payout (0.3)
+ * 5. Write the ledger ONLY once the payout is actually 'processed'
+ * 6. (TODO follow-up) Notify seller via FCM + SMS
  */
+
+// RazorpayX payout statuses that are accepted but not yet settled — we record the
+// payout id but do NOT mark the settlement paid or write the ledger.
+const PAYOUT_IN_FLIGHT = new Set(['queued', 'pending', 'processing', 'scheduled', 'created']);
+
+interface PayoutSeller {
+  id: string; upiId: string | null; userId: string; ownerName: string;
+  razorpayContactId: string | null; razorpayFundAccountId: string | null;
+}
+
+// Fields every caller must select so initiatePayout has what it needs.
+const sellerPayoutSelect = {
+  id: true, upiId: true, userId: true, ownerName: true,
+  razorpayContactId: true, razorpayFundAccountId: true,
+} as const;
 
 export async function runDailySettlement(prisma: PrismaClient): Promise<void> {
   const yesterday = new Date();
@@ -29,7 +47,7 @@ export async function runDailySettlement(prisma: PrismaClient): Promise<void> {
     where: { isActive: true },
     include: {
       seller: {
-        select: { id: true, upiId: true, userId: true },
+        select: sellerPayoutSelect,
       },
     },
   });
@@ -94,43 +112,122 @@ export async function runDailySettlement(prisma: PrismaClient): Promise<void> {
   console.log(`✅ Settlement done — settled: ${settled}, skipped: ${skipped}`);
 }
 
-async function initiatePayout(
+// Exported for unit testing the payout state machine (the money-critical path).
+export async function initiatePayout(
   settlementId: string,
-  seller: { id: string; upiId: string | null; userId: string },
+  seller: PayoutSeller,
   amountPaise: number,
   prisma: PrismaClient,
 ): Promise<void> {
-  // Dev mode — log mock payout
-  if (!seller.upiId) {
-    console.log(`⚠️  No UPI ID for seller ${seller.id} — skipping payout`);
-    await prisma.settlement.update({
-      where: { id: settlementId },
-      data:  { status: 'failed' },
-    });
+  // Idempotency guard — never re-pay a settlement that's already paid, in flight,
+  // or has a payout id on file. createPayout's idempotency key is the backstop.
+  const current = await prisma.settlement.findUnique({
+    where:  { id: settlementId },
+    select: { status: true, payoutId: true },
+  });
+  if (!current) return;
+  if (current.status === 'paid' || current.status === 'processing' || current.payoutId) {
+    console.log(`↩️  Settlement ${settlementId} already ${current.status} — skipping payout`);
     return;
   }
 
-  console.log(`📤 [DEV PAYOUT] Seller ${seller.id}: ₹${amountPaise / 100} → ${seller.upiId}`);
+  // No UPI on file → stays PENDING and flagged for an admin (NOT failed).
+  if (!seller.upiId) {
+    await prisma.settlement.update({
+      where: { id: settlementId },
+      data:  { status: 'pending', needsAttention: true, failureReason: 'No UPI ID on seller profile' },
+    });
+    console.warn(`⚠️  Seller ${seller.id} has no UPI — settlement ${settlementId} pending admin action`);
+    return;
+  }
 
-  // In production: call Razorpay Payouts API here
-  // const payout = await razorpayX.payouts.create({...});
+  // RazorpayX not configured (dev/test). 0.2 guarantees production can't reach
+  // here on placeholders. Leave pending — never fake a paid payout.
+  if (!isPayoutConfigured()) {
+    await prisma.settlement.update({
+      where: { id: settlementId },
+      data:  { failureReason: 'RazorpayX not configured — payout skipped (non-production)' },
+    });
+    console.log(`🧪 Payout skipped (unconfigured): settlement ${settlementId}, ₹${amountPaise / 100}`);
+    return;
+  }
 
-  // Mark as paid
-  await prisma.settlement.update({
-    where: { id: settlementId },
-    data:  { status: 'paid', paidAt: new Date(), upiRef: `DEV_${Date.now()}` },
-  });
+  try {
+    // Ensure a RazorpayX contact + VPA fund account, reusing cached ids.
+    const { contactId, fundAccountId } = await ensureSellerFundAccount({
+      contactId:       seller.razorpayContactId,
+      fundAccountId:   seller.razorpayFundAccountId,
+      sellerProfileId: seller.id,
+      name:            seller.ownerName,
+      upiId:           seller.upiId,
+    });
+    if (contactId !== seller.razorpayContactId || fundAccountId !== seller.razorpayFundAccountId) {
+      await prisma.sellerProfile.update({
+        where: { id: seller.id },
+        data:  { razorpayContactId: contactId, razorpayFundAccountId: fundAccountId },
+      });
+    }
 
-  // Log to financial ledger (append-only)
-  await prisma.transaction.create({
-    data: {
-      type:          'seller_settlement',
+    const payout = await createPayout({
+      fundAccountId,
       amountPaise,
-      referenceId:   settlementId,
-      referenceType: 'settlement',
-      description:   `Daily settlement payout to ${seller.upiId}`,
-    },
-  });
+      referenceId:    settlementId,
+      narration:      'Bringly settlement',
+      idempotencyKey: settlementId,
+    });
+
+    if (payout.status === 'processed') {
+      // Money actually moved — mark paid AND write the ledger atomically.
+      await prisma.$transaction([
+        prisma.settlement.update({
+          where: { id: settlementId },
+          data:  {
+            status: 'paid', paidAt: new Date(),
+            payoutId: payout.payoutId, upiRef: payout.utr,
+            needsAttention: false, failureReason: null,
+          },
+        }),
+        prisma.transaction.create({
+          data: {
+            type:          'seller_settlement',
+            amountPaise,
+            referenceId:   settlementId,
+            referenceType: 'settlement',
+            description:   `Daily settlement payout to ${seller.upiId}`,
+          },
+        }),
+      ]);
+      console.log(`✅ Payout processed: settlement ${settlementId} → ${seller.upiId}`);
+    } else if (PAYOUT_IN_FLIGHT.has(payout.status)) {
+      // Accepted but not settled yet — record the payout id WITHOUT marking paid
+      // or writing the ledger. A payout webhook / reconcile sweep finishes this
+      // later (see worklog follow-up).
+      await prisma.settlement.update({
+        where: { id: settlementId },
+        data:  { status: 'processing', payoutId: payout.payoutId, failureReason: null },
+      });
+      console.log(`⏳ Payout ${payout.status}: settlement ${settlementId} (payout ${payout.payoutId})`);
+    } else {
+      // rejected / cancelled / reversed / failed — flag for an admin, no ledger.
+      await prisma.settlement.update({
+        where: { id: settlementId },
+        data:  {
+          status: 'failed', payoutId: payout.payoutId,
+          needsAttention: true, failureReason: `Payout ${payout.status}`,
+        },
+      });
+      console.error(`❌ Payout ${payout.status}: settlement ${settlementId} flagged for admin`);
+    }
+  } catch (err) {
+    // API/network failure — failed + flagged. No ledger, not paid. Safe to retry:
+    // the idempotency key prevents a duplicate payout next run.
+    const reason = err instanceof Error ? err.message : 'Unknown payout error';
+    await prisma.settlement.update({
+      where: { id: settlementId },
+      data:  { status: 'failed', needsAttention: true, failureReason: reason.slice(0, 255) },
+    });
+    console.error(`❌ Payout error for settlement ${settlementId}:`, reason);
+  }
 }
 
 // ── Process single seller settle job ─────────────────────────────────────────
@@ -156,7 +253,7 @@ export async function processSingleSellerSettle(
 
   const shop = await prisma.shop.findUniqueOrThrow({
     where:   { id: shopId },
-    include: { seller: { select: { id: true, upiId: true, userId: true } } },
+    include: { seller: { select: sellerPayoutSelect } },
   });
 
   const totalProductPaise = orders.reduce((sum, order) =>

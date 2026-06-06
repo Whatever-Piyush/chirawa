@@ -146,6 +146,10 @@ model SellerProfile {
   bankAccount    String?   @map("bank_account") @db.VarChar(20)
   bankIfsc       String?   @map("bank_ifsc") @db.VarChar(15)
   gstin          String?   @db.VarChar(15)
+  // RazorpayX contact + fund-account ids, cached after first payout so we don't
+  // recreate them every settlement run (0.3).
+  razorpayContactId     String? @map("razorpay_contact_id") @db.VarChar(100)
+  razorpayFundAccountId String? @map("razorpay_fund_account_id") @db.VarChar(100)
   pinHash        String?   @map("pin_hash") @db.VarChar(60)
   pinFailCount   Int       @default(0) @map("pin_fail_count")
   pinLockedUntil DateTime? @map("pin_locked_until")
@@ -660,6 +664,12 @@ model Settlement {
   netPayablePaise   Int              @map("net_payable_paise")
   status            SettlementStatus @default(pending)
   upiRef            String?          @map("upi_ref") @db.VarChar(100)
+  // RazorpayX payout id (pout_*); set once a payout is created (0.3).
+  payoutId          String?          @map("payout_id") @db.VarChar(100)
+  // Why a settlement failed / why it needs a human — surfaced to admins.
+  failureReason     String?          @map("failure_reason") @db.VarChar(255)
+  // Admin attention flag: no UPI on file, or a payout failed/needs intervention.
+  needsAttention    Boolean          @default(false) @map("needs_attention")
   paidAt            DateTime?        @map("paid_at")
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
