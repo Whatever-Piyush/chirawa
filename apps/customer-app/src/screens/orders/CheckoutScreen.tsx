@@ -721,7 +721,7 @@ export default function CheckoutScreen({ navigation }: Props) {
             keyId={rzpData.keyId}
             razorpayOrderId={rzpData.razorpayOrderId}
             amountPaise={rzpData.amountPaise}
-            merchantName="Chirawa"
+            merchantName="Bringly"
             description={t('checkout.title')}
             themeColor={Colors.primary}
             prefill={{
@@ -755,11 +755,12 @@ const makeStyles = (Colors: ColorPalette) =>
 
   section: {
     backgroundColor: Colors.card, marginHorizontal: Spacing.lg, marginTop: Spacing.md,
-    borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.md, ...Shadow.card,
+    borderRadius: Radius.xl, padding: Spacing.lg, gap: Spacing.md,
+    borderWidth: 1, borderColor: 'rgba(0,0,0,0.04)', ...Shadow.md,
   },
   sectionNoBottomPad: { paddingBottom: Spacing.md },
   sectionNoTopPad: { marginTop: Spacing.md },
-  cardTitle: { fontSize: FontSize.lg, fontWeight: '800', color: Colors.text },
+  cardTitle: { fontSize: FontSize.lg, fontWeight: '800', color: Colors.text, letterSpacing: -0.3 },
   sectionSub: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '700', marginTop: 2 },
 
   // Savings nudge
@@ -798,8 +799,8 @@ const makeStyles = (Colors: ColorPalette) =>
   pinCircle: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primaryLight, justifyContent: 'center', alignItems: 'center' },
 
   addressList: { gap: 10, marginTop: 2 },
-  addressCard: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.lg, padding: 14, backgroundColor: Colors.surface, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  addressCardSelected: { borderWidth: 2, borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  addressCard: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.lg, padding: 14, backgroundColor: Colors.surface, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, ...Shadow.xs },
+  addressCardSelected: { borderWidth: 2, borderColor: Colors.primary, backgroundColor: Colors.primaryLight, ...Shadow.sm },
   addressCardLeft: { flex: 1, gap: 2 },
   addressLabel: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textPrimary, marginBottom: 2 },
   addressDefaultInline: { fontSize: FontSize.xs, color: Colors.success, fontWeight: FontWeight.semibold },
@@ -831,9 +832,11 @@ const makeStyles = (Colors: ColorPalette) =>
   pricingLabel: { fontSize: FontSize.md, color: Colors.textLight },
   pricingValue: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
   pricingMuted: { fontSize: FontSize.sm, color: Colors.textMuted, fontStyle: 'italic' },
-  totalRow: { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: Spacing.sm, marginTop: Spacing.xs },
-  totalLabel: { fontSize: FontSize.lg, fontWeight: '800', color: Colors.text },
-  totalValue: { fontSize: FontSize.lg, fontWeight: '900', color: Colors.primary },
+  totalRow: {
+    borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: Spacing.md, marginTop: Spacing.sm,
+  },
+  totalLabel: { fontSize: FontSize.xl, fontWeight: '900', color: Colors.text, letterSpacing: -0.3 },
+  totalValue: { fontSize: FontSize.xxl, fontWeight: '900', color: Colors.primary, letterSpacing: -0.5 },
 
   // Payment cards
   payCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, backgroundColor: Colors.surface, padding: Spacing.md, minHeight: 72 },
@@ -855,8 +858,9 @@ const makeStyles = (Colors: ColorPalette) =>
   // Sticky bottom
   stickyBottom: {
     position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: Colors.white,
-    borderTopWidth: 1, borderTopColor: Colors.border, paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, gap: Spacing.md,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -3 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 8,
+    borderTopLeftRadius: Radius.xxl, borderTopRightRadius: Radius.xxl,
+    paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg, gap: Spacing.md,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.14, shadowRadius: 18, elevation: 16,
   },
   addrBar: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   addrBarTitle: { fontSize: FontSize.sm, color: Colors.text },
@@ -870,7 +874,7 @@ const makeStyles = (Colors: ColorPalette) =>
   payUsingValue: { fontSize: FontSize.sm, color: Colors.text, fontWeight: '700', marginTop: 1 },
   placeOrderBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 56, paddingHorizontal: Spacing.lg, ...Shadow.primary,
+    backgroundColor: Colors.primary, borderRadius: Radius.xl, height: 60, paddingHorizontal: Spacing.lg, ...Shadow.primary,
   },
   placeBtnDisabled: { opacity: 0.5 },
   placeTotalRs: { color: Colors.white, fontSize: FontSize.lg, fontWeight: '900', lineHeight: 20 },
@@ -884,11 +888,11 @@ const makeStyles = (Colors: ColorPalette) =>
   // Payment method selector
   payOption: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    paddingVertical: Spacing.md, paddingHorizontal: Spacing.md,
-    borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border,
-    backgroundColor: Colors.surface, marginTop: Spacing.sm,
+    paddingVertical: Spacing.lg, paddingHorizontal: Spacing.md,
+    borderRadius: Radius.lg, borderWidth: 1.5, borderColor: Colors.border,
+    backgroundColor: Colors.surface, marginTop: Spacing.md,
   },
-  payOptionSelected: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  payOptionSelected: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight, ...Shadow.xs },
   payOptionTitle: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
   payOptionHint:  { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 1 },
   payRadio: {

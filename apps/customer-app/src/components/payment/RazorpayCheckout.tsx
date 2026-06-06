@@ -57,6 +57,18 @@ function buildHtml(opts: {
       description: ${JSON.stringify(opts.description)},
       prefill: ${JSON.stringify(opts.prefill)},
       theme: { color: ${JSON.stringify(opts.themeColor)} },
+      // UPI only — zero MDR (cards/wallets/netbanking carry a ~2% fee). Hide every
+      // other method and surface just the UPI block.
+      method: { upi: true, card: false, netbanking: false, wallet: false, paylater: false, emi: false },
+      config: {
+        display: {
+          blocks: {
+            upi: { name: "Pay using UPI", instruments: [{ method: "upi" }] }
+          },
+          sequence: ["block.upi"],
+          preferences: { show_default_blocks: false }
+        }
+      },
       handler: function (response) {
         post({
           type: "success",

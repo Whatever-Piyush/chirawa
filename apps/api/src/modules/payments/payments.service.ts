@@ -33,6 +33,54 @@ export function createPaymentsService(prisma: PrismaClient) {
     return { razorpayOrderId: rzpOrder.id, razorpayKeyId: env.RAZORPAY_KEY_ID, amountPaise: order.totalAmount, currency: 'INR', isDev: false };
   }
 
+  /**
+   * A multi-shop cart is split into one order PER shop at checkout. This creates
+   * a SINGLE Razorpay order for the grand total of all of them (so the customer
+   * pays once for everything), with one Payment row per order sharing that
+   * razorpayOrderId. Verification/webhook then settle every linked order.
+   */
+  async function createCartPaymentOrder(orderIds: string[], userId: string) {
+    const orders = await prisma.order.findMany({ where: { id: { in: orderIds }, customerId: userId } });
+    if (orders.length === 0) throw new NotFoundError('Order');
+    const payable = orders.filter((o) => o.status === 'pending_payment');
+    if (payable.length === 0) throw new BusinessRuleError('Order payment already processed');
+
+    const grandTotal = payable.reduce((s, o) => s + o.totalAmount, 0);
+
+    const razorpayOrderId = isRazorpayConfigured()
+      ? (await createRazorpayOrder(grandTotal, payable[0]!.id)).id
+      : `order_DEV_${Date.now()}`;
+
+    // One Payment row per order, all sharing the single razorpayOrderId.
+    await prisma.$transaction(
+      payable.map((o) => prisma.payment.create({
+        data: { orderId: o.id, razorpayOrderId, status: 'pending', amountPaise: o.totalAmount },
+      })),
+    );
+
+    return {
+      razorpayOrderId,
+      razorpayKeyId: env.RAZORPAY_KEY_ID,
+      amountPaise:   grandTotal,
+      currency:      'INR',
+      isDev:         !isRazorpayConfigured(),
+    };
+  }
+
+  // Mark every order linked to a razorpayOrderId as paid (idempotent).
+  async function settleOrdersForRazorpayOrder(razorpayOrderId: string, paymentId: string, method: string) {
+    const payments = await prisma.payment.findMany({
+      where: { razorpayOrderId }, select: { orderId: true },
+    });
+    const orderIds = [...new Set(payments.map((p) => p.orderId))];
+    for (const id of orderIds) {
+      const o = await prisma.order.findUnique({ where: { id }, select: { status: true } });
+      if (o && !['paid', 'confirmed', 'delivered'].includes(o.status)) {
+        await markOrderPaid(prisma, id, paymentId, method);
+      }
+    }
+  }
+
   async function verifyClientPayment(
     orderId: string, userId: string,
     razorpayOrderId: string, razorpayPaymentId: string, signature: string,
@@ -43,15 +91,13 @@ export function createPaymentsService(prisma: PrismaClient) {
     if (['paid', 'confirmed', 'delivered'].includes(order.status)) {
       return { success: true, message: 'Payment already confirmed' };
     }
-    if (!isRazorpayConfigured()) {
-      await markOrderPaid(prisma, orderId, razorpayPaymentId, 'upi');
-      return { success: true, message: 'Payment confirmed (dev mode)' };
-    }
-    if (!verifyPaymentSignature(razorpayOrderId, razorpayPaymentId, signature)) {
+    if (isRazorpayConfigured() && !verifyPaymentSignature(razorpayOrderId, razorpayPaymentId, signature)) {
       throw new PaymentError('Payment signature invalid');
     }
-    await markOrderPaid(prisma, orderId, razorpayPaymentId, 'upi');
-    return { success: true, message: 'Payment confirmed' };
+    // Settle EVERY order in this payment group, not just the one the client named —
+    // a multi-shop cart pays once but produced several orders.
+    await settleOrdersForRazorpayOrder(razorpayOrderId, razorpayPaymentId, 'upi');
+    return { success: true, message: isRazorpayConfigured() ? 'Payment confirmed' : 'Payment confirmed (dev mode)' };
   }
 
   async function processWebhook(rawBody: string, signature: string) {
@@ -73,8 +119,8 @@ export function createPaymentsService(prisma: PrismaClient) {
     if (eventType === 'payment.captured') {
       const entity  = event.payload.payment?.entity;
       if (entity) {
-        const payment = await prisma.payment.findFirst({ where: { razorpayOrderId: entity.order_id } });
-        if (payment) await markOrderPaid(prisma, payment.orderId, entity.id, entity.method);
+        // Settle every order linked to this Razorpay order (multi-shop carts).
+        await settleOrdersForRazorpayOrder(entity.order_id, entity.id, entity.method);
       }
     }
 
@@ -152,7 +198,7 @@ export function createPaymentsService(prisma: PrismaClient) {
     return reconciled;
   }
 
-  return { createPaymentOrder, verifyClientPayment, processWebhook, initiateRefund, reconcilePendingPayments };
+  return { createPaymentOrder, createCartPaymentOrder, verifyClientPayment, processWebhook, initiateRefund, reconcilePendingPayments };
 }
 
 // ── Auto-refund helper (Chunk 3.5) ──────────────────────────────────────────

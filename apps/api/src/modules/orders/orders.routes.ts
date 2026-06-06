@@ -19,7 +19,10 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
     const order = await ordersService.placeOrder(request.auth!.userId, parsed.data);
 
     if (parsed.data.paymentMethod !== 'cod') {
-      const payment = await paymentsService.createPaymentOrder(order.orderId, request.auth!.userId);
+      // A multi-shop cart produced one order per shop; charge the grand total of
+      // ALL of them in a single Razorpay order (previously only the primary order
+      // was charged, undercharging multi-shop carts).
+      const payment = await paymentsService.createCartPaymentOrder(order.orderIds, request.auth!.userId);
       return reply.status(201).send({ ...order, razorpayOrderId: payment.razorpayOrderId, razorpayKeyId: payment.razorpayKeyId, amountPaise: payment.amountPaise });
     }
     return reply.status(201).send(order);
