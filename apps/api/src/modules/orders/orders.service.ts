@@ -417,6 +417,34 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     return { message: 'Cash collection confirm ho gaya' };
   }
 
+  // Rider marks a non-COD (prepaid) order delivered. Mirrors codCollected — same
+  // status + deliveredAt + history + ORDER_STATUS_CHANGED — but there is no cash
+  // to record, so it never touches codCollectedPaise / the rider's COD balance.
+  // COD orders MUST go through codCollected (which records the cash), so they are
+  // rejected here; this is the symmetric counterpart of codCollected's non-COD guard.
+  async function markDelivered(orderId: string, riderId: string) {
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundError('Order');
+    if (order.riderId !== riderId) throw new ForbiddenError('Not your delivery');
+    if (order.paymentMethod === 'cod') throw new BusinessRuleError('COD order: cash collection confirm karein');
+
+    await prisma.$transaction([
+      prisma.order.update({
+        where: { id: orderId },
+        data:  { status: 'delivered', deliveredAt: new Date() },
+      }),
+      prisma.orderStatusHistory.create({
+        data: { orderId, status: 'delivered', changedByRole: 'rider', changedById: riderId },
+      }),
+    ]);
+
+    emitOrderStatusChanged({
+      orderId, status: 'delivered',
+      shopId: order.shopId, sellerId: '', riderId, customerId: order.customerId,
+    });
+    return { message: 'Order delivered confirm ho gaya' };
+  }
+
   // ── Customer rating ──────────────────────────────────────────────────────
 
   async function rateOrder(
@@ -444,10 +472,66 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     });
   }
 
+  // Statuses where the customer can still edit the delivery address / receiver —
+  // only before the rider picks the order up.
+  const EDITABLE_STATUSES = new Set(['pending_payment', 'paid', 'confirmed', 'preparing']);
+
+  async function updateDeliveryAddress(orderId: string, userId: string, addressId: string) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId }, select: { id: true, customerId: true, status: true },
+    });
+    if (!order) throw new NotFoundError('Order');
+    if (order.customerId !== userId) throw new ForbiddenError('Not your order');
+    if (!EDITABLE_STATUSES.has(order.status)) {
+      throw new BusinessRuleError('Address can no longer be changed for this order');
+    }
+
+    const address = await prisma.address.findUnique({ where: { id: addressId } });
+    if (!address || address.userId !== userId) throw new NotFoundError('Address');
+
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        addressId:        address.id,
+        deliveryStreet:   address.street,
+        deliveryLandmark: address.landmark,
+        deliveryLocality: address.locality,
+        deliveryCity:     address.city,
+        deliveryPincode:  address.pincode,
+        deliveryLat:      address.lat,
+        deliveryLng:      address.lng,
+      },
+    });
+    return { message: 'Delivery address updated' };
+  }
+
+  async function updateReceiver(orderId: string, userId: string, name: string, phone: string) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId }, select: { id: true, customerId: true, status: true },
+    });
+    if (!order) throw new NotFoundError('Order');
+    if (order.customerId !== userId) throw new ForbiddenError('Not your order');
+    if (!EDITABLE_STATUSES.has(order.status)) {
+      throw new BusinessRuleError('Receiver can no longer be changed for this order');
+    }
+
+    const cleanName  = name.trim().slice(0, 100);
+    const cleanPhone = phone.replace(/[^0-9]/g, '').slice(0, 15);
+    if (!cleanName) throw new ValidationError('Receiver name is required');
+    if (cleanPhone.length < 10) throw new ValidationError('A valid phone number is required');
+
+    await prisma.order.update({
+      where: { id: orderId },
+      data:  { receiverName: cleanName, receiverPhone: cleanPhone },
+    });
+    return { message: 'Receiver contact updated', receiverName: cleanName, receiverPhone: cleanPhone };
+  }
+
   return {
     placeOrder, getOrder, getMyOrders, updateOrderStatus,
     sellerAcceptOrder, sellerRejectOrder, sellerMarkPreparing, sellerMarkReady,
-    cancelOrder, codCollected, rateOrder, autoAcceptOrder,
+    cancelOrder, codCollected, markDelivered, rateOrder, autoAcceptOrder,
+    updateDeliveryAddress, updateReceiver,
   };
 }
 

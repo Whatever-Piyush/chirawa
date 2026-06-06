@@ -95,6 +95,16 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
     },
   );
 
+  // POST /api/v1/orders/:id/delivered — rider marks a non-COD (prepaid) order
+  // delivered. COD orders use /cod-collected instead (records the cash).
+  app.post('/:id/delivered',
+    { preHandler: [requireRole('rider')] },
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+      const result = await ordersService.markDelivered(request.params.id, request.auth!.userId);
+      return reply.send(result);
+    },
+  );
+
   // ── Customer post-delivery rating ─────────────────────────────────────────
 
   // POST /api/v1/orders/:id/rating
@@ -111,6 +121,36 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
         parsed.data.rating,
         parsed.data.comment,
       );
+      return reply.send(result);
+    },
+  );
+
+  // ── Customer: change delivery address (before pickup) ─────────────────────
+
+  // PATCH /api/v1/orders/:id/delivery-address  { addressId }
+  app.patch('/:id/delivery-address',
+    { preHandler: [requireRole('customer')] },
+    async (request: FastifyRequest<{ Params: { id: string }; Body: { addressId?: unknown } }>, reply) => {
+      const { addressId } = request.body;
+      if (typeof addressId !== 'string' || !addressId) {
+        throw new ValidationError('addressId is required');
+      }
+      const result = await ordersService.updateDeliveryAddress(request.params.id, request.auth!.userId, addressId);
+      return reply.send(result);
+    },
+  );
+
+  // ── Customer: update receiver contact (before pickup) ─────────────────────
+
+  // PATCH /api/v1/orders/:id/receiver  { name, phone }
+  app.patch('/:id/receiver',
+    { preHandler: [requireRole('customer')] },
+    async (request: FastifyRequest<{ Params: { id: string }; Body: { name?: unknown; phone?: unknown } }>, reply) => {
+      const { name, phone } = request.body;
+      if (typeof name !== 'string' || typeof phone !== 'string') {
+        throw new ValidationError('name and phone are required');
+      }
+      const result = await ordersService.updateReceiver(request.params.id, request.auth!.userId, name, phone);
       return reply.send(result);
     },
   );
