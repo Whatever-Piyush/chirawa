@@ -54,8 +54,15 @@ describe('inventory.service — products (1.1 / 1.5)', () => {
     expect(out.id).toBe('prod_new');
   });
 
-  it('derives out_of_stock when stockQty is 0 (or omitted)', async () => {
+  it('leaves stock untracked (no stockQty/status forced) when stockQty omitted', async () => {
     await svc(p).createProduct({ shopId: SHOP, name: 'Atta', pricePaise: 100 }, sellerAuth);
+    const data = p.prisma.product.create.mock.calls[0]![0].data as Record<string, unknown>;
+    expect(data).not.toHaveProperty('stockQty');
+    expect(data).not.toHaveProperty('stockStatus');
+  });
+
+  it('tracks stock and derives out_of_stock when stockQty is explicitly 0', async () => {
+    await svc(p).createProduct({ shopId: SHOP, name: 'Atta', pricePaise: 100, stockQty: 0 }, sellerAuth);
     expect(p.prisma.product.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ stockQty: 0, stockStatus: 'out_of_stock' }) }),
     );

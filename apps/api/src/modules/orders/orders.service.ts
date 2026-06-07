@@ -24,6 +24,49 @@ interface CartData {
   }>;
 }
 
+// Minimal slice of the Prisma (transaction) client this helper needs — lets it
+// be unit-tested with a fake tx.
+interface StockTx {
+  product: {
+    updateMany: (args: unknown) => Promise<{ count: number }>;
+    findUnique: (args: unknown) => Promise<{ stockQty: number | null; name: string } | null>;
+  };
+}
+
+/**
+ * Oversell protection (Phase 1.5). For each line, atomically decrement the
+ * product's numeric stock IF it opted in (stockQty != null). The conditional
+ * `gte` never matches a null (untracked) row, so `count === 0` means either the
+ * product is untracked (allowed — skip) or there isn't enough stock (reject the
+ * whole order via BusinessRuleError). On hitting zero, flip to out_of_stock.
+ * Must be called inside the checkout $transaction so a reject rolls everything back.
+ */
+export async function decrementStockOrThrow(
+  tx: StockTx,
+  items: Array<{ productId: string; quantity: number }>,
+): Promise<void> {
+  for (const item of items) {
+    const dec = await tx.product.updateMany({
+      where: { id: item.productId, stockQty: { gte: item.quantity } },
+      data:  { stockQty: { decrement: item.quantity } },
+    });
+    if (dec.count === 0) {
+      const prod = await tx.product.findUnique({
+        where: { id: item.productId }, select: { stockQty: true, name: true },
+      });
+      if (prod?.stockQty != null) {
+        throw new BusinessRuleError(`${prod.name}: sirf ${prod.stockQty} stock bacha hai`);
+      }
+      // untracked product → nothing to decrement, continue
+    } else {
+      await tx.product.updateMany({
+        where: { id: item.productId, stockQty: 0 },
+        data:  { stockStatus: 'out_of_stock' },
+      });
+    }
+  }
+}
+
 export function createOrdersService(prisma: PrismaClient, redis: Redis) {
 
   async function placeOrder(userId: string, input: PlaceOrderInput) {
@@ -147,6 +190,10 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
             quantity: item.quantity, subtotal: item.subtotal,
           })),
         });
+
+        // Oversell protection (Phase 1.5) for products that opted into numeric stock.
+        await decrementStockOrThrow(tx, p.items);
+
         await tx.orderStatusHistory.create({
           data: { orderId: newOrder.id, status: initStatus, changedByRole: 'customer', changedById: userId },
         });

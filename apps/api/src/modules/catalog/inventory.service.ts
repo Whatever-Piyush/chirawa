@@ -57,21 +57,25 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis) {
     await assertShopOwner(input.shopId, auth);
     if (input.categoryId) await assertCategoryInShop(input.categoryId, input.shopId);
 
-    const qty = input.stockQty ?? 0;
-    const product = await prisma.product.create({
-      data: {
-        shopId:      input.shopId,
-        name:        input.name,
-        price:       input.pricePaise,
-        mrpPaise:    input.mrpPaise ?? null,
-        unit:        input.unit ?? null,
-        categoryId:  input.categoryId ?? null,
-        description: input.description ?? null,
-        stockQty:    qty,
-        stockStatus: statusForQty(qty),
-        ...(input.imageUrl ? { images: { create: { url: input.imageUrl, sortOrder: 0 } } } : {}),
-      },
-    });
+    // Numeric stock is opt-in: only set stockQty (and derive status from it) when
+    // the seller provides one. Otherwise the product is status-only (untracked).
+    const data: Prisma.ProductUncheckedCreateInput = {
+      shopId:      input.shopId,
+      name:        input.name,
+      price:       input.pricePaise,
+      mrpPaise:    input.mrpPaise ?? null,
+      unit:        input.unit ?? null,
+      categoryId:  input.categoryId ?? null,
+      description: input.description ?? null,
+    };
+    if (input.stockQty != null) {
+      data.stockQty    = input.stockQty;
+      data.stockStatus = statusForQty(input.stockQty);
+    }
+    if (input.imageUrl) {
+      data.images = { create: { url: input.imageUrl, sortOrder: 0 } };
+    }
+    const product = await prisma.product.create({ data });
     await invalidate(input.shopId);
     return product;
   }
