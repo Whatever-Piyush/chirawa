@@ -275,6 +275,10 @@ model Product {
   description String?     @db.Text
   price       Int
   mrpPaise    Int?        @map("mrp_paise")
+  // Numeric stock (Phase 1.5). 0 => out_of_stock; decremented inside checkout to
+  // prevent over-selling. Variants carry their own stockQty.
+  stockQty    Int         @default(0) @map("stock_qty")
+  lowStockAt  Int?        @map("low_stock_at")
   stockStatus StockStatus @default(available) @map("stock_status")
   isActive    Boolean     @default(true) @map("is_active")
   sortOrder   Int         @default(0) @map("sort_order")
