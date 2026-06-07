@@ -5,6 +5,7 @@ import { placeOrderSchema, rateOrderSchema, type PlaceOrderInput, type RateOrder
 import { authenticate, requireRole } from '../../shared/middleware/auth.middleware';
 import { ValidationError } from '../../shared/errors/app-errors';
 import { runIdempotent, readIdempotencyKey } from '../../shared/utils/idempotency';
+import { perUserRateLimit } from '../../shared/middleware/rate-limit';
 
 export default async function ordersRoutes(app: FastifyInstance): Promise<void> {
   const ordersService   = createOrdersService(app.prisma, app.redis);
@@ -12,8 +13,8 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
 
   app.addHook('preHandler', authenticate);
 
-  // POST /api/v1/orders
-  app.post('/', async (request: FastifyRequest<{ Body: PlaceOrderInput }>, reply) => {
+  // POST /api/v1/orders — per-user cap on checkout (4.8) on top of the global per-IP limit.
+  app.post('/', perUserRateLimit(20, '1 minute'), async (request: FastifyRequest<{ Body: PlaceOrderInput }>, reply) => {
     const parsed = placeOrderSchema.safeParse(request.body);
     if (!parsed.success) throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid input');
 

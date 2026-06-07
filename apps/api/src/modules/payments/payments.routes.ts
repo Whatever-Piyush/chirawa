@@ -5,6 +5,7 @@ import {
 } from '../../shared/middleware/auth.middleware';
 import { verifyWebhookSignature } from './razorpay.service';
 import { ValidationError, AuthenticationError } from '../../shared/errors/app-errors';
+import { perUserRateLimit } from '../../shared/middleware/rate-limit';
 import { z } from 'zod';
 
 const verifyPaymentSchema = z.object({
@@ -20,7 +21,7 @@ export default async function paymentsRoutes(app: FastifyInstance): Promise<void
   // Create Razorpay payment order for a placed order
   app.post(
     '/orders/:orderId',
-    { preHandler: [authenticate] },
+    { ...perUserRateLimit(30, '1 minute'), preHandler: [authenticate] },
     async (
       request: FastifyRequest<{ Params: { orderId: string } }>,
       reply: FastifyReply,
@@ -37,7 +38,7 @@ export default async function paymentsRoutes(app: FastifyInstance): Promise<void
   // Client calls this after Razorpay checkout completes
   app.post(
     '/verify/:orderId',
-    { preHandler: [authenticate] },
+    { ...perUserRateLimit(30, '1 minute'), preHandler: [authenticate] },
     async (
       request: FastifyRequest<{
         Params: { orderId: string };

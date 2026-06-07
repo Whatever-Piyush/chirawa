@@ -128,7 +128,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     });
   });
 
-  // ── Health Check ──────────────────────────────────────────────────────────
+  // ── Liveness (/health) — process is up. Used by PM2/uptime pings. ───────────
   app.get('/health',
     { config: { rateLimit: { max: 300, timeWindow: '1 minute' } } },
     async (_req, reply) => reply.send({
@@ -137,6 +137,24 @@ export async function buildApp(): Promise<FastifyInstance> {
       uptimeSeconds: Math.floor(process.uptime()),
       environment: env.NODE_ENV,
     }),
+  );
+
+  // ── Readiness (/ready) — DB + Redis reachable (4.4). Returns 503 if not, so a
+  // load balancer / PM2 doesn't route traffic to a half-booted instance. ───────
+  app.get('/ready',
+    { config: { rateLimit: { max: 300, timeWindow: '1 minute' } } },
+    async (_req, reply) => {
+      const [db, redis] = await Promise.all([
+        app.prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false),
+        app.redis.ping().then((r) => r === 'PONG').catch(() => false),
+      ]);
+      const ready = db && redis;
+      return reply.status(ready ? 200 : 503).send({
+        status: ready ? 'ready' : 'not_ready',
+        checks: { database: db, redis },
+        timestamp: new Date().toISOString(),
+      });
+    },
   );
 
   // ── Module Routes ─────────────────────────────────────────────────────────
