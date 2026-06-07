@@ -1,30 +1,42 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, FlatList, Switch, StyleSheet,
-  ActivityIndicator, Alert,
+  View, Text, FlatList, Switch, StyleSheet, ActivityIndicator, Alert,
+  Modal, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
-import { SellerApi } from '../../services/api.service';
+import { SellerApi, type ProductInput } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
 
 interface Product {
   id: string; name: string; stockStatus: string;
-  price: number; unit: string | null;
+  price: number; mrpPaise: number | null; unit: string | null;
+  categoryId?: string | null;
 }
 interface Category { id: string; name: string; products: Product[] }
 interface ShopData  { id: string; name: string; categories: Category[] }
 
+// Form state for add/edit. Strings (rupees) — converted to paise on save.
+interface FormState {
+  name: string; priceRupees: string; mrpRupees: string;
+  unit: string; stockQty: string; categoryId: string | null;
+}
+const EMPTY_FORM: FormState = { name: '', priceRupees: '', mrpRupees: '', unit: '', stockQty: '', categoryId: null };
+
 export default function StockScreen() {
-  const { state }                   = useAuth();
-  const [shop,    setShop]          = useState<ShopData | null>(null);
-  const [loading, setLoading]       = useState(true);
-  const [updating, setUpdating]     = useState<string | null>(null);
+  const { state }               = useAuth();
+  const [shop, setShop]         = useState<ShopData | null>(null);
+  const [loading, setLoading]   = useState(true);
+  const [updating, setUpdating] = useState<string | null>(null);
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm]           = useState<FormState>(EMPTY_FORM);
+  const [newCategory, setNewCategory] = useState('');
+  const [saving, setSaving]       = useState(false);
 
   const loadShop = useCallback(async () => {
     if (!state.token || !state.userId) return;
     try {
-      // Get seller's shop via orders endpoint — shop comes from profile
-      // For now get all orders to find shopId
       const orders = await SellerApi.getOrders(state.token) as Array<{ shopId: string }>;
       const shopId = orders[0]?.shopId;
       if (!shopId) { setLoading(false); return; }
@@ -53,15 +65,96 @@ export default function StockScreen() {
     }
   }
 
-  const allProducts = shop?.categories.flatMap((c) => c.products) ?? [];
+  function openAdd() {
+    setEditingId(null); setForm(EMPTY_FORM); setNewCategory(''); setModalOpen(true);
+  }
+  function openEdit(p: Product) {
+    setEditingId(p.id);
+    setForm({
+      name: p.name,
+      priceRupees: String(Math.round(p.price / 100)),
+      mrpRupees:   p.mrpPaise != null ? String(Math.round(p.mrpPaise / 100)) : '',
+      unit:        p.unit ?? '',
+      stockQty:    '',
+      categoryId:  p.categoryId ?? null,
+    });
+    setNewCategory(''); setModalOpen(true);
+  }
+
+  async function save() {
+    if (!state.token || !shop) return;
+    const name  = form.name.trim();
+    const price = Number(form.priceRupees);
+    if (!name)                       { Alert.alert('Galti', 'Product ka naam likhein'); return; }
+    if (!Number.isFinite(price) || price < 0) { Alert.alert('Galti', 'Sahi price likhein'); return; }
+    const mrp = form.mrpRupees.trim() === '' ? undefined : Number(form.mrpRupees);
+    if (mrp !== undefined && (!Number.isFinite(mrp) || mrp < price)) {
+      Alert.alert('Galti', 'MRP price se kam nahi ho sakta'); return;
+    }
+    const qty = form.stockQty.trim() === '' ? undefined : Number(form.stockQty);
+
+    setSaving(true);
+    try {
+      let categoryId = form.categoryId ?? undefined;
+      // Create a new category on the fly if one was typed.
+      if (newCategory.trim()) {
+        const cat = await SellerApi.createCategory(shop.id, newCategory.trim(), state.token);
+        categoryId = cat.id;
+      }
+      const base: Partial<ProductInput> = {
+        name,
+        pricePaise: Math.round(price * 100),
+        ...(mrp !== undefined ? { mrpPaise: Math.round(mrp * 100) } : {}),
+        ...(form.unit.trim() ? { unit: form.unit.trim() } : {}),
+        ...(categoryId ? { categoryId } : {}),
+        ...(qty !== undefined ? { stockQty: qty } : {}),
+      };
+      if (editingId) {
+        await SellerApi.updateProduct(editingId, base, state.token);
+      } else {
+        await SellerApi.createProduct({ shopId: shop.id, ...base } as ProductInput, state.token);
+      }
+      setModalOpen(false);
+      await loadShop();
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Save nahi hua');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function confirmDelete(p: Product) {
+    Alert.alert('Product hatayein?', `"${p.name}" ko inventory se hata dein?`, [
+      { text: 'Nahi', style: 'cancel' },
+      { text: 'Haan, hatayein', style: 'destructive', onPress: () => void doDelete(p.id) },
+    ]);
+  }
+  async function doDelete(productId: string) {
+    if (!state.token) return;
+    try { await SellerApi.deleteProduct(productId, state.token); await loadShop(); }
+    catch (e: unknown) { Alert.alert('Error', e instanceof Error ? e.message : 'Delete nahi hua'); }
+  }
+
+  const allProducts = shop?.categories.flatMap((c) =>
+    c.products.map((p) => ({ ...p, categoryId: c.id })),
+  ) ?? [];
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.accent} size="large" /></View>;
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Stock Management</Text>
-        <Text style={styles.headerSub}>{allProducts.filter((p) => p.stockStatus === 'available').length}/{allProducts.length} available</Text>
+        <View>
+          <Text style={styles.headerTitle}>Inventory</Text>
+          <Text style={styles.headerSub}>
+            {allProducts.filter((p) => p.stockStatus === 'available').length}/{allProducts.length} available
+          </Text>
+        </View>
+        {shop && (
+          <Pressable style={styles.addBtn} onPress={openAdd}>
+            <Text style={styles.addBtnText}>+ Add</Text>
+          </Pressable>
+        )}
       </View>
 
       {!shop
@@ -70,12 +163,15 @@ export default function StockScreen() {
             data={allProducts}
             keyExtractor={(p) => p.id}
             contentContainerStyle={{ padding: Spacing.lg, gap: Spacing.sm }}
+            ListEmptyComponent={<Text style={styles.empty}>Abhi koi product nahi. "+ Add" dabayein.</Text>}
             renderItem={({ item }) => (
-              <View style={styles.productRow}>
+              <Pressable style={styles.productRow} onPress={() => openEdit(item)} onLongPress={() => confirmDelete(item)}>
                 <View style={styles.productInfo}>
                   <Text style={styles.productName}>{item.name}</Text>
                   <Text style={styles.productPrice}>
-                    ₹{Math.round(item.price / 100)}{item.unit ? ` / ${item.unit}` : ''}
+                    ₹{Math.round(item.price / 100)}
+                    {item.mrpPaise ? <Text style={styles.mrp}>  ₹{Math.round(item.mrpPaise / 100)}</Text> : null}
+                    {item.unit ? ` / ${item.unit}` : ''}
                   </Text>
                 </View>
                 {updating === item.id
@@ -87,10 +183,71 @@ export default function StockScreen() {
                       thumbColor={Colors.white}
                     />
                 }
-              </View>
+              </Pressable>
             )}
           />
       }
+
+      {/* ── Add / Edit product modal ───────────────────────────────────────── */}
+      <Modal visible={modalOpen} animationType="slide" transparent onRequestClose={() => setModalOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalRoot}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>{editingId ? 'Product Edit' : 'Naya Product'}</Text>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              <Field label="Naam *" value={form.name} onChangeText={(name) => setForm((f) => ({ ...f, name }))} placeholder="e.g. Aashirvaad Atta" />
+              <View style={styles.row}>
+                <View style={styles.flex1}><Field label="Price ₹ *" value={form.priceRupees} onChangeText={(priceRupees) => setForm((f) => ({ ...f, priceRupees }))} keyboardType="numeric" placeholder="285" /></View>
+                <View style={styles.flex1}><Field label="MRP ₹" value={form.mrpRupees} onChangeText={(mrpRupees) => setForm((f) => ({ ...f, mrpRupees }))} keyboardType="numeric" placeholder="320" /></View>
+              </View>
+              <View style={styles.row}>
+                <View style={styles.flex1}><Field label="Unit" value={form.unit} onChangeText={(unit) => setForm((f) => ({ ...f, unit }))} placeholder="5 kg" /></View>
+                <View style={styles.flex1}><Field label="Stock qty" value={form.stockQty} onChangeText={(stockQty) => setForm((f) => ({ ...f, stockQty }))} keyboardType="numeric" placeholder="optional" /></View>
+              </View>
+
+              <Text style={styles.fieldLabel}>Category</Text>
+              <View style={styles.chips}>
+                {shop?.categories.map((c) => (
+                  <Pressable key={c.id}
+                    style={[styles.chip, form.categoryId === c.id && styles.chipActive]}
+                    onPress={() => setForm((f) => ({ ...f, categoryId: f.categoryId === c.id ? null : c.id }))}>
+                    <Text style={[styles.chipText, form.categoryId === c.id && styles.chipTextActive]}>{c.name}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Field label="…ya nayi category" value={newCategory} onChangeText={setNewCategory} placeholder="Nayi category ka naam" />
+            </ScrollView>
+
+            <View style={styles.sheetActions}>
+              <Pressable style={[styles.btn, styles.btnGhost]} onPress={() => setModalOpen(false)} disabled={saving}>
+                <Text style={styles.btnGhostText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[styles.btn, styles.btnPrimary]} onPress={() => void save()} disabled={saving}>
+                {saving ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.btnPrimaryText}>{editingId ? 'Save' : 'Add Product'}</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    </View>
+  );
+}
+
+function Field(props: {
+  label: string; value: string; onChangeText: (t: string) => void;
+  placeholder?: string; keyboardType?: 'numeric' | 'default';
+}) {
+  return (
+    <View style={styles.fieldWrap}>
+      <Text style={styles.fieldLabel}>{props.label}</Text>
+      <TextInput
+        style={styles.input}
+        value={props.value}
+        onChangeText={props.onChangeText}
+        placeholder={props.placeholder}
+        placeholderTextColor={Colors.textMuted}
+        keyboardType={props.keyboardType ?? 'default'}
+      />
     </View>
   );
 }
@@ -104,14 +261,38 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: FontSize.xl, fontWeight: '800', color: Colors.white },
   headerSub:   { fontSize: FontSize.sm, color: 'rgba(255,255,255,0.7)' },
+  addBtn:      { backgroundColor: Colors.white, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, borderRadius: Radius.md },
+  addBtnText:  { color: Colors.primary, fontWeight: '800', fontSize: FontSize.md },
   noShop:      { fontSize: FontSize.lg, color: Colors.textMuted },
+  empty:       { textAlign: 'center', color: Colors.textMuted, marginTop: Spacing.xl, fontSize: FontSize.md },
   productRow: {
     backgroundColor: Colors.card, borderRadius: Radius.md,
-    padding: Spacing.lg, flexDirection: 'row',
-    alignItems: 'center', justifyContent: 'space-between',
+    padding: Spacing.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     ...Shadow.card,
   },
   productInfo:  { flex: 1 },
   productName:  { fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
   productPrice: { fontSize: FontSize.sm, color: Colors.textMuted },
+  mrp:          { textDecorationLine: 'line-through', color: Colors.textMuted },
+  // modal
+  modalRoot:  { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheet:      { backgroundColor: Colors.background, borderTopLeftRadius: Radius.lg, borderTopRightRadius: Radius.lg, padding: Spacing.lg, maxHeight: '88%' },
+  sheetHandle:{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: Colors.border, marginBottom: Spacing.md },
+  sheetTitle: { fontSize: FontSize.lg, fontWeight: '800', color: Colors.text, marginBottom: Spacing.md },
+  fieldWrap:  { marginBottom: Spacing.md },
+  fieldLabel: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textMuted, marginBottom: Spacing.xs },
+  input:      { backgroundColor: Colors.card, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, fontSize: FontSize.md, color: Colors.text, borderWidth: 1, borderColor: Colors.border },
+  row:        { flexDirection: 'row', gap: Spacing.md },
+  flex1:      { flex: 1 },
+  chips:      { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.md },
+  chip:       { paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs, borderRadius: Radius.full ?? 20, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.card },
+  chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  chipText:     { color: Colors.text, fontSize: FontSize.sm },
+  chipTextActive: { color: Colors.white, fontWeight: '700' },
+  sheetActions: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.md },
+  btn:         { flex: 1, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
+  btnGhost:    { backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border },
+  btnGhostText:{ color: Colors.text, fontWeight: '700', fontSize: FontSize.md },
+  btnPrimary:  { backgroundColor: Colors.primary },
+  btnPrimaryText: { color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
 });

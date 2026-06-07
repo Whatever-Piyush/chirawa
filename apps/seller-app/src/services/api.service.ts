@@ -133,6 +133,22 @@ export const SellerApi = {
   updateStock: (productId: string, stockStatus: string, token: string) =>
     request('PATCH', `/catalog/products/${productId}/stock`, { stockStatus }, token),
 
+  // ── Inventory CRUD (Phase 1.1–1.3 / 1.5) — money in paise ────────────────────
+  createProduct: (input: ProductInput, token: string) =>
+    request<{ id: string }>('POST', '/catalog/products', input, token),
+
+  updateProduct: (productId: string, input: Partial<Omit<ProductInput, 'shopId'>>, token: string) =>
+    request<{ id: string }>('PATCH', `/catalog/products/${productId}`, input, token),
+
+  deleteProduct: (productId: string, token: string) =>
+    request('DELETE', `/catalog/products/${productId}`, undefined, token),
+
+  setStockQty: (productId: string, stockQty: number, token: string) =>
+    request('PATCH', `/catalog/products/${productId}/stock-qty`, { stockQty }, token),
+
+  createCategory: (shopId: string, name: string, token: string) =>
+    request<{ id: string; name: string }>('POST', '/catalog/categories', { shopId, name }, token),
+
   registerDeviceToken: (fcmToken: string, token: string) =>
     request('POST', '/notifications/register-token', { token: fcmToken, platform: 'android' }, token),
 
@@ -143,6 +159,16 @@ export const SellerApi = {
   getSettlements: (token: string) =>
     request<SettlementsResponse>('GET', '/sellers/me/settlements', undefined, token),
 };
+
+export interface ProductInput {
+  shopId:      string;
+  name:        string;
+  pricePaise:  number;
+  mrpPaise?:   number;
+  unit?:       string;
+  categoryId?: string;
+  stockQty?:   number;
+}
 
 export interface SalesWindow { orders: number; valuePaise: number }
 export interface SalesSummary {
