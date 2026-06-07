@@ -18,6 +18,7 @@ interface Stop {
   items: Array<{ productName: string; quantity: number }>;
   deliveryStreet: string; deliveryLandmark: string; deliveryLocality: string;
   deliveryLat: number; deliveryLng: number;
+  receiverName: string; receiverPhone: string;
 }
 interface ActiveBatch {
   batchId: string | null; orderCount: number; allPickedUp: boolean; orders: Stop[];
@@ -70,7 +71,19 @@ export default function DeliveryScreen() {
         await new Promise<void>((resolve) => {
           Alert.alert(stop.paymentMethod === 'cod' ? '💵 Cash Collect' : '✅ Deliver', confirmMsg, [
             { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
-            { text: 'Done', onPress: async () => { await RiderApi.collectCod(stop.id, stop.totalAmount, state.token!); resolve(); } },
+            { text: 'Done', onPress: () => {
+                void (async () => {
+                  try {
+                    // COD records the cash; prepaid uses the delivered endpoint (0.1).
+                    if (stop.paymentMethod === 'cod') await RiderApi.collectCod(stop.id, stop.totalAmount, state.token!);
+                    else                              await RiderApi.markDelivered(stop.id, state.token!);
+                  } catch (e: unknown) {
+                    Alert.alert('Error', e instanceof Error ? e.message : 'Action fail hua');
+                  } finally {
+                    resolve();
+                  }
+                })();
+              } },
           ]);
         });
       }
@@ -134,6 +147,16 @@ export default function DeliveryScreen() {
             <Text style={styles.shopName}>{o.deliveryStreet}</Text>
             <Text style={styles.addr}>{o.deliveryLandmark} · {o.deliveryLocality}</Text>
             <Text style={styles.amount}>₹{Math.round(o.totalAmount / 100)} {o.paymentMethod === 'cod' ? '· 💵 COD' : '· 💳 Online'}</Text>
+            {o.receiverName ? (
+              <View style={styles.contactRow}>
+                <Text style={styles.contactName} numberOfLines={1}>👤 {o.receiverName}</Text>
+                {o.receiverPhone ? (
+                  <TouchableOpacity style={styles.callBtn} onPress={() => void Linking.openURL(`tel:${o.receiverPhone}`)}>
+                    <Text style={styles.callBtnText}>📞 Call</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
             <TouchableOpacity style={styles.navBtn} onPress={() => navigate(o.deliveryLat, o.deliveryLng)}>
               <Text style={styles.navBtnText}>🗺 Navigate to Customer</Text>
             </TouchableOpacity>
@@ -177,6 +200,10 @@ const styles = StyleSheet.create({
   addr:   { fontSize: FontSize.sm, color: Colors.textLight },
   item:   { fontSize: FontSize.sm, color: Colors.text },
   amount: { fontSize: FontSize.md, fontWeight: '800', color: Colors.primary, marginTop: 2 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
+  contactName: { flex: 1, fontSize: FontSize.sm, color: Colors.text, fontWeight: '700' },
+  callBtn: { backgroundColor: Colors.success, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
+  callBtnText: { color: Colors.white, fontSize: FontSize.sm, fontWeight: '800' },
   navBtn: { backgroundColor: Colors.background, borderRadius: Radius.md, padding: Spacing.sm, alignItems: 'center', marginTop: Spacing.sm },
   navBtnText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '700' },
   actionBtn: { backgroundColor: Colors.primary, borderRadius: Radius.md, padding: Spacing.md, alignItems: 'center', marginTop: Spacing.sm },

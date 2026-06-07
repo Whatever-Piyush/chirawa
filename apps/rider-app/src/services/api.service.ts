@@ -111,6 +111,9 @@ export const RiderApi = {
     request('POST', `/delivery/orders/${orderId}/start-delivery`, {}, token),
   collectCod: (orderId: string, amountPaise: number, token: string) =>
     request('POST', `/orders/${orderId}/cod-collected`, { amountPaise }, token),
+  // Prepaid (non-COD) completion — COD orders use collectCod instead (0.1).
+  markDelivered: (orderId: string, token: string) =>
+    request('POST', `/orders/${orderId}/delivered`, {}, token),
   getMyOrders: (token: string) =>
     request<unknown[]>('GET', '/orders', undefined, token),
 
