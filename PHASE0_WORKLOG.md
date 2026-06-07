@@ -198,4 +198,72 @@ paid order today. Worth de-duping (pick one event for the seller alert). Out of 
 
 ---
 
-_Next per `fixme.MD`: **0.5** — add `Idempotency-Key` support to `POST /orders` using Redis `SETNX`._
+## ✅ 0.5 — `Idempotency-Key` on `POST /orders` via Redis SETNX
+
+**Commit:** _(committed with this worklog entry)_ · No migration.
+
+**Problem:** `POST /orders` had no idempotency. A double-tap, or a client retry after a network
+timeout, would create **duplicate orders** and (for prepaid) **duplicate Razorpay charges**.
+
+**Fix:** New reusable `runIdempotent()` helper (`shared/utils/idempotency.ts`) backed by a Redis
+**SETNX** lock (`SET key val NX EX` — the atomic set-if-not-exists with TTL):
+- First caller wins the lock → runs the work → caches the response (24h replay window).
+- Concurrent caller while in-flight → **409 `ConflictError`** ("still processing, retry shortly") —
+  never a second order.
+- Caller after completion → gets the **same cached response** back (replay), no re-execution.
+- Handler failure → lock released (failures never cached) so a genuine retry can proceed.
+- Keys are **scoped per user** (`idem:order:<userId>:<key>`) so one user can't collide with — or
+  replay — another's request. `readIdempotencyKey()` normalizes the header (string | string[] |
+  absent) and caps length.
+
+Wired into `POST /orders`: the order-creation work (placeOrder + the multi-shop Razorpay charge) is
+wrapped in `createOrder()` and run through `runIdempotent` **only when an `Idempotency-Key` header is
+present** (optional → backwards compatible). Body validation happens *before* the lock so a malformed
+request doesn't consume a key.
+
+**Files:** `shared/utils/idempotency.ts` (new), `modules/orders/orders.routes.ts`,
+`shared/utils/__tests__/idempotency.test.ts` (new).
+
+**Tests:** ✅ 7/7 new (runs once; replays cached; concurrent→409; failure releases lock; per-user
+scoping; header parsing). Full suite: ✅ **78/78**. Typecheck: no new errors (`idempotency.ts` clean;
+the `POST /` handler clean — only the file's pre-existing route-generic errors remain).
+
+**Working?** Unit-verified. Live check below.
+
+**Verify on device / staging:**
+1. `POST /api/v1/orders` with header `Idempotency-Key: <uuid>` and a valid cart → 201, order created.
+2. Repeat the **exact same** request (same key) → **same 201 response**, and only **one** order +
+   **one** Razorpay order exist in the DB/dashboard.
+3. Fire two identical requests in parallel → one 201, the other **409** (retry).
+4. Omit the header → behaves exactly as before (no idempotency).
+
+**Client follow-up (frontend, separate):** the customer app should generate a UUID `Idempotency-Key`
+per checkout attempt and send it on `POST /orders` (and reuse it on retry) to actually benefit. Note
+in `packages/api-client`.
+
+---
+
+## 🏁 Phase 0 summary
+
+| # | Fix | Commit | Tests | Migration |
+|---|-----|--------|:--:|:--:|
+| 0.1 | Rider delivered path for non-COD orders | `5c750ea` | 4 | — |
+| 0.2 | Prod hard-fail on placeholder Razorpay secrets | `5b6bfc6` | 8 | — |
+| 0.3 | Real RazorpayX payouts (paid only on success) | `4c17a74` | 8 | `…175525` |
+| 0.4 | Reconciliation: direct seller FCM + auto-accept enqueue | `4e3dea6` | 5 | — |
+| 0.5 | `Idempotency-Key` on `POST /orders` (Redis SETNX) | _this_ | 7 | — |
+
+**Suite: 78/78 green.** `pnpm typecheck` remains red **only** from the branch-wide pre-existing
+`exactOptionalPropertyTypes` issue (see top of file) — no Phase-0 change added a new error category.
+
+**Your action items before production:**
+- Set real `rzp_live_*` keys, `RAZORPAY_WEBHOOK_SECRET`, and `RAZORPAYX_ACCOUNT_NUMBER` in `apps/api/.env`
+  (0.2 will hard-fail prod boot until you do); fund the RazorpayX account.
+- Run the committed migration in prod: `pnpm --filter @chirawa/api db:migrate:prod`.
+
+**High-priority follow-ups surfaced during Phase 0 (each its own task):**
+1. **Payout webhook / reconcile sweep** so `processing` payouts flip to `paid` + ledger (0.3).
+2. **Frontends:** rider "Mark delivered" button (0.1); customer `Idempotency-Key` per checkout (0.5).
+3. **Double seller new-order push** in the normal webhook path (0.4 finding).
+4. **Branch-wide typecheck**: fix or relax `exactOptionalPropertyTypes` — `tsc`/`build` is currently red.
+5. Consider extending 0.2's prod hard-fail to JWT/FCM/R2/`RAZORPAYX_ACCOUNT_NUMBER` placeholders.

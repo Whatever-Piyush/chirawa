@@ -4,6 +4,7 @@ import { createPaymentsService } from '../payments/payments.service';
 import { placeOrderSchema, rateOrderSchema, type PlaceOrderInput, type RateOrderInput } from './orders.schema';
 import { authenticate, requireRole } from '../../shared/middleware/auth.middleware';
 import { ValidationError } from '../../shared/errors/app-errors';
+import { runIdempotent, readIdempotencyKey } from '../../shared/utils/idempotency';
 
 export default async function ordersRoutes(app: FastifyInstance): Promise<void> {
   const ordersService   = createOrdersService(app.prisma, app.redis);
@@ -16,16 +17,28 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
     const parsed = placeOrderSchema.safeParse(request.body);
     if (!parsed.success) throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid input');
 
-    const order = await ordersService.placeOrder(request.auth!.userId, parsed.data);
+    // The actual order-creation work, run at most once per Idempotency-Key.
+    const createOrder = async (): Promise<{ status: number; body: unknown }> => {
+      const order = await ordersService.placeOrder(request.auth!.userId, parsed.data);
 
-    if (parsed.data.paymentMethod !== 'cod') {
-      // A multi-shop cart produced one order per shop; charge the grand total of
-      // ALL of them in a single Razorpay order (previously only the primary order
-      // was charged, undercharging multi-shop carts).
-      const payment = await paymentsService.createCartPaymentOrder(order.orderIds, request.auth!.userId);
-      return reply.status(201).send({ ...order, razorpayOrderId: payment.razorpayOrderId, razorpayKeyId: payment.razorpayKeyId, amountPaise: payment.amountPaise });
-    }
-    return reply.status(201).send(order);
+      if (parsed.data.paymentMethod !== 'cod') {
+        // A multi-shop cart produced one order per shop; charge the grand total of
+        // ALL of them in a single Razorpay order (previously only the primary order
+        // was charged, undercharging multi-shop carts).
+        const payment = await paymentsService.createCartPaymentOrder(order.orderIds, request.auth!.userId);
+        return { status: 201, body: { ...order, razorpayOrderId: payment.razorpayOrderId, razorpayKeyId: payment.razorpayKeyId, amountPaise: payment.amountPaise } };
+      }
+      return { status: 201, body: order };
+    };
+
+    // Idempotency-Key (optional): guards against double-tap / retry-after-timeout
+    // creating duplicate orders + duplicate Razorpay charges. Scoped per user.
+    const idemKey = readIdempotencyKey(request.headers['idempotency-key']);
+    const result = idemKey
+      ? await runIdempotent(app.redis, `order:${request.auth!.userId}`, idemKey, createOrder)
+      : await createOrder();
+
+    return reply.status(result.status).send(result.body);
   });
 
   // GET /api/v1/orders
