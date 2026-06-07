@@ -13,6 +13,7 @@ export const JobNames = {
   AUTO_ACCEPT:           'auto-accept',
   DAILY_SETTLEMENT:      'daily-settlement',
   SINGLE_SELLER_SETTLE:  'single-seller-settle',
+  PAYOUT_RECONCILE:      'payout-reconcile',
   PAYMENT_RECONCILE:     'payment-reconcile',
   LOCATION_CLEANUP:      'location-cleanup',
   OTP_CLEANUP:           'otp-cleanup',

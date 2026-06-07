@@ -161,6 +161,26 @@ export async function ensureSellerFundAccount(input: {
   return { contactId, fundAccountId };
 }
 
+async function razorpayXGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${RAZORPAYX_BASE}${path}`, {
+    method:  'GET',
+    headers: { Authorization: authHeader() },
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = json['error'] as { description?: string; code?: string } | undefined;
+    throw new Error(`RazorpayX GET ${path} ${res.status}: ${err?.description ?? err?.code ?? res.statusText}`);
+  }
+  return json as T;
+}
+
+// Current status of a payout — used by the reconcile sweep to finalize payouts
+// that came back queued/processing (no webhook yet). Mirrors createPayout's shape.
+export async function fetchPayout(payoutId: string): Promise<{ status: string; utr: string | null }> {
+  const p = await razorpayXGet<{ status: string; utr: string | null }>(`/payouts/${payoutId}`);
+  return { status: p.status, utr: p.utr ?? null };
+}
+
 export interface PayoutResult { payoutId: string; status: string; utr: string | null }
 
 // Create a UPI payout. `idempotencyKey` (the settlement id) makes retries safe:

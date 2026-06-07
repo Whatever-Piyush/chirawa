@@ -24,6 +24,18 @@ export async function setupSchedules(queues: {
     },
   );
 
+  // ── Payout reconcile — every 30 minutes (finalize in-flight payouts, 0.3) ──
+  await queues.settlement.add(
+    JobNames.PAYOUT_RECONCILE,
+    {},
+    {
+      repeat:     { every: 30 * 60 * 1000 },
+      jobId:      'payout-reconcile-recurring',
+      removeOnComplete: { count: 10 },
+      removeOnFail:     { count: 5 },
+    },
+  );
+
   // ── Payment reconciliation — every 15 minutes ─────────────────────────────
   await queues.reconciliation.add(
     JobNames.PAYMENT_RECONCILE,

@@ -2,7 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { Job } from 'bullmq';
 import type { SingleSellerSettlePayload } from '../queues';
 import {
-  isPayoutConfigured, ensureSellerFundAccount, createPayout,
+  isPayoutConfigured, ensureSellerFundAccount, createPayout, fetchPayout,
 } from '../../modules/payments/razorpay.service';
 
 /**
@@ -227,6 +227,60 @@ export async function initiatePayout(
       data:  { status: 'failed', needsAttention: true, failureReason: reason.slice(0, 255) },
     });
     console.error(`❌ Payout error for settlement ${settlementId}:`, reason);
+  }
+}
+
+/**
+ * Payout reconcile sweep (completes 0.3). A payout that came back queued/processing
+ * stays in settlement status 'processing' with no ledger entry. Until there's a
+ * RazorpayX webhook, this periodic sweep fetches each in-flight payout's status and
+ * finalizes it: processed → paid + ledger (idempotent); terminal failure → failed +
+ * needsAttention. Still-in-flight payouts are left for the next sweep.
+ */
+export async function runPayoutReconciliation(prisma: PrismaClient): Promise<void> {
+  if (!isPayoutConfigured()) return;
+
+  const pending = await prisma.settlement.findMany({
+    where:  { status: 'processing', payoutId: { not: null } },
+    take:   50,
+    select: { id: true, payoutId: true, netPayablePaise: true, seller: { select: { upiId: true } } },
+  });
+  if (pending.length === 0) return;
+
+  for (const s of pending) {
+    try {
+      const payout = await fetchPayout(s.payoutId!);
+
+      if (payout.status === 'processed') {
+        // Write the ledger only once (idempotent if a prior sweep already did).
+        const ledgered = await prisma.transaction.findFirst({
+          where: { referenceId: s.id, referenceType: 'settlement' }, select: { id: true },
+        });
+        await prisma.$transaction([
+          prisma.settlement.update({
+            where: { id: s.id },
+            data:  { status: 'paid', paidAt: new Date(), upiRef: payout.utr, needsAttention: false, failureReason: null },
+          }),
+          ...(ledgered ? [] : [prisma.transaction.create({
+            data: {
+              type: 'seller_settlement', amountPaise: s.netPayablePaise,
+              referenceId: s.id, referenceType: 'settlement',
+              description: `Daily settlement payout to ${s.seller.upiId ?? 'seller'}`,
+            },
+          })]),
+        ]);
+        console.log(`✅ Payout reconciled → paid: settlement ${s.id}`);
+      } else if (!PAYOUT_IN_FLIGHT.has(payout.status)) {
+        await prisma.settlement.update({
+          where: { id: s.id },
+          data:  { status: 'failed', needsAttention: true, failureReason: `Payout ${payout.status}` },
+        });
+        console.error(`❌ Payout reconciled → failed: settlement ${s.id} (${payout.status})`);
+      }
+      // else still in flight → leave for the next sweep
+    } catch (err) {
+      console.error(`Payout reconcile error for settlement ${s.id}:`, err);
+    }
   }
 }
 

@@ -6,7 +6,7 @@ import Redis from 'ioredis';
 import { env } from '../config/env';
 import { QueueNames, JobNames } from './queues';
 import { setupSchedules } from './scheduler';
-import { runDailySettlement, processSingleSellerSettle } from './jobs/settlement.job';
+import { runDailySettlement, processSingleSellerSettle, runPayoutReconciliation } from './jobs/settlement.job';
 import { runPaymentReconciliation } from './jobs/reconciliation.job';
 import { runLocationCleanup, runOtpCleanup, runTokenCleanup, runCartCleanup } from './jobs/cleanup.job';
 import { processUnlockReferral } from './jobs/referral.job';
@@ -39,6 +39,7 @@ const settlementWorker = new Worker(
   async (job) => {
     if (job.name === JobNames.DAILY_SETTLEMENT)     await runDailySettlement(prisma);
     if (job.name === JobNames.SINGLE_SELLER_SETTLE) await processSingleSellerSettle(job, prisma);
+    if (job.name === JobNames.PAYOUT_RECONCILE)     await runPayoutReconciliation(prisma);
   },
   { connection: redisConnection, concurrency: 1 },
 );
