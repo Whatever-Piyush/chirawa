@@ -57,6 +57,12 @@ export const envSchema = z
     R2_BUCKET_NAME: z.string().default('chirawa-assets'),
     R2_PUBLIC_URL: z.string().default('http://localhost:3000'),
 
+    // ── Observability ─────────────────────────────────────────────────────────
+    // Sentry is OPTIONAL: an empty DSN disables it (no-op), so dev/local don't
+    // need it. Set both in production for error tracking with release tagging (4.1).
+    SENTRY_DSN:     z.string().default(''),
+    SENTRY_RELEASE: z.string().default(''),
+
     // ── App Config ────────────────────────────────────────────────────────────
     APP_NAME: z.string().default('Chirawa'),
     FRONTEND_URLS: z.string().default('http://localhost:3001'),

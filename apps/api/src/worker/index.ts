@@ -12,6 +12,9 @@ import { runLocationCleanup, runOtpCleanup, runTokenCleanup, runCartCleanup } fr
 import { processUnlockReferral } from './jobs/referral.job';
 import { processAssignBatch } from './jobs/assignment.job';
 import { closeEventBus } from '../shared/events/event-bus';
+import { initSentry, captureError, flushSentry } from '../shared/observability/sentry';
+
+initSentry('worker'); // no-op without SENTRY_DSN (4.1)
 
 // BullMQ auto-connects — do NOT call .connect() manually
 const redisConnection = new Redis(env.REDIS_URL, {
@@ -86,8 +89,11 @@ const workers = [settlementWorker, reconciliationWorker, cleanupWorker, referral
 
 workers.forEach((worker) => {
   worker.on('completed', (job) => console.log(`✅ Job completed: ${job.name}`));
-  worker.on('failed',    (job, err) => console.error(`❌ Job failed: ${job?.name}:`, err.message));
-  worker.on('error',     (err) => console.error('Worker error:', err.message));
+  worker.on('failed',    (job, err) => {
+    console.error(`❌ Job failed: ${job?.name}:`, err.message);
+    captureError(err, { jobName: job?.name, jobId: job?.id });
+  });
+  worker.on('error',     (err) => { console.error('Worker error:', err.message); captureError(err); });
 });
 
 async function start(): Promise<void> {
@@ -119,6 +125,7 @@ async function shutdown(): Promise<void> {
       settlementQueue, reconciliationQueue, cleanupQueue, referralQueue, assignmentQueue, sellerAcceptQueue,
     ].map((q) => q.close()));
     await closeEventBus();
+    await flushSentry();
     await prisma.$disconnect();
   } catch {
     // Ignore cleanup errors

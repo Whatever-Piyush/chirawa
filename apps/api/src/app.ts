@@ -30,8 +30,10 @@ import adminRoutes         from './modules/admin/admin.routes';
 import loyaltyRoutes       from './modules/loyalty/loyalty.routes';
 import notificationsRoutes from './modules/notifications/notifications.routes';
 import sellersRoutes       from './modules/sellers/sellers.routes';
+import { initSentry, captureError } from './shared/observability/sentry';
 
 export async function buildApp(): Promise<FastifyInstance> {
+  initSentry('api'); // no-op without SENTRY_DSN (4.1)
   const app = Fastify({
     logger: {
       level: env.NODE_ENV === 'production' ? 'info' : 'debug',
@@ -115,7 +117,14 @@ export async function buildApp(): Promise<FastifyInstance> {
       });
     }
 
-    // Anything else → 500. Never leak stack traces in production.
+    // Anything else → 500. Report to Sentry with request context (4.1).
+    captureError(error, {
+      reqId:  request.id,
+      method: request.method,
+      url:    request.url,
+      userId: (request as { auth?: { userId?: string } }).auth?.userId,
+    });
+    // Never leak stack traces in production.
     return reply.status(500).send({
       success: false,
       error: {
