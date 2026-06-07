@@ -67,6 +67,31 @@ export async function decrementStockOrThrow(
   }
 }
 
+// ── Order state machine (Phase 1.7) ──────────────────────────────────────────
+// Single source of truth for legal status transitions. Keeps illegal jumps
+// (e.g. confirmed→ready_for_pickup, skipping preparing) out of the DB.
+export const ORDER_TRANSITIONS: Record<string, readonly string[]> = {
+  pending_payment:  ['paid', 'cancelled'],
+  paid:             ['confirmed', 'cancelled'],
+  confirmed:        ['preparing', 'cancelled'],
+  preparing:        ['ready_for_pickup', 'cancelled'],
+  ready_for_pickup: ['picked_up', 'cancelled'],
+  picked_up:        ['out_for_delivery', 'cancelled'],
+  out_for_delivery: ['delivered', 'cancelled'],
+  delivered:        [],
+  cancelled:        [],
+};
+
+// Throws BusinessRuleError on an illegal transition. A same-status write is
+// treated as an idempotent no-op (e.g. accepting an already-confirmed COD order).
+export function assertTransition(from: string, to: string): void {
+  if (from === to) return;
+  const allowed = ORDER_TRANSITIONS[from];
+  if (!allowed || !allowed.includes(to)) {
+    throw new BusinessRuleError(`Illegal order transition: ${from} → ${to}`);
+  }
+}
+
 // Minimal Prisma slice for releaseOrderAssignment — testable with a fake client.
 interface ReleaseTx {
   deliveryAssignment: { updateMany: (args: unknown) => Promise<{ count: number }> };
@@ -329,6 +354,9 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     refundedPaise?: number,
   ) {
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+
+    // Reject illegal jumps before writing (Phase 1.7).
+    assertTransition(order.status, newStatus);
 
     await prisma.$transaction([
       prisma.order.update({
