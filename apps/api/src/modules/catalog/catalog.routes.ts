@@ -172,4 +172,18 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
   app.delete('/variants/:id', writeGuard, async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
     return reply.send(await inventoryService.deleteVariant(request.params.id, authCtx(request)));
   });
+
+  // POST /api/v1/catalog/products/import?shopId=<uuid> — bulk CSV import (1.4)
+  app.post('/products/import', writeGuard, async (request: FastifyRequest<{ Querystring: { shopId?: string } }>, reply) => {
+    const shopId = request.query.shopId;
+    if (!shopId) throw new ValidationError('shopId query param is required');
+
+    const file = await request.file();
+    if (!file) throw new ValidationError('No CSV file provided');
+    const buffer = await file.toBuffer();
+    if (file.file.truncated) throw new ValidationError('CSV too large (max 5MB)');
+
+    const report = await inventoryService.importProductsCsv(shopId, buffer.toString('utf8'), authCtx(request));
+    return reply.send(report);
+  });
 }
