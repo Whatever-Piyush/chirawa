@@ -19,6 +19,7 @@ import { useTheme, type ColorPalette, type ThemeMode } from '../../theme/ThemeCo
 import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api.service';
+import { FEATURES } from '../../config/features';
 import type { LoyaltyResponse } from '@chirawa/types';
 import type { RootStackParamList, TabParamList } from '../../navigation/AppNavigator';
 import { Text, FauxGradient } from '../../components/ui';
@@ -121,6 +122,7 @@ export default function ProfileScreen() {
   const [loyalty, setLoyalty] = React.useState<LoyaltyResponse | null>(null);
 
   React.useEffect(() => {
+    if (!FEATURES.growthLoops) return; // loyalty hidden for v1 (Phase 1.9)
     let alive = true;
     void (async () => {
       try {
@@ -320,8 +322,8 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* ── Loyalty status card (Chunk 7.5) ───────────────────────────── */}
-          {loyalty && (
+          {/* ── Loyalty status card (Chunk 7.5) — hidden for v1 (Phase 1.9) ── */}
+          {FEATURES.growthLoops && loyalty && (
             <View style={styles.loyaltyCard}>
               <View style={styles.loyaltyTop}>
                 <Text style={styles.loyaltyEmoji}>{(TIER_META[loyalty.tier] ?? TIER_META.bronze).emoji}</Text>
