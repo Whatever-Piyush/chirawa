@@ -1,8 +1,18 @@
 import { z } from 'zod';
 
 export const updateProfileSchema = z.object({
+  // Customer
   firstName: z.string().trim().min(1).max(100).optional(),
   lastName:  z.string().trim().min(1).max(100).optional(),
+  // Seller payout/onboarding details (Phase 1.10) — UPI must be valid so
+  // settlements (0.3) can actually pay out.
+  ownerName:   z.string().trim().min(1).max(100).optional(),
+  upiId:       z.string().trim().regex(/^[\w.\-]{2,256}@[a-zA-Z]{2,64}$/, 'Enter a valid UPI ID (e.g. name@bank)').optional(),
+  bankAccount: z.string().trim().regex(/^\d{9,18}$/, 'Enter a valid bank account number').optional(),
+  bankIfsc:    z.string().trim().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Enter a valid IFSC code').optional(),
+  gstin:       z.string().trim().max(15).optional(),
+  // Rider onboarding (Phase 1.10)
+  vehicleNumber: z.string().trim().min(1).max(20).optional(),
 });
 
 export const createAddressSchema = z.object({

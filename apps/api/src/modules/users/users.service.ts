@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, Prisma } from '@prisma/client';
 import type { UpdateProfileInput, CreateAddressInput, UpdateAddressInput } from './users.schema';
 import { NotFoundError, ForbiddenError } from '../../shared/errors/app-errors';
 
@@ -10,7 +10,7 @@ export function createUsersService(prisma: PrismaClient) {
       where: { id: userId },
       include: {
         customerProfile: role === 'customer' ? { select: { id: true, firstName: true, lastName: true, walletBalance: true, loyaltyTier: true, totalOrders: true } } : false,
-        sellerProfile:   role === 'seller'   ? { select: { id: true, ownerName: true, upiId: true, gstin: true } } : false,
+        sellerProfile:   role === 'seller'   ? { select: { id: true, ownerName: true, upiId: true, bankAccount: true, bankIfsc: true, gstin: true } } : false,
         riderProfile:    role === 'rider'    ? { select: { id: true, fullName: true, vehicleNumber: true, codBalancePaise: true } } : false,
         referralCode:    { select: { code: true } },
       },
@@ -79,8 +79,21 @@ export function createUsersService(prisma: PrismaClient) {
           ...(data.lastName  !== undefined && { lastName:  data.lastName  }),
         },
       });
+    } else if (role === 'seller') {
+      // Payout + onboarding details (Phase 1.10). Build explicitly so untouched
+      // fields aren't overwritten and exactOptionalPropertyTypes stays happy.
+      const d: Prisma.SellerProfileUpdateInput = {};
+      if (data.ownerName   !== undefined) d.ownerName   = data.ownerName;
+      if (data.upiId       !== undefined) d.upiId       = data.upiId;
+      if (data.bankAccount !== undefined) d.bankAccount = data.bankAccount;
+      if (data.bankIfsc    !== undefined) d.bankIfsc    = data.bankIfsc;
+      if (data.gstin       !== undefined) d.gstin       = data.gstin;
+      if (Object.keys(d).length > 0) await prisma.sellerProfile.update({ where: { userId }, data: d });
+    } else if (role === 'rider') {
+      if (data.vehicleNumber !== undefined) {
+        await prisma.riderProfile.update({ where: { userId }, data: { vehicleNumber: data.vehicleNumber } });
+      }
     }
-    // Seller/rider profile updates handled in their own modules (Step 12/13)
     return getMe(userId, role);
   }
 
