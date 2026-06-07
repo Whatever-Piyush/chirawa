@@ -267,3 +267,55 @@ in `packages/api-client`.
 3. **Double seller new-order push** in the normal webhook path (0.4 finding).
 4. **Branch-wide typecheck**: fix or relax `exactOptionalPropertyTypes` — `tsc`/`build` is currently red.
 5. Consider extending 0.2's prod hard-fail to JWT/FCM/R2/`RAZORPAYX_ACCOUNT_NUMBER` placeholders.
+
+---
+
+# �myσ Phases 1, 2, 4 (backend) — CTO autonomous pass
+
+All backend, all tested, each its own commit. Suite: **126/126 green** (20 files).
+
+## Phase 1 — Backend completeness + inventory
+| # | Fix | Commit | Notes |
+|---|-----|--------|-------|
+| 1.1–1.3 | Product/category/variant CRUD | `325b565` | `inventory.service` + `catalog.schema`; seller-owns-shop (admin bypass), paise validation, cache invalidation, soft-deletes |
+| 1.4 | Bulk CSV import | `6539b1a` | quote-aware parser, rupees→paise, auto-categories, idempotent upserts, per-row report, template CSV |
+| 1.5 | Numeric stock + oversell | `325b565`,`71ba793` | **opt-in** (null=untracked); corrective migration after catching the default-0 trap; atomic decrement in checkout |
+| 1.6 | Release rider/batch on cancel | `0106439` | `releaseOrderAssignment` in cancel + seller-reject |
+| 1.7 | Order state-machine guard | `a9fa84f` | `assertTransition` in `updateOrderStatus` |
+| 1.8 | Webhook process-then-record | `9d07805` | transient failures now retried, not swallowed |
+| 1.10 | Seller UPI/bank + rider vehicle | `1c23525` | via `PUT /users/me`; validated UPI/IFSC |
+| **1.9** | Growth loops (referral/loyalty/wallet) | — | **NEEDS YOUR DECISION: wire or hide?** (see below) |
+
+## Phase 2 — Realtime (backend)
+| 2.1 | Socket.io Redis adapter | `95bf2c5` | cross-instance fan-out under PM2 cluster |
+| 2.5 | Lock Socket.io CORS to FRONTEND_URLS in prod | `95bf2c5` | |
+| 2.2 | Worker→user notify | (already via started event-bus bridge; 2.1 makes bridged socket emits reach the right instance) |
+| 2.3, 2.4 | Reconnect/token-refresh, live ETA | — | **client-side → Phase 3** |
+
+## Phase 4 — Observability & security (backend)
+| 4.1 | Sentry (api+worker) | `4de8421` | gated on `SENTRY_DSN` (no-op until set) |
+| 4.4 | `/ready` (DB+Redis) vs `/health` | `629736b` | |
+| 4.8 | Per-user rate limits | `629736b` | orders 20/min, payments 30/min, keyed by JWT sub |
+| 4.10 | Ownership audit → `SECURITY.md` | `629736b` | |
+| 4.11 | pg_dump backup script + restore runbook | `629736b` | `apps/api/scripts/backup-postgres.sh` |
+| — | Payout reconcile sweep (completes 0.3) | `091e1b0` | finalizes in-flight payouts → paid+ledger / failed |
+
+**Remaining Phase 4 (infra/ops, need your environment):** 4.2 log shipping, 4.3 uptime/alerting,
+4.5 Bull-Board, 4.6 admin TOTP+ipAllowlist, 4.7 secret rotation, 4.12 Redis durability, 4.13 migrate-deploy discipline.
+
+## New env vars added this pass (set in prod `.env`; not committed)
+`RAZORPAYX_ACCOUNT_NUMBER` (0.3) · `SENTRY_DSN`, `SENTRY_RELEASE` (4.1, optional).
+
+## Typecheck status
+`pnpm test` is green. `pnpm typecheck` remains red **only** from the repo-wide pre-existing
+`exactOptionalPropertyTypes` route-generic + Prisma-write issue (30 errors). No new business-logic
+error category was introduced; new service/helper files are clean. Fixing the tsconfig debt is its
+own task.
+
+## ⛔ Decisions I need from you
+1. **1.9 — wire or hide** referral/loyalty/wallet? (roadmap says ask before coding.)
+2. **Phase 3 (frontend)** — 3 Expo apps, design system, TanStack Query, optimistic cart, live
+   tracking. Large, needs device testing + design calls + your EAS/accounts. Want me to start the
+   design-system + perceived-speed slice, or keep it for a focused frontend session?
+3. **Phase 5 (deploy/store)** — needs your prod creds, EAS account, Play Console, legal copy.
+4. Optional infra Phase 4 items above — which do you want me to script vs. own yourself?
