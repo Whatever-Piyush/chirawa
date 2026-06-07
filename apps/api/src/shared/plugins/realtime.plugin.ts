@@ -1,6 +1,8 @@
 import fp from 'fastify-plugin';
 import { Server as SocketIOServer, type Socket } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
 import type { FastifyInstance } from 'fastify';
+import { env } from '../../config/env';
 import { verifyAccessToken } from '../../modules/auth/token.service';
 import {
   eventBus, Events,
@@ -25,9 +27,14 @@ interface SocketData {
 }
 
 async function realtimePlugin(app: FastifyInstance): Promise<void> {
+  // Lock CORS to the configured frontends in production; '*' only in dev (2.5).
+  const corsOrigin = env.NODE_ENV === 'production'
+    ? env.FRONTEND_URLS.split(',').map((u) => u.trim()).filter(Boolean)
+    : '*';
+
   const io = new SocketIOServer(app.server, {
     cors: {
-      origin:      '*', // Tightened in production via env
+      origin:      corsOrigin,
       methods:     ['GET', 'POST'],
       credentials: true,
     },
@@ -37,6 +44,16 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
     upgradeTimeout:      10000,
     maxHttpBufferSize:   1e6, // 1MB max message size
   });
+
+  // Redis adapter (2.1) — fans broadcasts across all PM2 instances so a status
+  // change handled on instance A reaches a customer socket on instance B. Uses
+  // two DEDICATED pub/sub clients (duplicated from app.redis); never the BullMQ
+  // connection. ioredis auto-connects, so no explicit .connect() is needed.
+  const pubClient = app.redis.duplicate();
+  const subClient = app.redis.duplicate();
+  pubClient.on('error', (err) => app.log.error({ err }, 'socket.io redis pub error'));
+  subClient.on('error', (err) => app.log.error({ err }, 'socket.io redis sub error'));
+  io.adapter(createAdapter(pubClient, subClient));
 
   // ── JWT Authentication Middleware ─────────────────────────────────────────
   // Every socket connection must send a valid JWT token
@@ -219,6 +236,7 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
 
   app.addHook('onClose', async () => {
     await new Promise<void>((resolve) => io.close(() => resolve()));
+    await Promise.allSettled([pubClient.quit(), subClient.quit()]);
     app.log.info('Socket.io server closed');
   });
 
