@@ -4,12 +4,10 @@ import Redis from 'ioredis';
 import type { FastifyInstance } from 'fastify';
 import { env } from '../../config/env';
 import { eventBus, Events, type NewOrderForSellerPayload } from '../../shared/events/event-bus';
-import { QueueNames, JobNames, type AutoAcceptPayload } from '../../worker/queues';
+import {
+  QueueNames, JobNames, SELLER_ACCEPT_MS, autoAcceptJobId, type AutoAcceptPayload,
+} from '../../worker/queues';
 import { createOrdersService } from './orders.service';
-
-// Seller acceptance window (Chunk 8.2): if the seller doesn't accept/reject in
-// this time, the order is auto-accepted so it never stalls. Configurable.
-const SELLER_ACCEPT_MS = Number(process.env.SELLER_ACCEPT_MS ?? 180_000); // 3 min
 
 // Processed IN the API process (not the separate worker) because auto-accepting
 // an online order must emit ORDER_STATUS_CHANGED on this process's event bus to
@@ -22,7 +20,8 @@ async function sellerTimeoutPlugin(app: FastifyInstance): Promise<void> {
     void app.queues.sellerAccept.add(
       JobNames.AUTO_ACCEPT,
       { orderId: payload.orderId } satisfies AutoAcceptPayload,
-      { delay: SELLER_ACCEPT_MS, removeOnComplete: true, removeOnFail: true },
+      // Stable jobId dedupes against the worker's reconciliation path (0.4).
+      { delay: SELLER_ACCEPT_MS, jobId: autoAcceptJobId(payload.orderId), removeOnComplete: true, removeOnFail: true },
     ).catch((err) => app.log.error({ err }, 'Failed to schedule seller auto-accept'));
   });
 

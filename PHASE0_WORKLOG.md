@@ -149,6 +149,53 @@ funded RazorpayX test account** — verify in staging with real creds.
 
 ---
 
-_Next per `fixme.MD`: **0.4** — in `reconciliation.job.ts`, after `markOrderPaid` (worker context),
-notify the seller via FCM directly + enqueue the seller auto-accept job (event bus can't cross the
-worker→API process boundary)._
+## ✅ 0.4 — Worker reconciliation notifies seller + schedules auto-accept directly
+
+**Commit:** _(committed with this worklog entry)_ · No migration.
+
+**Problem:** When `reconciliation.job` (in the **worker** process) rescued a stuck payment via
+`markOrderPaid`, it relied on `markOrderPaid`'s event-bus emits to alert the seller and start the
+auto-accept timer. But the worker has **no event-bus listeners**, and the only cross-process path is
+the Redis pub/sub **bridge — fire-and-forget, no persistence/replay**. Reconciliation runs *only* for
+orders whose normal flow already failed, so leaning on that lossy bus meant a customer could be
+charged while the order **stalls forever** (seller never alerted, never auto-accepted).
+
+**Fix:** After `markOrderPaid`, the worker now does both critical effects **directly and durably** in a
+new `progressReconciledOrder` step:
+1. **Enqueue the seller auto-accept job** into the `SELLER_ACCEPT` BullMQ queue (persisted in Redis,
+   retried; consumed by the API-tier worker in `seller-timeout.plugin`).
+2. **Push the seller an FCM new-order alert** (reads the `fcm:token:<userId>` Redis key and calls
+   `sendPush` — mirrors `notifications.plugin`'s `NEW_ORDER_FOR_SELLER` handler), logged to the
+   `notifications` table.
+- **Why the bus can't be relied on** is documented in a block comment right where it matters.
+- **No double-scheduling:** introduced a **deterministic `autoAcceptJobId(orderId)`** (in `queues.ts`)
+  used by *both* the API timer (`seller-timeout.plugin`) and the worker, so BullMQ dedupes to one job
+  per order if the bridge also happens to deliver. `SELLER_ACCEPT_MS` was also centralised in `queues.ts`.
+- **Order still progresses without a token:** if the seller has no FCM token, we skip the push but
+  **still enqueue auto-accept** (covered by a test).
+
+**Files:** `worker/queues.ts` (+`SELLER_ACCEPT_MS`, `autoAcceptJobId`), `orders/seller-timeout.plugin.ts`
+(shared constant + jobId), `worker/jobs/reconciliation.job.ts` (the fix + signature
+`(prisma, redis, sellerAcceptQueue)`), `worker/index.ts` (creates `sellerAcceptQueue`, passes it,
+closes it), `worker/jobs/__tests__/reconciliation.job.test.ts` (new).
+
+**Tests:** ✅ 5/5 new (captured→paid+enqueue+FCM; no-token→still enqueue, no FCM; not captured→nothing;
+unconfigured→skip; no stale orders→early return). Full suite: ✅ **71/71**. Typecheck: clean in 0.4 files.
+
+**Working?** Logic fully unit-verified. End-to-end needs a real stuck-payment scenario (see below).
+
+**Verify on device / staging:**
+1. Create an online order, pay on Razorpay, but kill the app/webhook so it stays `pending_payment`.
+2. Wait >30 min (or trigger the `PAYMENT_RECONCILE` job manually). Expect: order → `paid`; seller gets
+   a "Naya Order Aaya!" push; a `notifications` row; an `auto-accept` job in the `chirawa-seller-accept`
+   queue that fires after `SELLER_ACCEPT_MS` and confirms the order if the seller doesn't act.
+3. Re-run reconciliation → no duplicate auto-accept job (stable jobId).
+
+**Extra finding (flagged, not changed):** In the **normal** (API/webhook) path, `markOrderPaid` emits
+*both* `ORDER_STATUS_CHANGED(status:paid)` and `NEW_ORDER_FOR_SELLER`, and `notifications.plugin`
+sends a seller `newOrder` FCM for **each** → the seller already gets ~2 identical new-order pushes per
+paid order today. Worth de-duping (pick one event for the seller alert). Out of 0.4 scope.
+
+---
+
+_Next per `fixme.MD`: **0.5** — add `Idempotency-Key` support to `POST /orders` using Redis `SETNX`._

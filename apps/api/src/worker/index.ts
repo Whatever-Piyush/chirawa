@@ -30,6 +30,9 @@ const reconciliationQueue = new Queue(QueueNames.RECONCILIATION, { connection: r
 const cleanupQueue        = new Queue(QueueNames.CLEANUP,        { connection: redisConnection });
 const referralQueue       = new Queue(QueueNames.REFERRAL,       { connection: redisConnection });
 const assignmentQueue     = new Queue(QueueNames.ORDER_ASSIGNMENT, { connection: redisConnection });
+// Reconciliation (worker) enqueues seller auto-accept here; the API-tier worker
+// in seller-timeout.plugin consumes it (0.4).
+const sellerAcceptQueue   = new Queue(QueueNames.SELLER_ACCEPT,   { connection: redisConnection });
 
 const settlementWorker = new Worker(
   QueueNames.SETTLEMENT,
@@ -43,7 +46,7 @@ const settlementWorker = new Worker(
 const reconciliationWorker = new Worker(
   QueueNames.RECONCILIATION,
   async (job) => {
-    if (job.name === JobNames.PAYMENT_RECONCILE) await runPaymentReconciliation(prisma);
+    if (job.name === JobNames.PAYMENT_RECONCILE) await runPaymentReconciliation(prisma, redisForCleanup, sellerAcceptQueue);
   },
   { connection: redisConnection, concurrency: 1 },
 );
@@ -112,7 +115,7 @@ async function shutdown(): Promise<void> {
   try {
     await Promise.all(workers.map((w) => w.close()));
     await Promise.all([
-      settlementQueue, reconciliationQueue, cleanupQueue, referralQueue, assignmentQueue,
+      settlementQueue, reconciliationQueue, cleanupQueue, referralQueue, assignmentQueue, sellerAcceptQueue,
     ].map((q) => q.close()));
     await closeEventBus();
     await prisma.$disconnect();

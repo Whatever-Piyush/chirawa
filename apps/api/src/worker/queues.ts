@@ -32,6 +32,15 @@ export interface AutoAcceptPayload {
   orderId: string;
 }
 
+// Seller acceptance window (Chunk 8.2). Shared so the API-tier timer
+// (seller-timeout.plugin) and the worker (reconciliation.job) always agree.
+export const SELLER_ACCEPT_MS = Number(process.env.SELLER_ACCEPT_MS ?? 180_000); // 3 min
+
+// Deterministic auto-accept job id. Both the API timer and the worker may try to
+// schedule auto-accept for the same order; a stable jobId makes BullMQ dedupe so
+// only one job is ever created per order.
+export const autoAcceptJobId = (orderId: string): string => `auto-accept:${orderId}`;
+
 export interface SingleSellerSettlePayload {
   sellerProfileId: string;
   shopId:          string;
