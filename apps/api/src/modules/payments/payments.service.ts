@@ -108,14 +108,15 @@ export function createPaymentsService(prisma: PrismaClient) {
     const eventId   = event.id;
     const eventType = event.event;
 
-    try {
-      await prisma.paymentWebhookEvent.create({
-        data: { eventId, eventType, payload: event as object },
-      });
-    } catch {
-      return { processed: false, eventType }; // Duplicate
-    }
+    // Idempotency: skip only events we've ALREADY processed-and-recorded (Phase 1.8).
+    const seen = await prisma.paymentWebhookEvent.findUnique({ where: { eventId } });
+    if (seen) return { processed: false, eventType };
 
+    // Process FIRST, record AFTER success. The handlers below are idempotent
+    // (markOrderPaid no-ops once paid; failed-update only touches pending rows),
+    // so a re-delivery is safe. Crucially, a transient failure here throws WITHOUT
+    // recording the event, so Razorpay's retry re-runs it — fixing the old
+    // record-then-process flow that silently swallowed events on failure.
     if (eventType === 'payment.captured') {
       const entity  = event.payload.payment?.entity;
       if (entity) {
@@ -133,6 +134,13 @@ export function createPaymentsService(prisma: PrismaClient) {
         });
       }
     }
+
+    // Record only after successful processing. A concurrent delivery may have
+    // recorded it between our check and here — the unique constraint makes that
+    // create fail, which is benign (the work is already done + idempotent).
+    await prisma.paymentWebhookEvent
+      .create({ data: { eventId, eventType, payload: event as object } })
+      .catch(() => undefined);
 
     return { processed: true, eventType };
   }
