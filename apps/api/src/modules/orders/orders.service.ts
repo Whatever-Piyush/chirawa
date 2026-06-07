@@ -67,6 +67,45 @@ export async function decrementStockOrThrow(
   }
 }
 
+// Minimal Prisma slice for releaseOrderAssignment — testable with a fake client.
+interface ReleaseTx {
+  deliveryAssignment: { updateMany: (args: unknown) => Promise<{ count: number }> };
+  order:  { update: (args: unknown) => Promise<unknown>; count: (args: unknown) => Promise<number> };
+  batch:  { update: (args: unknown) => Promise<unknown> };
+}
+interface ReleasePrisma {
+  $transaction: <T>(fn: (tx: ReleaseTx) => Promise<T>) => Promise<T>;
+}
+
+/**
+ * Release a cancelled order's rider + batch (Phase 1.6). Runs in its own
+ * transaction (order status is owned by updateOrderStatus): deactivates the
+ * active assignment, detaches the order from rider + batch, and cancels the
+ * batch when it has no live orders left. Deactivating the assignment is what
+ * makes the order disappear from the rider's /delivery/active.
+ */
+export async function releaseOrderAssignment(
+  prisma: ReleasePrisma,
+  orderId: string,
+  batchId: string | null,
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.deliveryAssignment.updateMany({
+      where: { orderId, isActive: true },
+      data:  { isActive: false, completedAt: new Date(), rejectReason: 'Order cancelled' },
+    });
+    await tx.order.update({ where: { id: orderId }, data: { riderId: null, batchId: null } });
+    if (batchId) {
+      const liveInBatch = await tx.order.count({
+        where: { batchId, status: { notIn: ['cancelled', 'delivered'] } },
+      });
+      if (liveInBatch === 0) {
+        await tx.batch.update({ where: { id: batchId }, data: { status: 'cancelled' } });
+      }
+    }
+  });
+}
+
 export function createOrdersService(prisma: PrismaClient, redis: Redis) {
 
   async function placeOrder(userId: string, input: PlaceOrderInput) {
@@ -379,6 +418,8 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       orderId, 'cancelled', 'seller', sellerUserId, reason,
       refundedPaise ?? undefined,
     );
+    // Free any assigned rider/batch on a seller rejection too (Phase 1.6).
+    if (order.riderId) await releaseOrderAssignment(prisma, orderId, order.batchId);
     return { message: 'Order reject ho gaya' };
   }
 
@@ -433,6 +474,10 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       sellerId: order.shop.seller.userId,
       reason:   reason ?? '',
     });
+
+    // Free the rider/batch AFTER the cancel emit so the rider still gets the
+    // cancellation push, then the order leaves their active list (Phase 1.6).
+    if (order.riderId) await releaseOrderAssignment(prisma, orderId, order.batchId);
 
     return { message: 'Order cancel ho gaya' };
   }
