@@ -15,6 +15,12 @@ import { DEV_HOST } from '../../config/devHost';
 
 const SOCKET_URL = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chirawa.in';
 
+// Looping alarm tone played on a new order until Accept/Reject. Set to a hosted
+// alarm sound (or swap for a bundled require('../../assets/alarm.mp3')) to enable
+// audio; left empty it falls back to vibration-only so the build never depends on
+// a missing asset. EXPO_PUBLIC_ALARM_SOUND_URL overrides per-build.
+const ALARM_SOUND_URL = process.env.EXPO_PUBLIC_ALARM_SOUND_URL ?? '';
+
 const REJECT_REASONS = [
   'Stock nahi hai',
   'Dukaan band hai',
@@ -138,6 +144,19 @@ export default function OrderQueueScreen() {
       });
     } catch (e) {
       console.warn('Audio mode:', e);
+    }
+
+    // Looping alarm sound until Accept/Reject (no-op if no URL configured).
+    if (ALARM_SOUND_URL && !soundRef.current) {
+      try {
+        const { sound } = await Audio.Sound.createAsync(
+          { uri: ALARM_SOUND_URL },
+          { isLooping: true, shouldPlay: true, volume: 1.0 },
+        );
+        soundRef.current = sound;
+      } catch (e) {
+        console.warn('Alarm sound failed (vibration only):', e);
+      }
     }
 
     // Vibrate every 1.5 seconds
