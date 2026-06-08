@@ -389,7 +389,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       include: {
         shop:     { select: { id: true, name: true } },
         // Up to 8 images per card so the customer card can show a swipeable
-        // carousel (Blinkit-style). imageUrl stays as the first for back-compat.
+        // carousel. imageUrl stays as the first for back-compat.
         images:   { orderBy: { sortOrder: 'asc' }, take: 8, select: { url: true } },
         variants: { where: { isActive: true }, take: 1, select: { id: true } },
       },

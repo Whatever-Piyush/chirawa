@@ -9,22 +9,20 @@ import { useT } from '@chirawa/i18n';
 import { Text } from '../../components/ui';
 import { isOpenNow } from '../../utils/operatingHours';
 import { api } from '../../services/api.service';
+import { fetchCategories, type ApiCategory } from '../../services/catalog';
 import { useAuth } from '../../context/AuthContext';
 import LocationSheet from '../../components/location/LocationSheet';
 import Header from './Header';
 import SearchBar from './SearchBar';
-import CategoryTabs from './CategoryTabs';
 import FeaturedBanner from './FeaturedBanner';
-import PopularProductsSection from './PopularProductsSection';
-import BestsellersSection from './BestsellersSection';
-import CategoryGrid, { GROCERY_KITCHEN, SNACKS_DRINKS } from './CategoryGrid';
-import ShopsNearbySection from './ShopsNearbySection';
-import ChirawaSpecialSection from './ChirawaSpecialSection';
+import ProductCarouselSection from './ProductCarouselSection';
+import CategorySections from './CategorySections';
+import { SECTION_GROUPS, CAROUSEL_SECTIONS } from './categoryMeta';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 
-// Home is now a fully category-first surface (Blinkit-style) — no shop list.
-// Header + Search are fixed above the scroll; everything else scrolls.
+// Category-first home: a fixed header + search, then two horizontally-scrollable
+// category strips (chips + icons) and themed category sections below.
 export default function HomeScreen({ navigation }: Props) {
   const t = useT();
   const { colors: Colors } = useTheme();
@@ -34,6 +32,7 @@ export default function HomeScreen({ navigation }: Props) {
   // Delivery address shown in the header + edited via the location sheet.
   const [addresses, setAddresses] = useState<AddressResponse[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [categories, setCategories] = useState<ApiCategory[]>([]);
 
   const loadAddresses = useCallback(async () => {
     try {
@@ -51,10 +50,27 @@ export default function HomeScreen({ navigation }: Props) {
     [navigation, loadAddresses],
   );
 
+  // Load categories once. Keep only the known/curated categories (those grouped
+  // into a section), so a stray legacy category never shows up.
+  useEffect(() => {
+    let active = true;
+    const known = new Set(SECTION_GROUPS.flatMap((g) => g.tiles.map((tl) => tl.category)));
+    fetchCategories()
+      .then((all) => { if (active) setCategories(all.filter((c) => known.has(c.name))); })
+      .catch(() => { /* tolerate */ })
+      .finally(() => { /* no-op */ });
+    return () => { active = false; };
+  }, []);
+
   const activeAddress = addresses.find((a) => a.isDefault) ?? addresses[0] ?? null;
   const addressLine = activeAddress
     ? `${activeAddress.street}, ${activeAddress.locality}`
     : null;
+
+  const openCategory = useCallback(
+    (name: string) => navigation.navigate('CategoryProducts', { category: name }),
+    [navigation],
+  );
 
   // Entrance animations: header fades in, search + banner slide up just after.
   const headerOpacity   = useRef(new Animated.Value(0)).current;
@@ -76,7 +92,7 @@ export default function HomeScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      {/* ── 1. Header — delivery ETA + tappable address + profile icon ────── */}
+      {/* ── Header — delivery ETA + tappable address + profile icon ───────── */}
       <Header
         entranceOpacity={headerOpacity}
         addressLine={addressLine}
@@ -84,8 +100,7 @@ export default function HomeScreen({ navigation }: Props) {
         onLocationPress={() => setSheetOpen(true)}
       />
 
-      {/* ── 2. Search bar — outside the ScrollView; marginTop:-20 straddles
-               the orange/cream boundary. */}
+      {/* ── Search bar — overlaps the header's bottom edge. ───────────────── */}
       <View style={styles.searchOverlap}>
         <SearchBar
           entranceOpacity={searchOpacity}
@@ -108,32 +123,24 @@ export default function HomeScreen({ navigation }: Props) {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* ── 3. Category chips ──────────────────────────────────────────── */}
-        <CategoryTabs />
+        {/* ── Two product carousels, each with a category tab bar ────────── */}
+        {CAROUSEL_SECTIONS.map((s) => (
+          <ProductCarouselSection
+            key={s.title}
+            title={s.title}
+            tabs={s.tabs}
+            onSeeAll={openCategory}
+          />
+        ))}
 
-        {/* ── 4. Featured banner — delivery promise ──────────────────────── */}
+        {/* ── Delivery promise banner ────────────────────────────────────── */}
         <FeaturedBanner
           entranceOpacity={bannerOpacity}
           entranceTranslate={bannerTranslate}
         />
 
-        {/* ── 5. Popular products — real add-to-cart cards (live API) ─────── */}
-        <PopularProductsSection />
-
-        {/* ── 6. Shop by category — real categories (live API) ───────────── */}
-        <BestsellersSection />
-
-        {/* ── 7. Grocery & Kitchen — 4-column icon tiles ─────────────────── */}
-        <CategoryGrid title={t('home.groceryKitchen')} items={GROCERY_KITCHEN} />
-
-        {/* ── 8. Snacks & Drinks — 4-column icon tiles ───────────────────── */}
-        <CategoryGrid title={t('home.snacksDrinks')} items={SNACKS_DRINKS} />
-
-        {/* ── 9. Shops near you — general (non-featured) shops (live API) ── */}
-        <ShopsNearbySection />
-
-        {/* ── 10. Chirawa's Special — featured local-shops carousel ──────── */}
-        <ChirawaSpecialSection />
+        {/* ── Themed category sections — 4 equal tiles per row ───────────── */}
+        <CategorySections categories={categories} onSelect={openCategory} />
 
         <View style={{ height: Spacing.huge }} />
       </ScrollView>

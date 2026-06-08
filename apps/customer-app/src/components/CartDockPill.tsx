@@ -13,7 +13,7 @@ import type { RootStackParamList } from '../navigation/AppNavigator';
 const TAB_BAR_BASE = 64;   // matches CustomTabBar height (excl. safe-area)
 const GAP_ABOVE_BAR = 10;
 
-// Floating cart capsule — Blinkit-style content-hugging pill, centered above
+// Floating cart capsule — content-hugging pill, centered above
 // the bottom nav. Brand orange (matches the header / banner) with a left
 // product thumbnail, "View cart" + summary, and a circular chevron.
 export default function CartDockPill() {

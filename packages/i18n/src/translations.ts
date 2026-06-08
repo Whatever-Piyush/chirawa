@@ -183,7 +183,7 @@ export const translations = {
     trustBadge:        { en: 'Secure Checkout — 100% Safe',          hi: 'सुरक्षित चेकआउट — 100% Safe' },
     securePayment:     { en: '100% Secure Payment',                  hi: '100% सुरक्षित भुगतान' },
     orderPlaced:       { en: 'Order placed!',                        hi: 'ऑर्डर हो गया!' },
-    // ── Checkout redesign (v2 Blinkit layout) ────────────────────────
+    // ── Checkout redesign (v2 layout) ────────────────────────
     bestDeal:          { en: 'Best deal on your cart',               hi: 'आपकी कार्ट पर बेस्ट डील' },
     saveTo15:          { en: 'Add ₹{amt} more to cut delivery to ₹15', hi: '₹{amt} और जोड़ें — डिलीवरी ₹15 हो जाएगी' },
     saveTo10:          { en: 'Add ₹{amt} more to cut delivery to ₹10', hi: '₹{amt} और जोड़ें — डिलीवरी ₹10 हो जाएगी' },

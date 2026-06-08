@@ -369,7 +369,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
     );
   }, [Colors, styles, shopMap, t, reorderingId, navigation, handleReorder]);
 
-  // ─── Body: skeleton / error / Blinkit-style list ───────────────────────────
+  // ─── Body: skeleton / error / list ───────────────────────────
   // Hero/order-again grid + bestsellers live in the list header; past orders are
   // the (possibly empty) virtualised list; the faded tagline is the footer. We
   // never early-return on empty so the hero + bestsellers always greet the user.

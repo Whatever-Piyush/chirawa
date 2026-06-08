@@ -15,7 +15,7 @@ import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// 2-column grid card (regular) and 3-column (compact, Blinkit-style smaller tiles).
+// 2-column grid card (regular) and 3-column (compact, smaller tiles).
 export const PRODUCT_CARD_WIDTH         = (SCREEN_WIDTH - 32 - 12) / 2;
 export const PRODUCT_CARD_WIDTH_COMPACT = (SCREEN_WIDTH - 32 - 24) / 3;
 
@@ -169,13 +169,20 @@ export default function ProductCard({
         </Animated.View>
       </View>
 
-      {/* price */}
+      {/* price — green badge + strikethrough MRP + savings */}
       <View style={styles.priceRow}>
-        <Text weight="bold" color={Colors.textPrimary} style={styles.price}>₹{rupees}</Text>
+        <View style={styles.pricePill}>
+          <Text weight="bold" color="#FFFFFF" style={styles.priceText}>₹{rupees}</Text>
+        </View>
         {hasMrp && (
           <Text weight="regular" style={styles.mrp}>₹{Math.round((product.mrpPaise ?? 0) / 100)}</Text>
         )}
       </View>
+      {hasMrp && (
+        <Text weight="semibold" style={styles.off}>
+          ₹{Math.round(((product.mrpPaise ?? 0) - product.pricePaise) / 100)} OFF
+        </Text>
+      )}
 
       {/* name */}
       <Text weight="medium" color={Colors.textPrimary} numberOfLines={2} style={styles.name}>
@@ -261,9 +268,11 @@ const makeStyles = (Colors: ColorPalette, dims: typeof DIMS[ProductCardSize]) =>
   stepBtn:   { width: 22, alignItems: 'center', justifyContent: 'center' },
   stepCount: { fontSize: dims.nameSize + 1, minWidth: 16, textAlign: 'center' },
 
-  priceRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 5, marginTop: 6 },
-  price:    { fontSize: dims.priceSize, lineHeight: dims.priceSize + 4 },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 },
+  pricePill: { backgroundColor: '#1F8E3D', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1 },
+  priceText: { fontSize: dims.priceSize - 3, lineHeight: dims.priceSize + 1 },
   mrp:      { fontSize: dims.nameSize, color: '#999', textDecorationLine: 'line-through' },
+  off:      { fontSize: dims.nameSize - 1, color: '#1F8E3D', marginTop: 2 },
 
   name: { fontSize: dims.nameSize, lineHeight: dims.nameSize + 4, marginTop: 3 },
 });
