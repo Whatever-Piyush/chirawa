@@ -41,6 +41,11 @@ const CATEGORY_SORT: Record<string, number> = {
   'Baby Care':          14,
   'Health & Pharma':    15,
   'Sexual Wellness':    16,
+  // Household Essentials sub-categories
+  'Home & Lifestyle':      17,
+  'Cleaners & Repellents': 18,
+  'Electronics':           19,
+  'Stationery & Games':    20,
 };
 
 // Products carry no images by design — the customer card renders a clean
@@ -275,6 +280,53 @@ const DARK_STORE_PRODUCTS: SeedProduct[] = [
   { name: 'Durex Extra Time Condoms',               unit: '10 pcs', pricePaise: 29900, mrpPaise: 33500, category: 'Sexual Wellness' },
   { name: 'Manforce Extra Dotted Condoms',          unit: '10 pcs', pricePaise: 19900, mrpPaise: 22500, category: 'Sexual Wellness' },
   { name: 'Skore Not Out Condoms',                  unit: '10 pcs', pricePaise: 17900, mrpPaise: 19900, category: 'Sexual Wellness' },
+
+  // ════════════════════ HOUSEHOLD ESSENTIALS ══════════════════════════════════
+  // ── Home & Lifestyle ───────────────────────────────────────────────────────
+  { name: 'Trident Cotton Double Bedsheet',         unit: '1 pc',   pricePaise: 79900,  mrpPaise: 99900,  category: 'Home & Lifestyle' },
+  { name: 'Bombay Dyeing Bath Towel',               unit: '1 pc',   pricePaise: 39900,  mrpPaise: 49900,  category: 'Home & Lifestyle' },
+  { name: 'Milton Thermosteel Water Bottle',        unit: '1 L',    pricePaise: 64900,  mrpPaise: 79900,  category: 'Home & Lifestyle' },
+  { name: 'Cello Storage Container Set',            unit: '3 pcs',  pricePaise: 44900,  mrpPaise: 59900,  category: 'Home & Lifestyle' },
+  { name: 'Borosil Glass Tumbler Set',             unit: '6 pcs',  pricePaise: 54900,  mrpPaise: 69900,  category: 'Home & Lifestyle' },
+  { name: 'Prestige Non-Stick Frying Pan',         unit: '1 pc',   pricePaise: 89900,  mrpPaise: 119900, category: 'Home & Lifestyle' },
+  { name: 'Pigeon Stainless Steel Lunch Box',      unit: '1 pc',   pricePaise: 34900,  mrpPaise: 44900,  category: 'Home & Lifestyle' },
+  { name: 'Artificial Indoor Plant with Pot',      unit: '1 pc',   pricePaise: 29900,  mrpPaise: 39900,  category: 'Home & Lifestyle' },
+  { name: 'Wonderchef Kitchen Knife',              unit: '1 pc',   pricePaise: 24900,  mrpPaise: 34900,  category: 'Home & Lifestyle' },
+
+  // ── Cleaners & Repellents ──────────────────────────────────────────────────
+  { name: 'Surf Excel Matic Front Load Powder',    unit: '1 kg',   pricePaise: 18500,  mrpPaise: 21000,  category: 'Cleaners & Repellents' },
+  { name: 'Ariel Matic Liquid Detergent',          unit: '1 L',    pricePaise: 24500,  mrpPaise: 27500,  category: 'Cleaners & Repellents' },
+  { name: 'Vim Dishwash Gel (Lemon)',              unit: '500 ml', pricePaise: 11000,  mrpPaise: 12500,  category: 'Cleaners & Repellents' },
+  { name: 'Harpic Power Plus Toilet Cleaner',      unit: '1 L',    pricePaise: 19500,  mrpPaise: 22000,  category: 'Cleaners & Repellents' },
+  { name: 'Lizol Disinfectant Floor Cleaner',      unit: '975 ml', pricePaise: 19900,  mrpPaise: 22500,  category: 'Cleaners & Repellents' },
+  { name: 'Colin Glass Cleaner',                   unit: '500 ml', pricePaise: 9900,   mrpPaise: 11000,  category: 'Cleaners & Repellents' },
+  { name: 'Comfort Fabric Conditioner',            unit: '860 ml', pricePaise: 19900,  mrpPaise: 22500,  category: 'Cleaners & Repellents' },
+  { name: 'Scotch-Brite Scrub Pad',               unit: '3 pcs',  pricePaise: 6500,   mrpPaise: 7500,   category: 'Cleaners & Repellents' },
+  { name: 'Good Knight Gold Flash Refill',         unit: '45 ml',  pricePaise: 7500,   mrpPaise: 8500,   category: 'Cleaners & Repellents' },
+  { name: 'All Out Ultra Mosquito Refill',         unit: '45 ml',  pricePaise: 7500,   mrpPaise: 8500,   category: 'Cleaners & Repellents' },
+  { name: 'HIT Cockroach Killer Spray',            unit: '400 ml', pricePaise: 21500,  mrpPaise: 24000,  category: 'Cleaners & Repellents' },
+  { name: 'Odonil Air Freshener Blocks',           unit: '50 g',   pricePaise: 6500,   mrpPaise: 7500,   category: 'Cleaners & Repellents' },
+
+  // ── Electronics ────────────────────────────────────────────────────────────
+  { name: 'boAt Airdopes 141 Earbuds',             unit: '1 pc',   pricePaise: 129900, mrpPaise: 249900, category: 'Electronics' },
+  { name: 'boAt Rockerz 450 Headphones',           unit: '1 pc',   pricePaise: 149900, mrpPaise: 299900, category: 'Electronics' },
+  { name: 'Bajaj Majesty Steam Iron',              unit: '1 pc',   pricePaise: 89900,  mrpPaise: 119900, category: 'Electronics' },
+  { name: 'Mi Power Bank 10000mAh',                unit: '1 pc',   pricePaise: 99900,  mrpPaise: 129900, category: 'Electronics' },
+  { name: 'Syska 9W LED Bulb',                     unit: '1 pc',   pricePaise: 9900,   mrpPaise: 14900,  category: 'Electronics' },
+  { name: 'Duracell AA Batteries',                 unit: '4 pcs',  pricePaise: 19900,  mrpPaise: 24900,  category: 'Electronics' },
+  { name: 'Ambrane USB-C Fast Charging Cable',     unit: '1 pc',   pricePaise: 19900,  mrpPaise: 39900,  category: 'Electronics' },
+  { name: 'Portronics Extension Board (4 Socket)', unit: '1 pc',   pricePaise: 54900,  mrpPaise: 79900,  category: 'Electronics' },
+
+  // ── Stationery & Games ─────────────────────────────────────────────────────
+  { name: 'UNO Card Game',                         unit: '1 pc',   pricePaise: 19900,  mrpPaise: 24900,  category: 'Stationery & Games' },
+  { name: 'Ludo Board Game',                       unit: '1 pc',   pricePaise: 24900,  mrpPaise: 34900,  category: 'Stationery & Games' },
+  { name: 'Classmate Spiral Notebook',             unit: '1 pc',   pricePaise: 6500,   mrpPaise: 7500,   category: 'Stationery & Games' },
+  { name: 'Nataraj HB Pencils',                    unit: '10 pcs', pricePaise: 5000,   mrpPaise: 6000,   category: 'Stationery & Games' },
+  { name: 'Cello Gel Pens (Blue)',                 unit: '5 pcs',  pricePaise: 10000,  mrpPaise: 12500,  category: 'Stationery & Games' },
+  { name: 'Faber-Castell Colour Pencils',          unit: '12 pcs', pricePaise: 11500,  mrpPaise: 13500,  category: 'Stationery & Games' },
+  { name: 'Camlin Geometry Box',                   unit: '1 pc',   pricePaise: 12500,  mrpPaise: 14900,  category: 'Stationery & Games' },
+  { name: 'Fevicol MR Adhesive',                   unit: '100 g',  pricePaise: 4500,   mrpPaise: 5000,   category: 'Stationery & Games' },
+  { name: 'Playing Cards Deck',                    unit: '1 pc',   pricePaise: 5900,   mrpPaise: 7900,   category: 'Stationery & Games' },
 ];
 
 // Phones of the legacy per-area stores that no longer exist in the dark-store

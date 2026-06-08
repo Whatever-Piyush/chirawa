@@ -20,6 +20,11 @@ export const CATEGORY_EMOJI: Record<string, string> = {
   'Baby Care':          '🍼',
   'Health & Pharma':    '💊',
   'Sexual Wellness':    '❤️',
+  // Household Essentials sub-categories
+  'Home & Lifestyle':      '🏠',
+  'Cleaners & Repellents': '🧹',
+  'Electronics':           '🎧',
+  'Stationery & Games':    '✏️',
   'Grocery':           '🛍️',
 };
 
@@ -85,6 +90,15 @@ export const SECTION_GROUPS: ReadonlyArray<SectionGroup> = [
       { label: 'Baby Care',           emoji: '🍼', category: 'Baby Care' },
       { label: 'Health & Pharma',     emoji: '💊', category: 'Health & Pharma' },
       { label: 'Sexual Wellness',     emoji: '❤️', category: 'Sexual Wellness' },
+    ],
+  },
+  {
+    title: 'Household Essentials',
+    tiles: [
+      { label: 'Home & Lifestyle',      emoji: '🏠', category: 'Home & Lifestyle' },
+      { label: 'Cleaners & Repellents', emoji: '🧹', category: 'Cleaners & Repellents' },
+      { label: 'Electronics',           emoji: '🎧', category: 'Electronics' },
+      { label: 'Stationery & Games',    emoji: '✏️', category: 'Stationery & Games' },
     ],
   },
 ];
