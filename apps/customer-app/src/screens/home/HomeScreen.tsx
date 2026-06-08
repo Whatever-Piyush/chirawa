@@ -41,9 +41,23 @@ export default function HomeScreen({ navigation }: Props) {
     }
   }, []);
 
+  // Outside delivery hours the header + banner go night-themed. Kept in state so
+  // the UI flips back to the normal (daytime) interface at opening time even if
+  // the home screen is left open across the boundary — re-checked on focus and
+  // on a 1-min interval. setState bails out when the value is unchanged, so this
+  // only re-renders at the actual open↔close transition.
+  const [closed, setClosed] = useState(!isOpenNow());
+  useEffect(() => {
+    const id = setInterval(() => setClosed(!isOpenNow()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => { void loadAddresses(); }, [loadAddresses]);
   useEffect(
-    () => navigation.addListener('focus', () => { void loadAddresses(); }),
+    () => navigation.addListener('focus', () => {
+      setClosed(!isOpenNow());
+      void loadAddresses();
+    }),
     [navigation, loadAddresses],
   );
 
@@ -82,9 +96,6 @@ export default function HomeScreen({ navigation }: Props) {
     ]).start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Outside delivery hours the top of the screen (header + banner) goes night-themed.
-  const closed = !isOpenNow();
 
   return (
     <View style={styles.container}>
