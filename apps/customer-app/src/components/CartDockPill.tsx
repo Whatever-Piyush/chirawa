@@ -1,18 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Animated, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useT } from '@chirawa/i18n';
 import { Text, FauxGradient } from './ui';
 import { Colors, Spacing } from '../theme';
 import { useCart } from '../context/CartContext';
-import { useStoreClosed } from '../hooks/useStoreClosed';
+import { isOpenNow } from '../utils/operatingHours';
+import { navigationRef } from '../navigation/ref';
 import { NIGHT_FROM, NIGHT_TO } from '../screens/home/nightTheme';
 import Starfield from '../screens/home/Starfield';
-import type { RootStackParamList } from '../navigation/AppNavigator';
+import CartThumbs from './CartThumbs';
 import type { TextStyle } from 'react-native';
+
+const TAB_BAR_BASE = 64;   // matches CustomTabBar height (excl. safe-area)
+const GAP_ABOVE_BAR = 10;
+const STACK_GAP = 16;      // pushed screens (no tab bar)
+const PRODUCT_BAR = 96;    // clear Product Detail's add-to-cart footer
+
+// Bottom-tab routes — on these the capsule floats above the tab bar.
+const TAB_ROUTES = new Set(['Home', 'OrderHistory', 'Categories', 'Special', 'Profile']);
 
 // A few tiny stars for the cart pill's night look (matches header/banner).
 const CART_STARS: TextStyle[] = [
@@ -23,84 +30,94 @@ const CART_STARS: TextStyle[] = [
   { bottom: 10, right: 120,fontSize: 6, opacity: 0.45 },
 ];
 
-const TAB_BAR_BASE = 64;   // matches CustomTabBar height (excl. safe-area)
-const GAP_ABOVE_BAR = 10;
-
-// Floating cart capsule — content-hugging pill, centered above
-// the bottom nav. Brand orange (matches the header / banner) with a left
-// product thumbnail, "View cart" + summary, and a circular chevron.
-export default function CartDockPill() {
+// Floating cart capsule. Visible on Home always; on every other screen only once
+// the cart has items. Left side stacks circular thumbnails of the last 3 added
+// items (animated); brand orange by day, night-themed when the store is closed.
+export default function CartDockPill({ activeRoute }: { activeRoute?: string }) {
   const insets = useSafeAreaInsets();
   const t = useT();
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { count, subtotalPaise, lastAddedItem } = useCart();
-  const closed = useStoreClosed();
+  const { count, subtotalPaise, recentlyAdded } = useCart();
+  // Night theme when closed — re-checked on navigation (activeRoute) + every min.
+  const [closed, setClosed] = useState(!isOpenNow());
+  useEffect(() => {
+    setClosed(!isOpenNow());
+    const id = setInterval(() => setClosed(!isOpenNow()), 60_000);
+    return () => clearInterval(id);
+  }, [activeRoute]);
 
-  const anim  = useRef(new Animated.Value(count > 0 ? 1 : 0)).current;
+  // Empty cart → Home only; any items → every page.
+  const shouldShow = count > 0 || activeRoute === 'Home';
+
+  const anim  = useRef(new Animated.Value(shouldShow ? 1 : 0)).current;
   const scale = useRef(new Animated.Value(1)).current;
   const prevCount = useRef(count);
-  const [rendered, setRendered] = useState(count > 0);
+  const [rendered, setRendered] = useState(shouldShow);
 
+  // Show / hide on visibility changes.
   useEffect(() => {
-    const prev = prevCount.current;
-    prevCount.current = count;
-
-    if (count > 0) {
+    if (shouldShow) {
       if (!rendered) setRendered(true);
       Animated.spring(anim, { toValue: 1, tension: 200, friction: 18, useNativeDriver: true }).start();
-      if (prev > 0 && prev !== count) {
-        Animated.sequence([
-          Animated.timing(scale, { toValue: 1.05, duration: 60, useNativeDriver: true }),
-          Animated.spring(scale, { toValue: 1, tension: 300, friction: 10, useNativeDriver: true }),
-        ]).start();
-      }
     } else if (rendered) {
       Animated.timing(anim, { toValue: 0, duration: 200, useNativeDriver: true })
         .start(({ finished }) => { if (finished) setRendered(false); });
     }
-  }, [count, rendered, anim, scale]);
+  }, [shouldShow, rendered, anim]);
+
+  // Little bump when the count changes.
+  useEffect(() => {
+    const prev = prevCount.current;
+    prevCount.current = count;
+    if (prev > 0 && prev !== count) {
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 1.05, duration: 60, useNativeDriver: true }),
+        Animated.spring(scale, { toValue: 1, tension: 300, friction: 10, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [count, scale]);
 
   if (!rendered) return null;
+
+  const onTab     = !activeRoute || TAB_ROUTES.has(activeRoute);
+  const bottom    = onTab
+    ? insets.bottom + TAB_BAR_BASE + GAP_ABOVE_BAR
+    : activeRoute === 'ProductDetail'
+      ? insets.bottom + PRODUCT_BAR
+      : insets.bottom + STACK_GAP;
 
   const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [90, 0] });
   const rupees     = Math.round(subtotalPaise / 100);
   const itemsWord  = count === 1 ? t('cart.itemOne') : t('cart.itemMany');
+  const hasItems   = count > 0;
 
   return (
     <Animated.View
       pointerEvents="box-none"
-      style={[
-        styles.wrap,
-        { bottom: insets.bottom + TAB_BAR_BASE + GAP_ABOVE_BAR, opacity: anim, transform: [{ translateY }, { scale }] },
-      ]}
+      style={[styles.wrap, { bottom, opacity: anim, transform: [{ translateY }, { scale }] }]}
     >
       <TouchableOpacity
         activeOpacity={0.9}
         style={[styles.pill, closed && styles.pillNight]}
-        onPress={() => navigation.navigate('Checkout')}
+        onPress={() => { if (navigationRef.isReady()) navigationRef.navigate('Checkout'); }}
         accessibilityRole="button"
         accessibilityLabel={t('cart.viewCart')}
       >
-        {/* Night theme when closed — matches header & banner. The gradient is
-            self-rounded (no overflow:hidden on the pill) so the shadow survives. */}
+        {/* Night theme when closed — self-rounded gradient so the shadow survives. */}
         {closed && (
           <>
-            <FauxGradient
-              from={NIGHT_FROM}
-              to={NIGHT_TO}
-              steps={12}
-              style={[StyleSheet.absoluteFill, { borderRadius: 24 }]}
-            />
+            <FauxGradient from={NIGHT_FROM} to={NIGHT_TO} steps={12} style={[StyleSheet.absoluteFill, { borderRadius: 24 }]} />
             <Starfield stars={CART_STARS} />
           </>
         )}
 
-        {/* Left — last-added product thumbnail */}
-        <View style={styles.thumb}>
-          {lastAddedItem?.imageUrl ? (
-            <Image source={{ uri: lastAddedItem.imageUrl }} style={styles.thumbImg} resizeMode="cover" />
+        {/* Left — stacked thumbnails (items) or a cart glyph (empty) */}
+        <View style={styles.left}>
+          {hasItems ? (
+            <CartThumbs items={recentlyAdded} />
           ) : (
-            <View style={[styles.thumbImg, { backgroundColor: lastAddedItem?.imageColor ?? 'rgba(255,255,255,0.25)' }]} />
+            <View style={styles.emptyIcon}>
+              <Ionicons name="cart-outline" size={18} color={Colors.white} />
+            </View>
           )}
         </View>
 
@@ -109,9 +126,11 @@ export default function CartDockPill() {
           <Text weight="bold" color={Colors.white} style={styles.title}>
             {t('cart.viewCart')}
           </Text>
-          <Text weight="medium" style={styles.summary}>
-            {count} {itemsWord}  ·  ₹{rupees}
-          </Text>
+          {hasItems && (
+            <Text weight="medium" style={styles.summary}>
+              {count} {itemsWord}  ·  ₹{rupees}
+            </Text>
+          )}
         </View>
 
         {/* Right — circular chevron */}
@@ -134,11 +153,11 @@ const styles = StyleSheet.create({
     flexDirection:   'row',
     alignItems:      'center',
     alignSelf:       'center',
-    minWidth:        190,              // shorter, content-hugging
+    minWidth:        190,
     height:          48,
     borderRadius:    24,
     backgroundColor: Colors.primary,   // brand orange — matches header/banner
-    paddingLeft:     6,
+    paddingLeft:     8,
     paddingRight:    6,
     shadowColor:   Colors.primary,
     shadowOpacity: 0.40,
@@ -150,12 +169,13 @@ const styles = StyleSheet.create({
     backgroundColor: NIGHT_FROM,       // night base behind the gradient
     shadowColor:     '#150F2E',
   },
-  thumb: { width: 34, height: 34 },
-  thumbImg: {
-    width: 34, height: 34, borderRadius: 10,
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.5)',
+  left: { justifyContent: 'center', minHeight: 30 },
+  emptyIcon: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    justifyContent: 'center', alignItems: 'center',
   },
-  center: { flex: 1, marginLeft: Spacing.sm, marginRight: Spacing.sm },
+  center: { flex: 1, marginLeft: Spacing.sm, marginRight: Spacing.sm, justifyContent: 'center' },
   title:   { fontSize: 14, lineHeight: 18 },
   summary: { fontSize: 11, lineHeight: 14, color: 'rgba(255,255,255,0.9)', marginTop: 1 },
   chevron: {

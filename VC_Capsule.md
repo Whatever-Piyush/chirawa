@@ -3,7 +3,24 @@
 How the floating "View cart" capsule should look and behave. Review/edit before
 I implement.
 
-> Status: **PROPOSAL — not yet coded.** Edit anything; then say "go".
+> Status: **IMPLEMENTED ✅** (defaults: show above Product Detail bar; empty tap
+> opens Checkout; newest circle on top).
+
+### As built
+- `CartContext` now tracks `recentlyAdded` (last 3 distinct, deduped; cleared when
+  the cart empties).
+- New `CartThumbs` — overlapping circular thumbnails (30 px, ~40% overlap) with
+  slide-in-from-right / slide-out-left + width-stretch animations; newest on top.
+- `CartDockPill` is now rendered **once globally** (sibling of the root
+  `Stack.Navigator`), made self-sufficient (uses `navigationRef` + an interval
+  closed-check instead of screen-only nav hooks). Visibility: `count>0` →
+  everywhere; empty → Home only (empty-state shows a cart glyph, no thumbnails).
+  Bottom offset adapts: tab screens (above tab bar), Product Detail (above its
+  footer), other pushed screens (just above safe-area). Night theme retained.
+- Removed the old per-`MainTabs` pill.
+
+---
+_Original proposal below._
 
 ---
 

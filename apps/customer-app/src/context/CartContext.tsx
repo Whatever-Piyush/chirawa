@@ -24,6 +24,7 @@ interface CartContextValue {
   subtotalPaise:  number;
   quantities:     Record<string, number>;  // cartKey → qty (for steppers)
   lastAddedItem:  LastAddedItem | null;
+  recentlyAdded:  LastAddedItem[];         // last 3 distinct added (oldest→newest)
   addItem:        (item: AddItemInput) => Promise<void>;
   setQuantity:    (productId: string, qty: number, variantId?: string) => Promise<void>;
   refresh:        () => Promise<void>;
@@ -56,11 +57,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [quantities, setQuantities]     = useState<Record<string, number>>({});
   const [subtotalPaise, setSubtotal]    = useState(0);
   const [lastAddedItem, setLastAdded]   = useState<LastAddedItem | null>(null);
+  // Rolling window of the last 3 distinct items added (oldest→newest), powering
+  // the cart capsule's stacked thumbnails. Cleared when the cart empties.
+  const [recentlyAdded, setRecentlyAdded] = useState<LastAddedItem[]>([]);
 
   const count = useMemo(
     () => Object.values(quantities).reduce((s, q) => s + q, 0),
     [quantities],
   );
+
+  useEffect(() => { if (count === 0) setRecentlyAdded([]); }, [count]);
 
   const refresh = useCallback(async () => {
     if (!isAuthed) {
@@ -87,12 +93,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     const cur = quantities[key] ?? 0;
     // optimistic
     setQuantities((q) => ({ ...q, [key]: cur + 1 }));
-    setLastAdded({
+    const added: LastAddedItem = {
       productId:  item.productId,
       name:       item.name,
       imageUrl:   item.imageUrl ?? null,
       imageColor: item.imageColor ?? DEFAULT_COLOR,
-    });
+    };
+    setLastAdded(added);
+    // Dedupe (re-adding bumps it to newest) then keep only the last 3.
+    setRecentlyAdded((prev) => [...prev.filter((p) => p.productId !== added.productId), added].slice(-3));
     try {
       if (cur > 0) await api.updateCartItem(item.productId, cur + 1, item.variantId);
       else         await api.addToCart({ productId: item.productId, quantity: 1, ...(item.variantId ? { variantId: item.variantId } : {}) });
@@ -132,7 +141,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   return (
-    <CartContext.Provider value={{ count, subtotalPaise, quantities, lastAddedItem, addItem, setQuantity, refresh }}>
+    <CartContext.Provider value={{ count, subtotalPaise, quantities, lastAddedItem, recentlyAdded, addItem, setQuantity, refresh }}>
       {children}
     </CartContext.Provider>
   );
@@ -141,7 +150,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 export function useCart(): CartContextValue {
   const ctx = useContext(CartContext);
   return ctx ?? {
-    count: 0, subtotalPaise: 0, quantities: {}, lastAddedItem: null,
+    count: 0, subtotalPaise: 0, quantities: {}, lastAddedItem: null, recentlyAdded: [],
     addItem: async () => {}, setQuantity: async () => {}, refresh: async () => {},
   };
 }
