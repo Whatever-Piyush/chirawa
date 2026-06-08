@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useT } from '@chirawa/i18n';
 import { Text, FauxGradient } from '../../components/ui';
 import { Spacing, Shadow } from '../../theme';
+import { NIGHT_FROM, NIGHT_TO } from './nightTheme';
 
 // Shown outside delivery hours. Browsing is still allowed, so instead of a flat
 // warning strip this is a calm "good night" card: a night-sky gradient, a moon,
@@ -14,7 +15,7 @@ export default function ClosedBanner() {
 
   return (
     <View style={styles.outer}>
-      <FauxGradient from="#23264F" to="#4C3E86" style={styles.card} steps={18}>
+      <FauxGradient from={NIGHT_FROM} to={NIGHT_TO} style={styles.card} steps={18}>
         {/* Decorative starfield — purely cosmetic, never intercepts touches. */}
         <View pointerEvents="none" style={StyleSheet.absoluteFill}>
           <Text style={[styles.star, { top: 12, left: 54, fontSize: 10, opacity: 0.55 }]}>✦</Text>

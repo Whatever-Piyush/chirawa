@@ -2,10 +2,11 @@ import React from 'react';
 import { View, TouchableOpacity, StyleSheet, Animated, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Text } from '../../components/ui';
+import { Text, FauxGradient } from '../../components/ui';
 import { Colors, Spacing } from '../../theme';
 import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
+import { NIGHT_FROM, NIGHT_TO } from './nightTheme';
 
 const HEADER_BLEED = 28; // bottom padding so the SearchBar can overlap upward
 
@@ -15,10 +16,12 @@ interface Props {
   addressLine?:    string | null;
   style?:          ViewStyle;
   entranceOpacity?: Animated.Value;
+  /** When true (store closed) the header wears the night theme instead of orange. */
+  night?:          boolean;
 }
 
 export default function Header({
-  onProfilePress, onLocationPress, addressLine, style, entranceOpacity,
+  onProfilePress, onLocationPress, addressLine, style, entranceOpacity, night = false,
 }: Props) {
   const insets = useSafeAreaInsets();
   const t = useT();
@@ -30,11 +33,17 @@ export default function Header({
     <Animated.View
       style={[
         styles.header,
+        night && styles.headerNight,
         { paddingTop: insets.top + Spacing.md },
         entranceOpacity ? { opacity: entranceOpacity } : null,
         style,
       ]}
     >
+      {/* Night background — drawn behind the content so taps still land. */}
+      {night && (
+        <FauxGradient from={NIGHT_FROM} to={NIGHT_TO} steps={18} style={StyleSheet.absoluteFill} />
+      )}
+
       {/* Row 1 — delivery promise + profile avatar */}
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
@@ -62,7 +71,7 @@ export default function Header({
           <Text style={styles.avatarText}>
             {state.name ? state.name.charAt(0).toUpperCase() : '?'}
           </Text>
-          <View style={styles.activeDot} />
+          <View style={[styles.activeDot, night && { borderColor: NIGHT_FROM }]} />
         </TouchableOpacity>
       </View>
 
@@ -94,6 +103,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     paddingHorizontal: Spacing.lg,
     paddingBottom: HEADER_BLEED,
+    overflow: 'hidden',          // clip the absolute night gradient to the header
+  },
+  headerNight: {
+    backgroundColor: NIGHT_FROM, // fallback base behind the gradient
   },
   row: {
     flexDirection: 'row',

@@ -83,12 +83,16 @@ export default function HomeScreen({ navigation }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Outside delivery hours the top of the screen (header + banner) goes night-themed.
+  const closed = !isOpenNow();
+
   return (
     <View style={styles.container}>
       {/* ── Header — delivery ETA + tappable address + profile icon ───────── */}
       <Header
         entranceOpacity={headerOpacity}
         addressLine={addressLine}
+        night={closed}
         onProfilePress={() => navigation.navigate('MainTabs', { screen: 'Profile' })}
         onLocationPress={() => setSheetOpen(true)}
       />
@@ -103,7 +107,7 @@ export default function HomeScreen({ navigation }: Props) {
       </View>
 
       {/* ── Closed banner — outside delivery hours (browsing still allowed) ── */}
-      {!isOpenNow() && <ClosedBanner />}
+      {closed && <ClosedBanner />}
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}

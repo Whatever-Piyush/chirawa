@@ -1,0 +1,62 @@
+# Closed-Hours Night Theme — Header + Banner
+
+What this change does and the decisions behind it. Edit anything you want
+changed before/after I implement.
+
+> Status: **IMPLEMENTED** (header now goes night-themed when closed).
+
+---
+
+## Goal
+
+When the store is **closed** (outside 8 AM – 9 PM), the night theme used by the
+closed banner should **extend upward into the header** — the area showing the
+Bringly delivery ETA, the `24×7` chip, the delivery address, and the profile
+button.
+
+- Keep every header element exactly as it is (ETA, address row, profile avatar).
+- Only the **background** changes: orange → the night gradient from the closed banner.
+- Everything must keep working:
+  - **Search bar** still opens the Search screen.
+  - **Address row** is still tappable and opens the editable location sheet.
+  - **Profile button** still opens the Profile tab.
+- When the store is **open**, the header stays the normal brand orange.
+
+---
+
+## How it's built
+
+1. **Shared night palette** (`screens/home/nightTheme.ts`)
+   - `NIGHT_FROM = '#23264F'` (deep indigo, top)
+   - `NIGHT_TO   = '#4C3E86'` (soft purple, bottom)
+   - Used by both the header background and the closed banner so they match.
+
+2. **Header (`screens/home/Header.tsx`)**
+   - New optional prop `night?: boolean`.
+   - When `night` is true, an absolutely-positioned `FauxGradient` (same
+     `NIGHT_FROM → NIGHT_TO`) is drawn as the header background instead of the
+     orange fill. All content renders on top, so taps still work.
+   - The profile avatar's little green "active" dot border is recoloured to the
+     night base so the ring doesn't show orange.
+   - Header content, layout, and the `onProfilePress` / `onLocationPress`
+     handlers are **unchanged**.
+
+3. **HomeScreen (`screens/home/HomeScreen.tsx`)**
+   - Computes `closed = !isOpenNow()` once and passes `night={closed}` to the
+     header (and renders the existing `ClosedBanner` below as before).
+
+4. **ClosedBanner** — refactored to import the shared palette (no visual change).
+
+5. **Search bar** — untouched. It stays a white card that overlaps the header's
+   bottom edge; on the dark header it reads clearly and still navigates to Search.
+
+---
+
+## Notes / open points
+
+- The white search bar sits between the night header and the night banner — it
+  stays light on purpose (a search input should look tappable/editable). If you
+  want the search bar itself tinted dark at night too, say so and I'll theme it.
+- Status bar / safe-area top becomes dark at night (covered by the header), which
+  suits the theme. If you want light status-bar icons forced at night, tell me.
+- Daytime look is unchanged (brand orange).
