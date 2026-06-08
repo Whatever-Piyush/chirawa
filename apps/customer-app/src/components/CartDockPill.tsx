@@ -5,10 +5,23 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useT } from '@chirawa/i18n';
-import { Text } from './ui';
+import { Text, FauxGradient } from './ui';
 import { Colors, Spacing } from '../theme';
 import { useCart } from '../context/CartContext';
+import { useStoreClosed } from '../hooks/useStoreClosed';
+import { NIGHT_FROM, NIGHT_TO } from '../screens/home/nightTheme';
+import Starfield from '../screens/home/Starfield';
 import type { RootStackParamList } from '../navigation/AppNavigator';
+import type { TextStyle } from 'react-native';
+
+// A few tiny stars for the cart pill's night look (matches header/banner).
+const CART_STARS: TextStyle[] = [
+  { top: 6,  left: 70,   fontSize: 6, opacity: 0.5 },
+  { top: 14, left: 130,  fontSize: 5, opacity: 0.4 },
+  { top: 8,  right: 90,  fontSize: 7, opacity: 0.5, color: '#BFD0FF' },
+  { bottom: 8,  left: 100, fontSize: 5, opacity: 0.4 },
+  { bottom: 10, right: 120,fontSize: 6, opacity: 0.45 },
+];
 
 const TAB_BAR_BASE = 64;   // matches CustomTabBar height (excl. safe-area)
 const GAP_ABOVE_BAR = 10;
@@ -21,6 +34,7 @@ export default function CartDockPill() {
   const t = useT();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { count, subtotalPaise, lastAddedItem } = useCart();
+  const closed = useStoreClosed();
 
   const anim  = useRef(new Animated.Value(count > 0 ? 1 : 0)).current;
   const scale = useRef(new Animated.Value(1)).current;
@@ -62,11 +76,25 @@ export default function CartDockPill() {
     >
       <TouchableOpacity
         activeOpacity={0.9}
-        style={styles.pill}
+        style={[styles.pill, closed && styles.pillNight]}
         onPress={() => navigation.navigate('Checkout')}
         accessibilityRole="button"
         accessibilityLabel={t('cart.viewCart')}
       >
+        {/* Night theme when closed — matches header & banner. The gradient is
+            self-rounded (no overflow:hidden on the pill) so the shadow survives. */}
+        {closed && (
+          <>
+            <FauxGradient
+              from={NIGHT_FROM}
+              to={NIGHT_TO}
+              steps={12}
+              style={[StyleSheet.absoluteFill, { borderRadius: 24 }]}
+            />
+            <Starfield stars={CART_STARS} />
+          </>
+        )}
+
         {/* Left — last-added product thumbnail */}
         <View style={styles.thumb}>
           {lastAddedItem?.imageUrl ? (
@@ -88,7 +116,7 @@ export default function CartDockPill() {
 
         {/* Right — circular chevron */}
         <View style={styles.chevron}>
-          <Ionicons name="chevron-forward" size={18} color={Colors.primary} />
+          <Ionicons name="chevron-forward" size={18} color={closed ? NIGHT_FROM : Colors.primary} />
         </View>
       </TouchableOpacity>
     </Animated.View>
@@ -117,6 +145,10 @@ const styles = StyleSheet.create({
     shadowRadius:  12,
     shadowOffset:  { width: 0, height: 5 },
     elevation:     12,
+  },
+  pillNight: {
+    backgroundColor: NIGHT_FROM,       // night base behind the gradient
+    shadowColor:     '#150F2E',
   },
   thumb: { width: 34, height: 34 },
   thumbImg: {

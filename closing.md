@@ -7,6 +7,18 @@ changed before/after I implement.
 
 ---
 
+## Round 3 — IMPLEMENTED ✅
+
+- **Banner scrolls with content** — the closed banner now lives *inside* each
+  page's scroll/list (not pinned), so it scrolls up with everything else.
+  Home & Special: first child of the ScrollView. Categories & Order History:
+  added to the FlatList header in a negative-margin wrapper so it still bleeds
+  to the edges despite the list's padding. Profile already scrolled.
+- **"Opens 8 AM" pill** → white background, black text + black sun icon.
+- **View Cart capsule** → goes night-themed when closed (same NIGHT gradient +
+  a few stars, dark shadow, night-tinted chevron), matching the header & banner.
+  Gradient is self-rounded so the pill keeps its floating shadow.
+
 ## Round 2 — IMPLEMENTED ✅
 
 Five changes shipped (defaults used: **Neptune** planet, **gold-gradient** pill):

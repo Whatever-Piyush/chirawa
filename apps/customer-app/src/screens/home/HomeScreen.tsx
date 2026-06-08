@@ -107,14 +107,14 @@ export default function HomeScreen({ navigation }: Props) {
         />
       </View>
 
-      {/* ── Closed banner — outside delivery hours (browsing still allowed) ── */}
-      {closed && <ClosedBanner />}
-
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {/* ── Closed banner — scrolls with the content ───────────────────── */}
+        {closed && <ClosedBanner />}
+
         {/* ── Two product carousels, each with a category tab bar ────────── */}
         {CAROUSEL_SECTIONS.map((s) => (
           <ProductCarouselSection

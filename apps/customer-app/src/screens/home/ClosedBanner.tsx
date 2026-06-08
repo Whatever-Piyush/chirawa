@@ -65,12 +65,12 @@ export default function ClosedBanner() {
             {t('home.closedSub')}
           </Text>
 
-          <FauxGradient from="#FFE08A" to="#FF9D3D" steps={10} style={styles.pill}>
-            <Ionicons name="sunny" size={13} color="#6A3B05" />
-            <Text weight="bold" color="#6A3B05" style={styles.pillText}>
+          <View style={styles.pill}>
+            <Ionicons name="sunny" size={13} color="#000000" />
+            <Text weight="bold" color="#000000" style={styles.pillText}>
               {t('home.closedReopen')}
             </Text>
-          </FauxGradient>
+          </View>
         </View>
       </FauxGradient>
     </View>
@@ -99,7 +99,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 5,
     marginTop: 12,
     paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 20,             // gold-gradient chip — sexy "come back" cue
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',   // white chip, black text
     ...Shadow.sm,
   },
   pillText: { fontSize: 13, lineHeight: 17 },

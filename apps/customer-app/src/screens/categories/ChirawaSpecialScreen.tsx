@@ -39,12 +39,11 @@ export default function ChirawaSpecialScreen() {
         </Text>
       </View>
 
-      {closed && <ClosedBanner />}
-
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
+        {closed && <ClosedBanner />}
         <ChirawaSpecialSection />
         <View style={{ height: Spacing.huge }} />
       </ScrollView>

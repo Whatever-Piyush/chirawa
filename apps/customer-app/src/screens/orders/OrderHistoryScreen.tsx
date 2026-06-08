@@ -409,6 +409,8 @@ export default function OrderHistoryScreen({ navigation }: Props) {
         renderItem={renderOrder}
         ListHeaderComponent={
           <View>
+            {closed && <View style={styles.bannerBleed}><ClosedBanner /></View>}
+
             {/* Order-again grid when the user has history; hero card otherwise */}
             {reorderProducts.length > 0 ? (
               <View style={styles.grid}>
@@ -483,8 +485,6 @@ export default function OrderHistoryScreen({ navigation }: Props) {
         />
       </View>
 
-      {closed && <ClosedBanner />}
-
       {renderBody()}
 
       <LocationSheet
@@ -505,6 +505,8 @@ const makeStyles = (Colors: ColorPalette) =>
   StyleSheet.create({
   container:   { flex: 1, backgroundColor: Colors.background },
   listContent: { padding: Spacing.lg, gap: Spacing.md, paddingBottom: Spacing.huge },
+  // Cancel the list's padding so the banner bleeds to the screen edges.
+  bannerBleed: { marginHorizontal: -Spacing.lg, marginTop: -Spacing.lg, marginBottom: Spacing.md },
 
   // Sticky search straddles the orange header bottom (matches Home / Categories).
   searchOverlap: { marginTop: -20 },

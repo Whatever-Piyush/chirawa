@@ -142,8 +142,6 @@ export default function CategoriesScreen() {
         />
       </View>
 
-      {closed && <ClosedBanner />}
-
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={Colors.primary} /></View>
       ) : (
@@ -152,6 +150,11 @@ export default function CategoriesScreen() {
           keyExtractor={(item) => item.name}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            closed ? (
+              <View style={styles.bannerBleed}><ClosedBanner /></View>
+            ) : null
+          }
           renderItem={({ item, index }) => (
             <CategoryRow
               item={item}
@@ -183,6 +186,8 @@ const makeStyles = (Colors: ColorPalette) =>
   searchOverlap: { marginTop: -20 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   list:   { padding: Spacing.lg, gap: 10, paddingBottom: Spacing.xxxl },
+  // Cancel the list's padding so the banner bleeds to the screen edges.
+  bannerBleed: { marginHorizontal: -Spacing.lg, marginTop: -Spacing.lg },
   row: {
     flexDirection:   'row',
     alignItems:      'center',
