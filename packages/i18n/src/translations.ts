@@ -60,9 +60,6 @@ export const translations = {
     searchRotate4:     { en: 'Search "milk"',                        hi: '"दूध" खोजें' },
     searchRotate5:     { en: 'Search "masala"',                      hi: '"मसाला" खोजें' },
     voiceSoon:         { en: 'Voice search coming soon',             hi: 'वॉइस सर्च जल्द आएगी' },
-    // ── HomeScreen redesign — Chunk 4 (Featured Banner: delivery promise) ─
-    bannerTitle:       { en: '🛵 Delivered in 30 minutes',           hi: '🛵 30 मिनट में घर तक' },
-    bannerSub:         { en: 'Fresh, straight from the shop',        hi: 'ताज़ा सामान, सीधे दुकान से' },
     // ── HomeScreen redesign — Chunk 5 (Bestsellers) ──────────────────
     bestsellers:       { en: 'Bestsellers',                          hi: 'बेस्टसेलर्स' },
     bsMore:            { en: 'more',                                 hi: 'और' },

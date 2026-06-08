@@ -14,7 +14,6 @@ import { useAuth } from '../../context/AuthContext';
 import LocationSheet from '../../components/location/LocationSheet';
 import Header from './Header';
 import SearchBar from './SearchBar';
-import FeaturedBanner from './FeaturedBanner';
 import ProductCarouselSection from './ProductCarouselSection';
 import CategorySections from './CategorySections';
 import { SECTION_GROUPS, CAROUSEL_SECTIONS } from './categoryMeta';
@@ -76,16 +75,12 @@ export default function HomeScreen({ navigation }: Props) {
   const headerOpacity   = useRef(new Animated.Value(0)).current;
   const searchTranslate = useRef(new Animated.Value(20)).current;
   const searchOpacity   = useRef(new Animated.Value(0)).current;
-  const bannerTranslate = useRef(new Animated.Value(20)).current;
-  const bannerOpacity   = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.timing(headerOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
       Animated.timing(searchOpacity, { toValue: 1, duration: 300, delay: 100, useNativeDriver: true }),
       Animated.timing(searchTranslate, { toValue: 0, duration: 300, delay: 100, useNativeDriver: true }),
-      Animated.timing(bannerOpacity, { toValue: 1, duration: 300, delay: 200, useNativeDriver: true }),
-      Animated.timing(bannerTranslate, { toValue: 0, duration: 300, delay: 200, useNativeDriver: true }),
     ]).start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -133,12 +128,6 @@ export default function HomeScreen({ navigation }: Props) {
             onSeeAll={openCategory}
           />
         ))}
-
-        {/* ── Delivery promise banner ────────────────────────────────────── */}
-        <FeaturedBanner
-          entranceOpacity={bannerOpacity}
-          entranceTranslate={bannerTranslate}
-        />
 
         {/* ── Themed category sections — 4 equal tiles per row ───────────── */}
         <CategorySections categories={categories} onSelect={openCategory} />
