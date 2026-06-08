@@ -27,25 +27,28 @@ const CATEGORY_SORT: Record<string, number> = {
   'Grocery & Kitchen':  1,
   'Dairy & Bread':      2,
   'Snacks & Drinks':    3,
-  'Veggies & Fruits':   4,
-  'Dry Fruits & Nuts':  5,
-  'Bakery':             6,
-  'Sauces & Spreads':   7,
-  'Sweets & Mithai':    8,
+  // Fresh produce sub-categories (power the "Fresh" carousel tabs)
+  'Vegetables':         4,
+  'Fruits':             5,
+  'Mangoes & Melons':   6,
+  'Dry Fruits & Nuts':  7,
+  'Bakery':             8,
+  'Sauces & Spreads':   9,
+  'Sweets & Mithai':    10,
   // Beauty & Personal Care sub-categories
-  'Bath & Body':        9,
-  'Hair Care':          10,
-  'Skin & Face':        11,
-  'Beauty & Cosmetics': 12,
-  'Feminine Hygiene':   13,
-  'Baby Care':          14,
-  'Health & Pharma':    15,
-  'Sexual Wellness':    16,
+  'Bath & Body':        11,
+  'Hair Care':          12,
+  'Skin & Face':        13,
+  'Beauty & Cosmetics': 14,
+  'Feminine Hygiene':   15,
+  'Baby Care':          16,
+  'Health & Pharma':    17,
+  'Sexual Wellness':    18,
   // Household Essentials sub-categories
-  'Home & Lifestyle':      17,
-  'Cleaners & Repellents': 18,
-  'Electronics':           19,
-  'Stationery & Games':    20,
+  'Home & Lifestyle':      19,
+  'Cleaners & Repellents': 20,
+  'Electronics':           21,
+  'Stationery & Games':    22,
 };
 
 // Products carry no images by design — the customer card renders a clean
@@ -146,19 +149,41 @@ const DARK_STORE_PRODUCTS: SeedProduct[] = [
   { name: 'Real Mixed Fruit Juice',           unit: '1 L',    pricePaise: 11000, mrpPaise: 12000, category: 'Snacks & Drinks' },
   { name: 'Bisleri Mineral Water',            unit: '1 L',    pricePaise: 2000,  mrpPaise: 2000,  category: 'Snacks & Drinks' },
 
-  // ── Veggies & Fruits ───────────────────────────────────────────────────────
-  { name: 'Fresh Tomatoes',                   unit: '500 g',  pricePaise: 2500,  mrpPaise: 3000,  category: 'Veggies & Fruits' },
-  { name: 'Onion',                            unit: '1 kg',   pricePaise: 3500,  mrpPaise: 4000,  category: 'Veggies & Fruits' },
-  { name: 'Potato',                           unit: '1 kg',   pricePaise: 3000,  mrpPaise: 3500,  category: 'Veggies & Fruits' },
-  { name: 'Fresh Banana',                     unit: '6 pcs',  pricePaise: 3500,  mrpPaise: 4000,  category: 'Veggies & Fruits' },
-  { name: 'Green Chilli',                     unit: '100 g',  pricePaise: 1500,  mrpPaise: 1800,  category: 'Veggies & Fruits' },
-  { name: 'Shimla Apple',                     unit: '4 pcs',  pricePaise: 8000,  mrpPaise: 9500,  category: 'Veggies & Fruits' },
-  { name: 'Carrot',                           unit: '500 g',  pricePaise: 3000,  mrpPaise: 3500,  category: 'Veggies & Fruits' },
-  { name: 'Fresh Ginger',                     unit: '100 g',  pricePaise: 2000,  mrpPaise: 2500,  category: 'Veggies & Fruits' },
-  { name: 'Coriander (Dhaniya)',              unit: '100 g',  pricePaise: 1500,  mrpPaise: 2000,  category: 'Veggies & Fruits' },
-  { name: 'Lemon',                            unit: '250 g',  pricePaise: 2500,  mrpPaise: 3000,  category: 'Veggies & Fruits' },
-  { name: 'Cauliflower',                      unit: '1 pc',   pricePaise: 3000,  mrpPaise: 3500,  category: 'Veggies & Fruits' },
-  { name: 'Capsicum',                         unit: '250 g',  pricePaise: 3000,  mrpPaise: 3500,  category: 'Veggies & Fruits' },
+  // ── Vegetables (Fresh) ─────────────────────────────────────────────────────
+  { name: 'Organically Grown Potato',         unit: '1 kg',   pricePaise: 3000,  mrpPaise: 3500,  category: 'Vegetables' },
+  { name: 'Onion',                            unit: '1 kg',   pricePaise: 3500,  mrpPaise: 4000,  category: 'Vegetables' },
+  { name: 'Tomato Local',                     unit: '500 g',  pricePaise: 2400,  mrpPaise: 3000,  category: 'Vegetables' },
+  { name: 'Chilli Green',                     unit: '100 g',  pricePaise: 1500,  mrpPaise: 1800,  category: 'Vegetables' },
+  { name: 'Organically Grown Ginger',         unit: '100 g',  pricePaise: 2600,  mrpPaise: 4100,  category: 'Vegetables' },
+  { name: 'Garlic',                           unit: '200 g',  pricePaise: 4000,  mrpPaise: 4800,  category: 'Vegetables' },
+  { name: 'Carrot',                           unit: '500 g',  pricePaise: 3000,  mrpPaise: 3500,  category: 'Vegetables' },
+  { name: 'Coriander (Dhaniya)',              unit: '100 g',  pricePaise: 1500,  mrpPaise: 2000,  category: 'Vegetables' },
+  { name: 'Lemon',                            unit: '250 g',  pricePaise: 2500,  mrpPaise: 3000,  category: 'Vegetables' },
+  { name: 'Cauliflower',                      unit: '1 pc',   pricePaise: 3000,  mrpPaise: 3500,  category: 'Vegetables' },
+  { name: 'Capsicum',                         unit: '250 g',  pricePaise: 3000,  mrpPaise: 3500,  category: 'Vegetables' },
+  { name: 'Lady Finger (Bhindi)',             unit: '250 g',  pricePaise: 2000,  mrpPaise: 2500,  category: 'Vegetables' },
+  { name: 'Spinach (Palak)',                  unit: '1 bunch',pricePaise: 2000,  mrpPaise: 2500,  category: 'Vegetables' },
+  { name: 'Cucumber',                         unit: '500 g',  pricePaise: 2500,  mrpPaise: 3000,  category: 'Vegetables' },
+  { name: 'Brinjal (Baingan)',                unit: '500 g',  pricePaise: 2500,  mrpPaise: 3000,  category: 'Vegetables' },
+
+  // ── Fruits (Fresh) ─────────────────────────────────────────────────────────
+  { name: 'Fresh Banana',                     unit: '6 pcs',  pricePaise: 3500,  mrpPaise: 4000,  category: 'Fruits' },
+  { name: 'Shimla Apple',                     unit: '4 pcs',  pricePaise: 8000,  mrpPaise: 9500,  category: 'Fruits' },
+  { name: 'Pomegranate (Anar)',               unit: '500 g',  pricePaise: 9000,  mrpPaise: 11000, category: 'Fruits' },
+  { name: 'Orange (Nagpur)',                  unit: '1 kg',   pricePaise: 8000,  mrpPaise: 9500,  category: 'Fruits' },
+  { name: 'Green Grapes',                     unit: '500 g',  pricePaise: 5000,  mrpPaise: 6000,  category: 'Fruits' },
+  { name: 'Papaya',                           unit: '1 pc',   pricePaise: 4000,  mrpPaise: 5000,  category: 'Fruits' },
+  { name: 'Guava (Amrood)',                   unit: '500 g',  pricePaise: 4000,  mrpPaise: 5000,  category: 'Fruits' },
+  { name: 'Kiwi',                             unit: '3 pcs',  pricePaise: 9900,  mrpPaise: 12000, category: 'Fruits' },
+  { name: 'Pineapple',                        unit: '1 pc',   pricePaise: 5000,  mrpPaise: 6000,  category: 'Fruits' },
+  { name: 'Sweet Lime (Mosambi)',             unit: '1 kg',   pricePaise: 6000,  mrpPaise: 7000,  category: 'Fruits' },
+
+  // ── Mangoes & Melons (Seasonal) ────────────────────────────────────────────
+  { name: 'Alphonso Mango (Hapus)',           unit: '1 kg',   pricePaise: 39900, mrpPaise: 49900, category: 'Mangoes & Melons' },
+  { name: 'Dasheri Mango',                    unit: '1 kg',   pricePaise: 12000, mrpPaise: 15000, category: 'Mangoes & Melons' },
+  { name: 'Langra Mango',                     unit: '1 kg',   pricePaise: 13000, mrpPaise: 16000, category: 'Mangoes & Melons' },
+  { name: 'Watermelon',                       unit: '1 pc',   pricePaise: 6000,  mrpPaise: 8000,  category: 'Mangoes & Melons' },
+  { name: 'Muskmelon (Kharbooja)',            unit: '1 pc',   pricePaise: 5000,  mrpPaise: 7000,  category: 'Mangoes & Melons' },
 
   // ── Dry Fruits & Nuts ──────────────────────────────────────────────────────
   { name: 'Happilo California Almonds',        unit: '200 g',  pricePaise: 22000, mrpPaise: 25000, category: 'Dry Fruits & Nuts' },
@@ -449,6 +474,7 @@ export async function seedShops(prisma: PrismaClient): Promise<void> {
     // 4) Categories used by this shop's products (deterministic ids)
     const uniqueCategories = [...new Set(s.products.map((p) => p.category))];
     const categoryIdByName = new Map<string, string>();
+    const keepCategoryIds: string[] = [];
     for (const name of uniqueCategories) {
       const id = stableUuid(`cat:${shop.id}:${name}`);
       const sortOrder = CATEGORY_SORT[name] ?? 99;
@@ -458,10 +484,12 @@ export async function seedShops(prisma: PrismaClient): Promise<void> {
         create: { id, shopId: shop.id, name, sortOrder },
       });
       categoryIdByName.set(name, id);
+      keepCategoryIds.push(id);
       categoryCount++;
     }
 
     // 5) Products (deterministic ids) — no images by design
+    const keepProductIds: string[] = [];
     for (let i = 0; i < s.products.length; i++) {
       const p = s.products[i];
       const productId = stableUuid(`prod:${shop.id}:${p.name}`);
@@ -483,8 +511,22 @@ export async function seedShops(prisma: PrismaClient): Promise<void> {
 
       // Products are imageless — drop any images left from earlier seeds.
       await prisma.productImage.deleteMany({ where: { productId } });
+      keepProductIds.push(productId);
       productCount++;
     }
+
+    // 6) Converge: deactivate this shop's products/categories that are no longer
+    // in the seed set (e.g. left over from a renamed category) so the catalog
+    // doesn't surface orphans. Upserts are keyed by (shop, name), so renames
+    // create new rows and leave the old ones behind — this cleans them up.
+    await prisma.product.updateMany({
+      where: { shopId: shop.id, id: { notIn: keepProductIds }, isActive: true },
+      data:  { isActive: false },
+    });
+    await prisma.category.updateMany({
+      where: { shopId: shop.id, id: { notIn: keepCategoryIds }, isActive: true },
+      data:  { isActive: false },
+    });
   }
 
   // ── Retire legacy per-area stores (dark-store migration) ────────────────────

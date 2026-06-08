@@ -7,11 +7,13 @@ import { Text } from '../../components/ui';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import ProductCard from '../../components/product/ProductCard';
 import { fetchProducts, toProductCard, type ApiProduct } from '../../services/catalog';
+import type { CarouselTab } from './categoryMeta';
 
 interface Props {
-  title:    string;
-  tabs:     string[];                 // category names; 'All' is treated as no filter
-  onSeeAll: (category: string) => void;
+  title:     string;
+  subtitle?: string;
+  tabs:      CarouselTab[];           // each shows `label`, filters by `category`
+  onSeeAll:  (category: string) => void;
 }
 
 const ALL = 'All';
@@ -19,11 +21,12 @@ const ALL = 'All';
 // A home product carousel: a title, a horizontally-scrollable category tab bar,
 // and a horizontal row of product cards for the active tab. Products per tab are
 // fetched lazily and cached so switching tabs is instant after the first load.
-export default function ProductCarouselSection({ title, tabs, onSeeAll }: Props) {
+export default function ProductCarouselSection({ title, subtitle, tabs, onSeeAll }: Props) {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
-  const [active, setActive] = useState(tabs[0] ?? ALL);
+  // `active` tracks the selected category (not the label).
+  const [active, setActive] = useState(tabs[0]?.category ?? ALL);
   const [cache, setCache]   = useState<Record<string, ApiProduct[]>>({});
   const [loading, setLoading] = useState(false);
 
@@ -43,6 +46,9 @@ export default function ProductCarouselSection({ title, tabs, onSeeAll }: Props)
   return (
     <View style={styles.section}>
       <Text weight="bold" color={Colors.textPrimary} style={styles.title}>{title}</Text>
+      {subtitle ? (
+        <Text weight="regular" color={Colors.textSecondary} style={styles.subtitle}>{subtitle}</Text>
+      ) : null}
 
       {/* Category tab bar */}
       <ScrollView
@@ -51,15 +57,15 @@ export default function ProductCarouselSection({ title, tabs, onSeeAll }: Props)
         contentContainerStyle={styles.tabBar}
       >
         {tabs.map((tab) => {
-          const on = tab === active;
+          const on = tab.category === active;
           return (
-            <TouchableOpacity key={tab} onPress={() => setActive(tab)} activeOpacity={0.8} style={styles.tab}>
+            <TouchableOpacity key={tab.category} onPress={() => setActive(tab.category)} activeOpacity={0.8} style={styles.tab}>
               <Text
                 weight={on ? 'bold' : 'medium'}
                 color={on ? Colors.primary : Colors.textSecondary}
                 style={styles.tabText}
               >
-                {tab}
+                {tab.label}
               </Text>
               <View style={[styles.underline, on && { backgroundColor: Colors.primary }]} />
             </TouchableOpacity>
@@ -87,7 +93,7 @@ export default function ProductCarouselSection({ title, tabs, onSeeAll }: Props)
         <TouchableOpacity
           style={styles.seeAll}
           activeOpacity={0.8}
-          onPress={() => onSeeAll(active === ALL ? (tabs[1] ?? tabs[0]) : active)}
+          onPress={() => onSeeAll(active === ALL ? (tabs[1]?.category ?? tabs[0]?.category ?? active) : active)}
         >
           <Text weight="semibold" color={Colors.textPrimary} style={styles.seeAllText}>See All</Text>
           <Ionicons name="chevron-forward" size={15} color={Colors.textPrimary} />
@@ -101,6 +107,7 @@ const makeStyles = (Colors: ColorPalette) =>
   StyleSheet.create({
     section:  { marginTop: 14 },
     title:    { fontSize: 18, lineHeight: 23, marginHorizontal: 16, marginBottom: 8 },
+    subtitle: { fontSize: 13, lineHeight: 17, marginHorizontal: 16, marginTop: -6, marginBottom: 8 },
     tabBar:   { paddingHorizontal: 16, gap: 18, marginBottom: 10 },
     tab:      { alignItems: 'center' },
     tabText:  { fontSize: 14, lineHeight: 18, paddingBottom: 6 },

@@ -6,7 +6,9 @@ export const CATEGORY_EMOJI: Record<string, string> = {
   'Grocery & Kitchen': '🛒',
   'Dairy & Bread':     '🥛',
   'Snacks & Drinks':   '🍟',
-  'Veggies & Fruits':  '🥦',
+  'Vegetables':        '🥦',
+  'Fruits':            '🍎',
+  'Mangoes & Melons':  '🥭',
   'Dry Fruits & Nuts': '🥜',
   'Bakery':            '🥐',
   'Sauces & Spreads':  '🫙',
@@ -47,7 +49,7 @@ export const SECTION_GROUPS: ReadonlyArray<SectionGroup> = [
   {
     title: 'Grocery & Kitchen',
     tiles: [
-      { label: 'Vegetables & Fruits', emoji: '🥦', category: 'Veggies & Fruits' },
+      { label: 'Vegetables & Fruits', emoji: '🥦', category: 'Vegetables' },
       { label: 'Atta, Rice & Dal',    emoji: '🌾', category: 'Grocery & Kitchen' },
       { label: 'Oil, Ghee & Masala',  emoji: '🧈', category: 'Grocery & Kitchen' },
       { label: 'Dairy, Bread & Eggs', emoji: '🥚', category: 'Dairy & Bread' },
@@ -73,10 +75,10 @@ export const SECTION_GROUPS: ReadonlyArray<SectionGroup> = [
   {
     title: 'Fresh & Daily',
     tiles: [
-      { label: 'Fresh Vegetables', emoji: '🥬', category: 'Veggies & Fruits' },
-      { label: 'Fresh Fruits',     emoji: '🍎', category: 'Veggies & Fruits' },
+      { label: 'Fresh Vegetables', emoji: '🥬', category: 'Vegetables' },
+      { label: 'Fresh Fruits',     emoji: '🍎', category: 'Fruits' },
+      { label: 'Mangoes & Melons', emoji: '🥭', category: 'Mangoes & Melons' },
       { label: 'Milk & Dairy',     emoji: '🥛', category: 'Dairy & Bread' },
-      { label: 'Bread & Eggs',     emoji: '🍞', category: 'Dairy & Bread' },
     ],
   },
   {
@@ -103,14 +105,40 @@ export const SECTION_GROUPS: ReadonlyArray<SectionGroup> = [
   },
 ];
 
-// The two top product carousels — each has a title and a category tab bar.
-// 'All' is a no-filter tab (mixed products).
+// The top product carousels — each has a title, optional subtitle, and a tab bar.
+// A tab shows `label` but filters by `category`; category 'All' is a no-filter
+// tab (mixed products). Decoupling label/category lets us show short labels
+// (e.g. "Veggies") while filtering a real category ("Vegetables").
+export interface CarouselTab {
+  label:    string;
+  category: string;   // 'All' = no filter
+}
+
 export interface CarouselSection {
-  title: string;
-  tabs:  string[];
+  title:     string;
+  subtitle?: string;
+  tabs:      CarouselTab[];
 }
 
 export const CAROUSEL_SECTIONS: ReadonlyArray<CarouselSection> = [
-  { title: 'For You',       tabs: ['All', 'Grocery & Kitchen', 'Dairy & Bread', 'Snacks & Drinks', 'Skin & Face', 'Bakery'] },
-  { title: 'Fresh & Daily', tabs: ['Veggies & Fruits', 'Dry Fruits & Nuts', 'Sweets & Mithai', 'Sauces & Spreads'] },
+  {
+    title: 'For You',
+    tabs: [
+      { label: 'All',               category: 'All' },
+      { label: 'Grocery & Kitchen', category: 'Grocery & Kitchen' },
+      { label: 'Dairy & Bread',     category: 'Dairy & Bread' },
+      { label: 'Snacks & Drinks',   category: 'Snacks & Drinks' },
+      { label: 'Skin & Face',       category: 'Skin & Face' },
+      { label: 'Bakery',            category: 'Bakery' },
+    ],
+  },
+  {
+    title: 'Fresh',
+    subtitle: 'Handpicked daily essentials',
+    tabs: [
+      { label: 'Veggies',          category: 'Vegetables' },
+      { label: 'Fruits',           category: 'Fruits' },
+      { label: 'Mangoes & Melons', category: 'Mangoes & Melons' },
+    ],
+  },
 ];

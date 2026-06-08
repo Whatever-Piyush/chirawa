@@ -128,6 +128,7 @@ export default function HomeScreen({ navigation }: Props) {
           <ProductCarouselSection
             key={s.title}
             title={s.title}
+            subtitle={s.subtitle}
             tabs={s.tabs}
             onSeeAll={openCategory}
           />
