@@ -5,8 +5,6 @@ import type { AddressResponse } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
-import { useT } from '@chirawa/i18n';
-import { Text } from '../../components/ui';
 import { isOpenNow } from '../../utils/operatingHours';
 import { api } from '../../services/api.service';
 import { fetchCategories, type ApiCategory } from '../../services/catalog';
@@ -16,6 +14,7 @@ import Header from './Header';
 import SearchBar from './SearchBar';
 import ProductCarouselSection from './ProductCarouselSection';
 import CategorySections from './CategorySections';
+import ClosedBanner from './ClosedBanner';
 import { SECTION_GROUPS, CAROUSEL_SECTIONS } from './categoryMeta';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
@@ -23,7 +22,6 @@ type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTa
 // Category-first home: a fixed header + search, then two horizontally-scrollable
 // category strips (chips + icons) and themed category sections below.
 export default function HomeScreen({ navigation }: Props) {
-  const t = useT();
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const { state } = useAuth();
@@ -105,13 +103,7 @@ export default function HomeScreen({ navigation }: Props) {
       </View>
 
       {/* ── Closed banner — outside delivery hours (browsing still allowed) ── */}
-      {!isOpenNow() && (
-        <View style={styles.closedBanner}>
-          <Text weight="medium" color={Colors.warning} style={styles.closedBannerText}>
-            🕒 {t('home.closedBanner')}
-          </Text>
-        </View>
-      )}
+      {!isOpenNow() && <ClosedBanner />}
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -154,13 +146,4 @@ const makeStyles = (Colors: ColorPalette) =>
   scrollContent: { paddingBottom: Spacing.xxxl },
   // Pull the SearchBar up into the orange header's bottom padding zone.
   searchOverlap: { marginTop: -20 },
-  closedBanner: {
-    backgroundColor: Colors.warningLight,
-    marginHorizontal: Spacing.lg,
-    borderRadius: 12,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    marginBottom: Spacing.xs,
-  },
-  closedBannerText: { fontSize: 13, lineHeight: 18 },
 });

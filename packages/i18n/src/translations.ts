@@ -35,7 +35,9 @@ export const translations = {
     setLocation:       { en: 'Set your delivery location',           hi: 'अपना डिलीवरी पता चुनें' },
     viewAll:           { en: 'See all',                              hi: 'सभी देखें' },
     tabHome:           { en: 'Home',                                 hi: 'होम' },
-    closedBanner:      { en: "We're closed — we deliver 8 AM – 9 PM. Browse now, order tomorrow!", hi: 'हम अभी बंद हैं — डिलीवरी 8 AM – 9 PM। अभी देखें, कल ऑर्डर करें!' },
+    closedTitle:       { en: "We're closed for tonight", hi: 'आज रात के लिए हम बंद हैं' },
+    closedSub:         { en: "Delivery resumes at 8 AM. Add your items now — we'll have everything ready first thing tomorrow.", hi: 'डिलीवरी सुबह 8 बजे फिर शुरू होगी। अभी सामान चुनें — कल सुबह सबसे पहले आपका ऑर्डर तैयार मिलेगा।' },
+    closedReopen:      { en: 'Opens 8 AM', hi: 'सुबह 8 बजे खुलेगा' },
     tabOrders:         { en: 'Orders',                               hi: 'ऑर्डर' },
     tabProfile:        { en: 'Profile',                              hi: 'प्रोफाइल' },
     // ── HomeScreen redesign — Chunk 8 (bottom nav: 4 tabs) ───────────
