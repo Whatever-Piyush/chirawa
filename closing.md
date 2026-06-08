@@ -71,13 +71,16 @@ surrounding sizes so it stays balanced):
 Pill padding nudged up (h 11→12, v 5→6) so the larger text isn't cramped.
 Everything else (night gradient, stars, copy, behaviour) is unchanged.
 
-## More scattered stars
+## More scattered stars (banner + header)
 
-Expanded the starfield from 5 → **14 little stars**, driven by a `STARS`
-array (each entry = position + size + opacity). Sizes 5–11 px and opacity
-0.30–0.55, mixed ✦ / ✧, scattered across the card (avoiding the moon badge)
-for a subtle night-sky feel. Purely cosmetic — still `pointerEvents="none"`,
-so taps pass straight through.
+- Extracted the starfield into a reusable `Starfield` component (renders an
+  absolute-fill, `pointerEvents="none"` overlay of little ✦ / ✧ stars).
+- **Closed banner**: now **18 stars** (was 5), sizes 5–11 px, opacity 0.30–0.55.
+- **Night header**: added **18 stars** behind the ETA / address / profile
+  content (low opacity, spread across the full width) so the whole closed
+  surface — header + banner — reads as one starry night sky.
+- Purely cosmetic; taps pass straight through, so search / address / profile
+  all keep working.
 
 ---
 
