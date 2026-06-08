@@ -82,6 +82,62 @@ Everything else (night gradient, stars, copy, behaviour) is unchanged.
 - Purely cosmetic; taps pass straight through, so search / address / profile
   all keep working.
 
+## "Universe" deep-space look
+
+- **Deeper gradient** (keep): night palette darkened to `#0A0E2A` (space navy)
+  → `#34245F` (deep violet) for a real outer-space feel (header + banner).
+- **Richer stars** (keep): varied brightness (size 4–12 px, opacity 0.24–0.85)
+  plus a few tinted stars (blue `#BFD0FF`, violet `#E2D2FF`, gold `#FFF1C9`) so
+  it reads like a star field with depth.
+
+### Planets instead of nebula blobs
+
+> Status: **IMPLEMENTED.**
+
+- Removed the 3 nebula colour-blobs from `Starfield`.
+- New `Planet` component (`screens/home/Planet.tsx`), pure Views (no images):
+  **Jupiter** (banded sphere + Great Red Spot + highlight) and **Saturn**
+  (pale sphere + tilted ring via `rotate(-20deg) scaleY(0.34)`).
+- Placement: header has Saturn (size 50, upper-right) + a small Jupiter;
+  the banner has a small Jupiter (size 34, lower-right). All `pointerEvents="none"`.
+- Subtitle shortened to **"Browse now — order first thing tomorrow."** Banner
+  font sizes / padding unchanged (only the copy changed).
+
+<details><summary>Original proposal</summary>
+
+**1. Remove the big circles.** Drop the 3 nebula colour-blobs from `Starfield`
+(the `nebula` prop and its `nebulaA/B/C` styles) — they looked like plain
+circles, not space.
+
+**2. Add real planets in the background**, drawn purely with Views (no images,
+consistent with the imageless app):
+
+- **A new `Planet` component** (`screens/home/Planet.tsx`), props:
+  `size`, `position` (top/left/right/bottom), and a `kind` (`'jupiter' | 'saturn'`).
+  All `pointerEvents="none"`, low-ish opacity so they read as distant background
+  behind the ETA / address / banner copy.
+- **Jupiter** — a banded gas-giant ball: a circle filled with 3–4 horizontal
+  stripe bands in tan/cream/brown (`#C9A06B`, `#E3C39A`, `#9C6B43`) + a small
+  oval "Great Red Spot" (`#B5532E`). Rendered with `overflow:hidden` so the
+  bands clip to the sphere. A soft top-left highlight for a 3-D feel.
+- **Saturn** — a pale-gold sphere (`#E6Cf9A` / `#C9A86B`) with a **tilted ring**:
+  an ellipse made from a `View` with `borderWidth`, big `borderRadius`, and a
+  `transform: [{ rotate: '-18deg' }, { scaleY: 0.35 }]` so it reads as a ring
+  around the planet.
+
+**3. Placement** (subtle, never on top of the important text):
+- **Header**: Saturn in the upper-right area (around/under the profile corner,
+  small ~46–56 px), one small distant Jupiter mid-left.
+- **Banner**: a small Jupiter in the lower-right, behind the "Opens 8 AM" pill area.
+- Sizes kept small and opacity ~0.6–0.85 so stars still dominate.
+
+**4. Keep** the deeper gradient + tinted star field from above.
+
+Tell me if you want different planets (e.g. add a ringless Mars/Neptune), bigger/
+smaller, or different placement — otherwise I'll implement exactly this.
+
+</details>
+
 ---
 
 ## Notes / open points

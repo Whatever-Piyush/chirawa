@@ -6,29 +6,36 @@ import { Text, FauxGradient } from '../../components/ui';
 import { Spacing, Shadow } from '../../theme';
 import { NIGHT_FROM, NIGHT_TO } from './nightTheme';
 import Starfield from './Starfield';
+import Planet from './Planet';
 
-// Scattered little stars (position + size + opacity). Kept varied and subtle so
-// the starfield reads as a night sky rather than a pattern.
+// A scattered star map (position + size + opacity + optional colour). Varied
+// brightness and a few blue/violet/gold tints give a deep-space feel rather
+// than a flat pattern.
 const STARS: TextStyle[] = [
-  { top: 10, left: 60,   fontSize: 10, opacity: 0.55 },
+  { top: 10, left: 60,   fontSize: 12, opacity: 0.85 },
   { top: 30, left: 100,  fontSize: 7,  opacity: 0.40 },
-  { top: 46, left: 150,  fontSize: 6,  opacity: 0.32 },
-  { top: 8,  left: 152,  fontSize: 6,  opacity: 0.35 },
-  { top: 22, left: 196,  fontSize: 8,  opacity: 0.45 },
-  { top: 40, left: 110,  fontSize: 5,  opacity: 0.30 },
+  { top: 46, left: 150,  fontSize: 5,  opacity: 0.30 },
+  { top: 8,  left: 152,  fontSize: 6,  opacity: 0.35, color: '#BFD0FF' },
+  { top: 22, left: 196,  fontSize: 9,  opacity: 0.55 },
+  { top: 40, left: 110,  fontSize: 4,  opacity: 0.28 },
   { top: 4,  left: 220,  fontSize: 6,  opacity: 0.32 },
-  { bottom: 16, left: 74,  fontSize: 8, opacity: 0.45 },
-  { bottom: 12, left: 128, fontSize: 6, opacity: 0.40 },
-  { bottom: 28, left: 168, fontSize: 7, opacity: 0.38 },
-  { bottom: 6,  left: 210, fontSize: 5, opacity: 0.30 },
-  { top: 14, right: 28,  fontSize: 9,  opacity: 0.50 },
-  { top: 36, right: 64,  fontSize: 6,  opacity: 0.34 },
-  { top: 10, right: 92,  fontSize: 7,  opacity: 0.40 },
-  { top: 28, right: 124, fontSize: 6,  opacity: 0.34 },
-  { bottom: 14, right: 50,  fontSize: 11, opacity: 0.50 },
-  { bottom: 30, right: 22,  fontSize: 7,  opacity: 0.40 },
-  { bottom: 36, right: 110, fontSize: 5,  opacity: 0.30 },
+  { top: 18, left: 256,  fontSize: 5,  opacity: 0.30, color: '#E2D2FF' },
+  { top: 44, left: 250,  fontSize: 7,  opacity: 0.42 },
+  { bottom: 16, left: 74,  fontSize: 8, opacity: 0.48 },
+  { bottom: 12, left: 128, fontSize: 5, opacity: 0.34 },
+  { bottom: 28, left: 168, fontSize: 7, opacity: 0.40, color: '#BFD0FF' },
+  { bottom: 6,  left: 210, fontSize: 4, opacity: 0.28 },
+  { bottom: 34, left: 96,  fontSize: 6, opacity: 0.36 },
+  { top: 14, right: 28,  fontSize: 10, opacity: 0.60 },
+  { top: 36, right: 64,  fontSize: 5,  opacity: 0.30 },
+  { top: 10, right: 92,  fontSize: 7,  opacity: 0.42 },
+  { top: 28, right: 124, fontSize: 6,  opacity: 0.34, color: '#FFF1C9' },
+  { top: 48, right: 100, fontSize: 4,  opacity: 0.26 },
+  { bottom: 14, right: 50,  fontSize: 12, opacity: 0.70 },
+  { bottom: 30, right: 22,  fontSize: 6,  opacity: 0.38 },
+  { bottom: 36, right: 110, fontSize: 5,  opacity: 0.30, color: '#E2D2FF' },
   { bottom: 8,  right: 156, fontSize: 6,  opacity: 0.34 },
+  { bottom: 22, right: 88,  fontSize: 4,  opacity: 0.26 },
 ];
 
 // Shown outside delivery hours. Browsing is still allowed, so instead of a flat
@@ -41,8 +48,9 @@ export default function ClosedBanner() {
   return (
     <View style={styles.outer}>
       <FauxGradient from={NIGHT_FROM} to={NIGHT_TO} style={styles.card} steps={18}>
-        {/* Decorative starfield — purely cosmetic, never intercepts touches. */}
+        {/* Decorative starfield + a small planet — cosmetic, no touch capture. */}
         <Starfield stars={STARS} />
+        <Planet kind="jupiter" size={34} style={{ bottom: 12, right: 16, opacity: 0.72 }} />
 
         {/* Moon badge */}
         <View style={styles.iconWrap}>

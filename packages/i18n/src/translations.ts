@@ -36,7 +36,7 @@ export const translations = {
     viewAll:           { en: 'See all',                              hi: 'सभी देखें' },
     tabHome:           { en: 'Home',                                 hi: 'होम' },
     closedTitle:       { en: "We're closed for tonight", hi: 'आज रात के लिए हम बंद हैं' },
-    closedSub:         { en: "Delivery resumes at 8 AM. Add your items now — we'll have everything ready first thing tomorrow.", hi: 'डिलीवरी सुबह 8 बजे फिर शुरू होगी। अभी सामान चुनें — कल सुबह सबसे पहले आपका ऑर्डर तैयार मिलेगा।' },
+    closedSub:         { en: 'Browse now — order first thing tomorrow.', hi: 'अभी देखें — कल सुबह ऑर्डर करें।' },
     closedReopen:      { en: 'Opens 8 AM', hi: 'सुबह 8 बजे खुलेगा' },
     tabOrders:         { en: 'Orders',                               hi: 'ऑर्डर' },
     tabProfile:        { en: 'Profile',                              hi: 'प्रोफाइल' },
