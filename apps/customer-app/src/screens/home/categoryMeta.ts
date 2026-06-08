@@ -11,6 +11,7 @@ export const CATEGORY_EMOJI: Record<string, string> = {
   'Bakery':            '🥐',
   'Sauces & Spreads':  '🫙',
   'Sweets & Mithai':   '🍬',
+  'Beauty & Personal Care': '💄',
   'Grocery':           '🛍️',
 };
 
@@ -65,6 +66,19 @@ export const SECTION_GROUPS: ReadonlyArray<SectionGroup> = [
       { label: 'Bread & Eggs',     emoji: '🍞', category: 'Dairy & Bread' },
     ],
   },
+  {
+    title: 'Beauty & Personal Care',
+    tiles: [
+      { label: 'Skin Care',       emoji: '🧴', category: 'Beauty & Personal Care' },
+      { label: 'Hair Care',       emoji: '💇', category: 'Beauty & Personal Care' },
+      { label: 'Bath & Body',     emoji: '🧼', category: 'Beauty & Personal Care' },
+      { label: 'Makeup',          emoji: '💄', category: 'Beauty & Personal Care' },
+      { label: 'Oral Care',       emoji: '🪥', category: 'Beauty & Personal Care' },
+      { label: "Men's Grooming",  emoji: '🧔', category: 'Beauty & Personal Care' },
+      { label: 'Fragrances',      emoji: '🌸', category: 'Beauty & Personal Care' },
+      { label: 'Baby Care',       emoji: '🍼', category: 'Beauty & Personal Care' },
+    ],
+  },
 ];
 
 // The two top product carousels — each has a title and a category tab bar.
@@ -75,6 +89,6 @@ export interface CarouselSection {
 }
 
 export const CAROUSEL_SECTIONS: ReadonlyArray<CarouselSection> = [
-  { title: 'For You',       tabs: ['All', 'Grocery & Kitchen', 'Dairy & Bread', 'Snacks & Drinks', 'Bakery'] },
+  { title: 'For You',       tabs: ['All', 'Grocery & Kitchen', 'Dairy & Bread', 'Snacks & Drinks', 'Beauty & Personal Care', 'Bakery'] },
   { title: 'Fresh & Daily', tabs: ['Veggies & Fruits', 'Dry Fruits & Nuts', 'Sweets & Mithai', 'Sauces & Spreads'] },
 ];
