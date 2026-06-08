@@ -13,8 +13,9 @@ I implement.
   slide-in-from-right / slide-out-left + width-stretch animations; newest on top.
 - `CartDockPill` is now rendered **once globally** (sibling of the root
   `Stack.Navigator`), made self-sufficient (uses `navigationRef` + an interval
-  closed-check instead of screen-only nav hooks). Visibility: `count>0` →
-  everywhere; empty → Home only (empty-state shows a cart glyph, no thumbnails).
+  closed-check instead of screen-only nav hooks). Visibility: **hidden when the
+  cart is empty (everywhere, incl. Home); slides up the moment an item is added**
+  on any screen. (Earlier empty-state-on-Home was removed per request.)
   Bottom offset adapts: tab screens (above tab bar), Product Detail (above its
   footer), other pushed screens (just above safe-area). Night theme retained.
 - Removed the old per-`MainTabs` pill.

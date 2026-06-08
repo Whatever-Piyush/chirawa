@@ -30,9 +30,9 @@ const CART_STARS: TextStyle[] = [
   { bottom: 10, right: 120,fontSize: 6, opacity: 0.45 },
 ];
 
-// Floating cart capsule. Visible on Home always; on every other screen only once
-// the cart has items. Left side stacks circular thumbnails of the last 3 added
-// items (animated); brand orange by day, night-themed when the store is closed.
+// Floating cart capsule. Hidden when the cart is empty; slides up on every screen
+// the moment an item is added. Left side stacks circular thumbnails of the last 3
+// added items (animated); brand orange by day, night-themed when the store closes.
 export default function CartDockPill({ activeRoute }: { activeRoute?: string }) {
   const insets = useSafeAreaInsets();
   const t = useT();
@@ -45,8 +45,8 @@ export default function CartDockPill({ activeRoute }: { activeRoute?: string }) 
     return () => clearInterval(id);
   }, [activeRoute]);
 
-  // Empty cart → Home only; any items → every page.
-  const shouldShow = count > 0 || activeRoute === 'Home';
+  // Show only when the cart has items — on every screen.
+  const shouldShow = count > 0;
 
   const anim  = useRef(new Animated.Value(shouldShow ? 1 : 0)).current;
   const scale = useRef(new Animated.Value(1)).current;
@@ -88,7 +88,6 @@ export default function CartDockPill({ activeRoute }: { activeRoute?: string }) 
   const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [90, 0] });
   const rupees     = Math.round(subtotalPaise / 100);
   const itemsWord  = count === 1 ? t('cart.itemOne') : t('cart.itemMany');
-  const hasItems   = count > 0;
 
   return (
     <Animated.View
@@ -110,15 +109,9 @@ export default function CartDockPill({ activeRoute }: { activeRoute?: string }) 
           </>
         )}
 
-        {/* Left — stacked thumbnails (items) or a cart glyph (empty) */}
+        {/* Left — stacked thumbnails of the last 3 added items */}
         <View style={styles.left}>
-          {hasItems ? (
-            <CartThumbs items={recentlyAdded} />
-          ) : (
-            <View style={styles.emptyIcon}>
-              <Ionicons name="cart-outline" size={18} color={Colors.white} />
-            </View>
-          )}
+          <CartThumbs items={recentlyAdded} />
         </View>
 
         {/* Center — view cart + summary */}
@@ -126,11 +119,9 @@ export default function CartDockPill({ activeRoute }: { activeRoute?: string }) 
           <Text weight="bold" color={Colors.white} style={styles.title}>
             {t('cart.viewCart')}
           </Text>
-          {hasItems && (
-            <Text weight="medium" style={styles.summary}>
-              {count} {itemsWord}  ·  ₹{rupees}
-            </Text>
-          )}
+          <Text weight="medium" style={styles.summary}>
+            {count} {itemsWord}  ·  ₹{rupees}
+          </Text>
         </View>
 
         {/* Right — circular chevron */}
@@ -170,11 +161,6 @@ const styles = StyleSheet.create({
     shadowColor:     '#150F2E',
   },
   left: { justifyContent: 'center', minHeight: 30 },
-  emptyIcon: {
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    justifyContent: 'center', alignItems: 'center',
-  },
   center: { flex: 1, marginLeft: Spacing.sm, marginRight: Spacing.sm, justifyContent: 'center' },
   title:   { fontSize: 14, lineHeight: 18 },
   summary: { fontSize: 11, lineHeight: 14, color: 'rgba(255,255,255,0.9)', marginTop: 1 },
