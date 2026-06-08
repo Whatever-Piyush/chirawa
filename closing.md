@@ -52,6 +52,27 @@ button.
 
 ---
 
+## Resize — bigger, more readable banner text
+
+The closed-banner copy read too small. Bumped the type scale (and a few
+surrounding sizes so it stays balanced):
+
+| Element            | Before (fontSize / lineHeight) | After (fontSize / lineHeight) |
+|--------------------|--------------------------------|-------------------------------|
+| Title              | 15.5 / 21                      | **18 / 24**                   |
+| Subtitle           | 12.5 / 17                      | **14 / 20**                   |
+| "Opens 8 AM" pill  | 11.5 / 15                      | **13 / 17**                   |
+| Moon icon          | 22                             | **24**                        |
+| Moon badge circle  | 44 × 44                        | **48 × 48**                   |
+| Sun icon (pill)    | 12                             | **13**                        |
+| Card padding       | 16                             | **18**                        |
+| Row gap            | 12                             | **14**                        |
+
+Pill padding nudged up (h 11→12, v 5→6) so the larger text isn't cramped.
+Everything else (night gradient, stars, copy, behaviour) is unchanged.
+
+---
+
 ## Notes / open points
 
 - The white search bar sits between the night header and the night banner — it
