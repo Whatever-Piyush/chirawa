@@ -22,10 +22,13 @@ I implement.
 
 ## 2. Goal (from the request)
 
-1. **Show the capsule on every page** — including Category Products and Product
-   Detail — not just the tab screens.
-2. **Empty cart:** hidden (nothing added → no capsule). It appears the moment the
-   first item is added, on whatever page you're on.
+1. **Visibility rule (important):**
+   - **Empty cart →** capsule shows on the **Home page only** (an empty-state
+     "View cart" capsule). It is **hidden on all other pages** when empty.
+   - **Cart has item(s) →** capsule shows on **every page** (Home, all tabs, and
+     pushed screens like Category Products / Product Detail).
+   - So: Home always has the capsule; other pages get it only once something is
+     in the cart.
 3. **Circular thumbnails**, stacked & partially overlapping like the reference
    (grouped-avatars look).
 4. **Rolling stack of the last 3 added items:**
@@ -41,10 +44,15 @@ I implement.
 
 ## 3. Proposed design
 
-### 3a. Show on every page
-- Move `CartDockPill` from inside `MainTabs` to a **global overlay** rendered once
-  above the root `Stack.Navigator`, so it floats over **all** screens (tabs +
-  pushed screens).
+### 3a. Where it renders (per the visibility rule)
+- Move `CartDockPill` to a **global overlay** above the root `Stack.Navigator`, so
+  it can float over **all** screens (tabs + pushed screens).
+- Gate rendering on cart state + current route:
+  - `count > 0` → render everywhere.
+  - `count === 0` → render **only when the active route is Home**.
+- The empty-state capsule (Home only) shows "View cart" with **no thumbnails**
+  and an empty summary (e.g. "0 items"). ❓ *Decision: tapping it when empty —
+  open Checkout (empty), or disable the tap? Default: open Checkout.*
 - **Bottom offset** differs by screen:
   - Tab screens: sit above the tab bar (current behaviour).
   - Pushed stack screens (Category Products, Product Detail): no tab bar, so sit
@@ -99,4 +107,5 @@ I implement.
 3. Thumbnails = **last-3 added events** or **last-3 items in cart**?
    *(default: last-3 added)*
 4. Thumbnail **size / overlap** — 32 px, ~40% overlap OK? *(default: yes)*
-5. When the cart is emptied to 0, hide the capsule entirely? *(default: yes)*
+5. Empty cart → capsule on **Home only** (hidden elsewhere). ✅ confirmed.
+6. Empty-state capsule tap → open Checkout (empty) or disable? *(default: open)*
