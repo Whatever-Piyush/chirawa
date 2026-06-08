@@ -71,6 +71,14 @@ surrounding sizes so it stays balanced):
 Pill padding nudged up (h 11→12, v 5→6) so the larger text isn't cramped.
 Everything else (night gradient, stars, copy, behaviour) is unchanged.
 
+## More scattered stars
+
+Expanded the starfield from 5 → **14 little stars**, driven by a `STARS`
+array (each entry = position + size + opacity). Sizes 5–11 px and opacity
+0.30–0.55, mixed ✦ / ✧, scattered across the card (avoiding the moon badge)
+for a subtle night-sky feel. Purely cosmetic — still `pointerEvents="none"`,
+so taps pass straight through.
+
 ---
 
 ## Notes / open points

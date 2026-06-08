@@ -1,10 +1,29 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, type TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useT } from '@chirawa/i18n';
 import { Text, FauxGradient } from '../../components/ui';
 import { Spacing, Shadow } from '../../theme';
 import { NIGHT_FROM, NIGHT_TO } from './nightTheme';
+
+// Scattered little stars (position + size + opacity). Kept varied and subtle so
+// the starfield reads as a night sky rather than a pattern.
+const STARS: TextStyle[] = [
+  { top: 10, left: 60,   fontSize: 10, opacity: 0.55 },
+  { top: 30, left: 100,  fontSize: 7,  opacity: 0.40 },
+  { top: 46, left: 150,  fontSize: 6,  opacity: 0.32 },
+  { top: 8,  left: 152,  fontSize: 6,  opacity: 0.35 },
+  { top: 22, left: 196,  fontSize: 8,  opacity: 0.45 },
+  { bottom: 16, left: 74,  fontSize: 8, opacity: 0.45 },
+  { bottom: 12, left: 128, fontSize: 6, opacity: 0.40 },
+  { bottom: 28, left: 168, fontSize: 7, opacity: 0.38 },
+  { top: 14, right: 28,  fontSize: 9,  opacity: 0.50 },
+  { top: 36, right: 64,  fontSize: 6,  opacity: 0.34 },
+  { top: 10, right: 92,  fontSize: 7,  opacity: 0.40 },
+  { bottom: 14, right: 50,  fontSize: 11, opacity: 0.50 },
+  { bottom: 30, right: 22,  fontSize: 7,  opacity: 0.40 },
+  { bottom: 36, right: 110, fontSize: 5,  opacity: 0.30 },
+];
 
 // Shown outside delivery hours. Browsing is still allowed, so instead of a flat
 // warning strip this is a calm "good night" card: a night-sky gradient, a moon,
@@ -18,11 +37,9 @@ export default function ClosedBanner() {
       <FauxGradient from={NIGHT_FROM} to={NIGHT_TO} style={styles.card} steps={18}>
         {/* Decorative starfield — purely cosmetic, never intercepts touches. */}
         <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-          <Text style={[styles.star, { top: 12, left: 54, fontSize: 10, opacity: 0.55 }]}>✦</Text>
-          <Text style={[styles.star, { top: 30, left: 96, fontSize: 7,  opacity: 0.4 }]}>✦</Text>
-          <Text style={[styles.star, { bottom: 16, left: 70, fontSize: 8, opacity: 0.45 }]}>✧</Text>
-          <Text style={[styles.star, { top: 16, right: 26, fontSize: 9,  opacity: 0.5 }]}>✧</Text>
-          <Text style={[styles.star, { bottom: 14, right: 54, fontSize: 11, opacity: 0.5 }]}>✦</Text>
+          {STARS.map((s, i) => (
+            <Text key={i} style={[styles.star, s]}>{i % 3 === 0 ? '✧' : '✦'}</Text>
+          ))}
         </View>
 
         {/* Moon badge */}
