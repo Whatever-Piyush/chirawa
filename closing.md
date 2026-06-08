@@ -7,6 +7,56 @@ changed before/after I implement.
 
 ---
 
+## PLANNED — next round (⏳ awaiting your review before I code it)
+
+Five changes requested. Edit anything below, then say "go".
+
+### 1. Full-bleed banner (touch left & right edges) — every page
+- Drop the banner's side margins (`marginHorizontal`) and set `borderRadius: 0`
+  so it becomes an **edge-to-edge strip** spanning the full screen width.
+- Keep a little top/bottom margin so it doesn't jam into the header/content.
+- `ClosedBanner` is a shared component, so this automatically applies on **all
+  tabs** (Home, Order History, Categories, Special, Profile).
+- Trade-off: square corners (no rounded card) since it now touches the edges.
+
+### 2. Night headers on every page (like Home)
+Make each tab's header go night-themed when closed (not just Home):
+- **Categories** & **Order History** — already use the shared `Header`; just
+  pass `night={closed}` (they already have the `closed` flag). ✅ easy.
+- **Special** — its header is a deep-red bar; swap to the night gradient + stars
+  when closed.
+- **Profile** — its header is a gradient; swap to the night gradient + stars
+  when closed.
+- Result: header + full-bleed banner read as one night section on every tab.
+
+### 3. More aesthetic moon
+Replace the flat Ionicons moon with a **custom-drawn Moon** (pure Views, no
+images):
+- a soft pale sphere (`#F4F1E6`) with a faint **glow halo**,
+- 2–3 subtle **craters** (slightly darker circles),
+- a gentle shaded edge (terminator) for a 3-D crescent feel.
+
+### 4. Banner planet — remove Jupiter, add a different planet
+- Remove **Jupiter** from the banner.
+- Add a **new planet kind** for colour contrast against the warm moon.
+  **Recommended: Neptune** — a deep-blue sphere with faint lighter bands (cool
+  tone pops on the night sky). *(Alt options: Mars = rusty red, or a small
+  Saturn.)*
+- Saturn stays in the header.
+- ❓ **Decision needed:** Neptune (blue) / Mars (red) / Saturn (ringed)?
+
+### 5. "Opens 8 AM" pill — sexier / more aesthetic colour
+Currently a flat brand-orange chip. Proposed (pick one):
+- **A — Gold gradient** (`#FFE08A → #FF9D3D`) + dark text → luxe / premium.
+- **B — Aurora gradient** (`#A06BFF → #FF6FB5 → #FF9A5C`) + white text → vibrant.
+- **C — Neon mint** (`#15E6C3`) glow + dark text → modern / fresh.
+- ❓ **Decision needed:** A / B / C (default if you don't pick: **A, gold**).
+
+> Once you confirm #4 (planet) and #5 (pill colour) — or just say "go" with the
+> defaults — I'll implement all five and re-seed nothing (UI only).
+
+---
+
 ## Goal
 
 When the store is **closed** (outside 8 AM – 9 PM), the night theme used by the
