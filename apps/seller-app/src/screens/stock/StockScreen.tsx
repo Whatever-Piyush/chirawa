@@ -3,6 +3,7 @@ import {
   View, Text, FlatList, Switch, StyleSheet, ActivityIndicator, Alert,
   Modal, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform,
 } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
 import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
 import { SellerApi, type ProductInput } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
@@ -33,6 +34,7 @@ export default function StockScreen() {
   const [form, setForm]           = useState<FormState>(EMPTY_FORM);
   const [newCategory, setNewCategory] = useState('');
   const [saving, setSaving]       = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const loadShop = useCallback(async () => {
     if (!state.token || !state.userId) return;
@@ -62,6 +64,30 @@ export default function StockScreen() {
       Alert.alert('Error', e instanceof Error ? e.message : 'Update nahi hua');
     } finally {
       setUpdating(null);
+    }
+  }
+
+  async function handleImport() {
+    if (!state.token || !shop) return;
+    const picked = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+    if (picked.canceled || !picked.assets?.[0]) return;
+    const asset = picked.assets[0];
+    setImporting(true);
+    try {
+      const report = await SellerApi.importProductsCsv(shop.id, { uri: asset.uri, name: asset.name }, state.token);
+      const errLines = report.errors.slice(0, 5).map((e) => `Row ${e.row}: ${e.reason}`).join('\n');
+      Alert.alert(
+        'Import ho gaya ✅',
+        `Naye: ${report.created}\nUpdate: ${report.updated}\nSkip: ${report.skipped}` +
+          (report.errors.length
+            ? `\n\nErrors:\n${errLines}${report.errors.length > 5 ? `\n…+${report.errors.length - 5} aur` : ''}`
+            : ''),
+      );
+      await loadShop();
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Import fail hua');
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -151,9 +177,14 @@ export default function StockScreen() {
           </Text>
         </View>
         {shop && (
-          <Pressable style={styles.addBtn} onPress={openAdd}>
-            <Text style={styles.addBtnText}>+ Add</Text>
-          </Pressable>
+          <View style={styles.headerBtns}>
+            <Pressable style={styles.importBtn} onPress={() => void handleImport()} disabled={importing}>
+              {importing ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.importBtnText}>⬆ CSV</Text>}
+            </Pressable>
+            <Pressable style={styles.addBtn} onPress={openAdd}>
+              <Text style={styles.addBtnText}>+ Add</Text>
+            </Pressable>
+          </View>
         )}
       </View>
 
@@ -261,8 +292,11 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: FontSize.xl, fontWeight: '800', color: Colors.white },
   headerSub:   { fontSize: FontSize.sm, color: 'rgba(255,255,255,0.7)' },
+  headerBtns:  { flexDirection: 'row', gap: Spacing.sm, alignItems: 'center' },
   addBtn:      { backgroundColor: Colors.white, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, borderRadius: Radius.md },
   addBtnText:  { color: Colors.primary, fontWeight: '800', fontSize: FontSize.md },
+  importBtn:   { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.md, minWidth: 64, alignItems: 'center' },
+  importBtnText: { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
   noShop:      { fontSize: FontSize.lg, color: Colors.textMuted },
   empty:       { textAlign: 'center', color: Colors.textMuted, marginTop: Spacing.xl, fontSize: FontSize.md },
   productRow: {

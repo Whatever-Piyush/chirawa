@@ -149,6 +149,21 @@ export const SellerApi = {
   createCategory: (shopId: string, name: string, token: string) =>
     request<{ id: string; name: string }>('POST', '/catalog/categories', { shopId, name }, token),
 
+  // Bulk CSV import (Phase 1.4). Multipart upload (not the JSON helper). The file
+  // object is the React Native FormData shape ({ uri, name, type }).
+  importProductsCsv: async (shopId: string, file: { uri: string; name: string }, token: string): Promise<ImportReport> => {
+    const form = new FormData();
+    form.append('file', { uri: file.uri, name: file.name || 'products.csv', type: 'text/csv' } as unknown as Blob);
+    const res = await fetch(`${BASE_URL}/catalog/products/import?shopId=${encodeURIComponent(shopId)}`, {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${token}` }, // no Content-Type — RN sets the multipart boundary
+      body:    form,
+    });
+    const data = await res.json() as Record<string, unknown>;
+    if (!res.ok) throw new Error((data['message'] as string) ?? 'Import fail hua');
+    return data as unknown as ImportReport;
+  },
+
   registerDeviceToken: (fcmToken: string, token: string) =>
     request('POST', '/notifications/register-token', { token: fcmToken, platform: 'android' }, token),
 
@@ -168,6 +183,11 @@ export interface ProductInput {
   unit?:       string;
   categoryId?: string;
   stockQty?:   number;
+}
+
+export interface ImportReport {
+  created: number; updated: number; skipped: number;
+  errors: Array<{ row: number; reason: string }>;
 }
 
 export interface SalesWindow { orders: number; valuePaise: number }
