@@ -7,7 +7,25 @@ changed before/after I implement.
 
 ---
 
-## PLANNED — next round (⏳ awaiting your review before I code it)
+## Round 2 — IMPLEMENTED ✅
+
+Five changes shipped (defaults used: **Neptune** planet, **gold-gradient** pill):
+
+1. **Full-bleed banner** — side margins removed, `borderRadius: 0`; the banner is
+   now an edge-to-edge strip on every tab (shared component).
+2. **Night headers on every page** — extracted `NightHeaderBackground` (gradient
+   + stars + Saturn/Jupiter). Home/Categories/Order History pass `night` to the
+   shared `Header`; Special & Profile overlay it on their own headers (Profile's
+   header text flips to white when closed).
+3. **Aesthetic moon** — new `Moon` component: glowing pale sphere + halo +
+   craters + highlight (replaces the flat icon).
+4. **Banner planet** — Jupiter removed from the banner, **Neptune** (blue) added;
+   Saturn stays in the header.
+5. **"Opens 8 AM" pill** — gold gradient (`#FFE08A → #FF9D3D`) with dark text.
+
+Original proposal below.
+
+## PLANNED — next round (the request that produced Round 2)
 
 Five changes requested. Edit anything below, then say "go".
 

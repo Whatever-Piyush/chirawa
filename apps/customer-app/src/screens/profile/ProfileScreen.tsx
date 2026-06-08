@@ -23,6 +23,7 @@ import type { LoyaltyResponse } from '@chirawa/types';
 import type { RootStackParamList, TabParamList } from '../../navigation/AppNavigator';
 import { Text, FauxGradient } from '../../components/ui';
 import ClosedBanner from '../home/ClosedBanner';
+import NightHeaderBackground from '../home/NightHeaderBackground';
 import { useStoreClosed } from '../../hooks/useStoreClosed';
 
 // Tier visuals — names match the seeded LoyaltyTier rows (bronze/silver/gold).
@@ -247,15 +248,17 @@ export default function ProfileScreen() {
           to={gradientTo}
           style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}
         >
+          {closed && <NightHeaderBackground topInset={insets.top} />}
+
           <View style={styles.topRow}>
             <TouchableOpacity
               onPress={() => navigation.navigate('Home')}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               style={styles.backBtn}
             >
-              <Ionicons name="arrow-back" size={22} color={c.textPrimary} />
+              <Ionicons name="arrow-back" size={22} color={closed ? '#FFFFFF' : c.textPrimary} />
             </TouchableOpacity>
-            <Text weight="bold" color={c.textPrimary} style={styles.topTitle}>
+            <Text weight="bold" color={closed ? '#FFFFFF' : c.textPrimary} style={styles.topTitle}>
               {t('profile.title')}
             </Text>
             <View style={{ width: 40 }} />
@@ -277,10 +280,10 @@ export default function ProfileScreen() {
             </View>
           </TouchableOpacity>
 
-          <Text weight="bold" color={c.textPrimary} style={styles.accountTitle}>
+          <Text weight="bold" color={closed ? '#FFFFFF' : c.textPrimary} style={styles.accountTitle}>
             {state.name ? state.name : t('profile.yourAccount')}
           </Text>
-          <Text weight="medium" color={c.textSecondary} style={styles.phone}>
+          <Text weight="medium" color={closed ? 'rgba(255,255,255,0.85)' : c.textSecondary} style={styles.phone}>
             +91 {phone}
           </Text>
         </FauxGradient>

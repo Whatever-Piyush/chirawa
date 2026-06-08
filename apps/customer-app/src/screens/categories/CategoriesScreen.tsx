@@ -129,6 +129,7 @@ export default function CategoriesScreen() {
       <Header
         entranceOpacity={headerOpacity}
         addressLine={addressLine}
+        night={closed}
         onProfilePress={() => navigation.navigate('MainTabs', { screen: 'Profile' })}
         onLocationPress={() => setSheetOpen(true)}
       />

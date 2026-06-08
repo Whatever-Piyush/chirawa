@@ -4,7 +4,7 @@ import { View, StyleSheet, type ViewStyle } from 'react-native';
 // Decorative background planets drawn purely with Views (no images, to match the
 // imageless app). Jupiter = banded gas giant + Great Red Spot; Saturn = pale
 // sphere with a tilted ring. Always pointerEvents="none" so taps pass through.
-type Kind = 'jupiter' | 'saturn';
+type Kind = 'jupiter' | 'saturn' | 'neptune';
 
 interface Band { t: number; h: number; c: string } // fractions of diameter
 
@@ -25,10 +25,24 @@ const SATURN_BANDS: Band[] = [
   { t: 0.82, h: 0.18, c: '#C29A5E' },
 ];
 
+const NEPTUNE_BANDS: Band[] = [
+  { t: 0.00, h: 0.28, c: '#2E5BC0' },
+  { t: 0.28, h: 0.18, c: '#3E74D6' },
+  { t: 0.46, h: 0.18, c: '#2A53B0' },
+  { t: 0.64, h: 0.18, c: '#4A82E0' },
+  { t: 0.82, h: 0.18, c: '#244A9E' },
+];
+
+const BANDS: Record<Kind, Band[]> = {
+  jupiter: JUPITER_BANDS,
+  saturn:  SATURN_BANDS,
+  neptune: NEPTUNE_BANDS,
+};
+
 export default function Planet({
   kind, size, style,
 }: { kind: Kind; size: number; style?: ViewStyle }) {
-  const bands = kind === 'jupiter' ? JUPITER_BANDS : SATURN_BANDS;
+  const bands = BANDS[kind];
 
   return (
     <View pointerEvents="none" style={[styles.wrap, { width: size, height: size }, style]}>

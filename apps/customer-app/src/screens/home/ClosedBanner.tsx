@@ -7,6 +7,7 @@ import { Spacing, Shadow } from '../../theme';
 import { NIGHT_FROM, NIGHT_TO } from './nightTheme';
 import Starfield from './Starfield';
 import Planet from './Planet';
+import Moon from './Moon';
 
 // A scattered star map (position + size + opacity + optional colour). Varied
 // brightness and a few blue/violet/gold tints give a deep-space feel rather
@@ -48,14 +49,12 @@ export default function ClosedBanner() {
   return (
     <View style={styles.outer}>
       <FauxGradient from={NIGHT_FROM} to={NIGHT_TO} style={styles.card} steps={18}>
-        {/* Decorative starfield + a small planet — cosmetic, no touch capture. */}
+        {/* Decorative starfield + a planet — cosmetic, no touch capture. */}
         <Starfield stars={STARS} />
-        <Planet kind="jupiter" size={34} style={{ bottom: 12, right: 16, opacity: 0.72 }} />
+        <Planet kind="neptune" size={34} style={{ bottom: 12, right: 16, opacity: 0.85 }} />
 
-        {/* Moon badge — natural moonlight white */}
-        <View style={styles.iconWrap}>
-          <Ionicons name="moon" size={24} color="#F4F1E6" />
-        </View>
+        {/* Aesthetic glowing moon */}
+        <Moon size={48} />
 
         {/* Copy */}
         <View style={styles.copy}>
@@ -66,12 +65,12 @@ export default function ClosedBanner() {
             {t('home.closedSub')}
           </Text>
 
-          <View style={styles.pill}>
-            <Ionicons name="sunny" size={13} color="#FFFFFF" />
-            <Text weight="bold" color="#FFFFFF" style={styles.pillText}>
+          <FauxGradient from="#FFE08A" to="#FF9D3D" steps={10} style={styles.pill}>
+            <Ionicons name="sunny" size={13} color="#6A3B05" />
+            <Text weight="bold" color="#6A3B05" style={styles.pillText}>
               {t('home.closedReopen')}
             </Text>
-          </View>
+          </FauxGradient>
         </View>
       </FauxGradient>
     </View>
@@ -80,23 +79,17 @@ export default function ClosedBanner() {
 
 const styles = StyleSheet.create({
   outer: {
-    marginHorizontal: Spacing.lg,
-    marginTop:        Spacing.sm,
-    marginBottom:     Spacing.xs,
+    marginTop:    Spacing.sm,
+    marginBottom: Spacing.xs,
   },
   card: {
-    borderRadius:   18,
+    // Full-bleed strip — touches the screen's left & right edges, square corners.
+    borderRadius:   0,
     padding:        18,
     flexDirection:  'row',
-    alignItems:     'flex-start',
+    alignItems:     'center',
     gap:            14,
     ...Shadow.md,
-  },
-  iconWrap: {
-    width: 48, height: 48, borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.30)',
-    justifyContent: 'center', alignItems: 'center',
   },
   copy: { flex: 1 },
   title: { fontSize: 18, lineHeight: 24 },
@@ -106,8 +99,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 5,
     marginTop: 12,
     paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: '#FF6B35',   // brand orange — a warm, urgent "come back" cue
+    borderRadius: 20,             // gold-gradient chip — sexy "come back" cue
     ...Shadow.sm,
   },
   pillText: { fontSize: 13, lineHeight: 17 },

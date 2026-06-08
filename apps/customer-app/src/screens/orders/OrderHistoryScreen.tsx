@@ -470,6 +470,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
       <Header
         entranceOpacity={headerOpacity}
         addressLine={addressLine}
+        night={closed}
         onProfilePress={() => navigation.navigate('MainTabs', { screen: 'Profile' })}
         onLocationPress={() => setSheetOpen(true)}
       />
