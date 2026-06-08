@@ -11,7 +11,15 @@ export const CATEGORY_EMOJI: Record<string, string> = {
   'Bakery':            '🥐',
   'Sauces & Spreads':  '🫙',
   'Sweets & Mithai':   '🍬',
-  'Beauty & Personal Care': '💄',
+  // Beauty & Personal Care sub-categories
+  'Bath & Body':        '🧼',
+  'Hair Care':          '💇',
+  'Skin & Face':        '🧴',
+  'Beauty & Cosmetics': '💄',
+  'Feminine Hygiene':   '🌸',
+  'Baby Care':          '🍼',
+  'Health & Pharma':    '💊',
+  'Sexual Wellness':    '❤️',
   'Grocery':           '🛍️',
 };
 
@@ -69,14 +77,14 @@ export const SECTION_GROUPS: ReadonlyArray<SectionGroup> = [
   {
     title: 'Beauty & Personal Care',
     tiles: [
-      { label: 'Skin Care',       emoji: '🧴', category: 'Beauty & Personal Care' },
-      { label: 'Hair Care',       emoji: '💇', category: 'Beauty & Personal Care' },
-      { label: 'Bath & Body',     emoji: '🧼', category: 'Beauty & Personal Care' },
-      { label: 'Makeup',          emoji: '💄', category: 'Beauty & Personal Care' },
-      { label: 'Oral Care',       emoji: '🪥', category: 'Beauty & Personal Care' },
-      { label: "Men's Grooming",  emoji: '🧔', category: 'Beauty & Personal Care' },
-      { label: 'Fragrances',      emoji: '🌸', category: 'Beauty & Personal Care' },
-      { label: 'Baby Care',       emoji: '🍼', category: 'Beauty & Personal Care' },
+      { label: 'Bath & Body',         emoji: '🧼', category: 'Bath & Body' },
+      { label: 'Hair',                emoji: '💇', category: 'Hair Care' },
+      { label: 'Skin & Face',         emoji: '🧴', category: 'Skin & Face' },
+      { label: 'Beauty & Cosmetics',  emoji: '💄', category: 'Beauty & Cosmetics' },
+      { label: 'Feminine Hygiene',    emoji: '🌸', category: 'Feminine Hygiene' },
+      { label: 'Baby Care',           emoji: '🍼', category: 'Baby Care' },
+      { label: 'Health & Pharma',     emoji: '💊', category: 'Health & Pharma' },
+      { label: 'Sexual Wellness',     emoji: '❤️', category: 'Sexual Wellness' },
     ],
   },
 ];
@@ -89,6 +97,6 @@ export interface CarouselSection {
 }
 
 export const CAROUSEL_SECTIONS: ReadonlyArray<CarouselSection> = [
-  { title: 'For You',       tabs: ['All', 'Grocery & Kitchen', 'Dairy & Bread', 'Snacks & Drinks', 'Beauty & Personal Care', 'Bakery'] },
+  { title: 'For You',       tabs: ['All', 'Grocery & Kitchen', 'Dairy & Bread', 'Snacks & Drinks', 'Skin & Face', 'Bakery'] },
   { title: 'Fresh & Daily', tabs: ['Veggies & Fruits', 'Dry Fruits & Nuts', 'Sweets & Mithai', 'Sauces & Spreads'] },
 ];
