@@ -22,6 +22,8 @@ import { api } from '../../services/api.service';
 import type { LoyaltyResponse } from '@chirawa/types';
 import type { RootStackParamList, TabParamList } from '../../navigation/AppNavigator';
 import { Text, FauxGradient } from '../../components/ui';
+import ClosedBanner from '../home/ClosedBanner';
+import { useStoreClosed } from '../../hooks/useStoreClosed';
 
 // Tier visuals — names match the seeded LoyaltyTier rows (bronze/silver/gold).
 const TIER_META: Record<string, { emoji: string; color: string }> = {
@@ -116,6 +118,7 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
   const styles = useMemo(() => makeStyles(c), [c]);
+  const closed = useStoreClosed();
 
   const [themeModalOpen, setThemeModalOpen] = React.useState(false);
   const [loyalty, setLoyalty] = React.useState<LoyaltyResponse | null>(null);
@@ -281,6 +284,8 @@ export default function ProfileScreen() {
             +91 {phone}
           </Text>
         </FauxGradient>
+
+        {closed && <ClosedBanner />}
 
         <View style={styles.body}>
           {/* ── Birthday banner ───────────────────────────────────────────── */}

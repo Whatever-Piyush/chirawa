@@ -140,6 +140,20 @@ smaller, or different placement — otherwise I'll implement exactly this.
 
 ---
 
+## Closed banner on every main tab
+
+- New `useStoreClosed()` hook (`hooks/useStoreClosed.ts`) — shared open/close
+  state (focus + 1-min interval re-check, auto-restore at opening time).
+- The closed-hours `ClosedBanner` now renders on **all bottom-tab screens** when
+  the store is closed: Home, Order History, Categories, Special, Profile
+  (each inserted below that screen's own header). Home also keeps the night
+  header. The banner is a shared component, so its look stays identical everywhere.
+- Moon recoloured to natural moonlight white (`#F4F1E6`); the "Opens 8 AM" pill
+  is now a solid brand-orange (`#FF6B35`) chip with white text — a warm, urgent
+  "come back" cue.
+- Headers on the non-Home tabs stay their normal colour (you chose banner-only,
+  not "night header on all pages"). Say the word to upgrade those too.
+
 ## Notes / open points
 
 - The white search bar sits between the night header and the night banner — it

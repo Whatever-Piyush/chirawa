@@ -6,6 +6,8 @@ import { Text } from '../../components/ui';
 import { Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import ChirawaSpecialSection from '../home/ChirawaSpecialSection';
+import ClosedBanner from '../home/ClosedBanner';
+import { useStoreClosed } from '../../hooks/useStoreClosed';
 
 // "Special" tab — the full Chirawa's Special surface. For now it reuses the
 // ChirawaSpecialSection carousel from Chunk 7; it can grow into a richer,
@@ -15,6 +17,7 @@ export default function ChirawaSpecialScreen() {
   const insets = useSafeAreaInsets();
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const closed = useStoreClosed();
 
   return (
     <View style={styles.container}>
@@ -26,6 +29,8 @@ export default function ChirawaSpecialScreen() {
           {t('home.specialSubtitle')}
         </Text>
       </View>
+
+      {closed && <ClosedBanner />}
 
       <ScrollView
         contentContainerStyle={styles.scroll}

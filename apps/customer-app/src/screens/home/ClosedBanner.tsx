@@ -52,9 +52,9 @@ export default function ClosedBanner() {
         <Starfield stars={STARS} />
         <Planet kind="jupiter" size={34} style={{ bottom: 12, right: 16, opacity: 0.72 }} />
 
-        {/* Moon badge */}
+        {/* Moon badge — natural moonlight white */}
         <View style={styles.iconWrap}>
-          <Ionicons name="moon" size={24} color="#FFD27D" />
+          <Ionicons name="moon" size={24} color="#F4F1E6" />
         </View>
 
         {/* Copy */}
@@ -67,8 +67,8 @@ export default function ClosedBanner() {
           </Text>
 
           <View style={styles.pill}>
-            <Ionicons name="sunny" size={13} color="#FFC75A" />
-            <Text weight="semibold" color="#FFE3A3" style={styles.pillText}>
+            <Ionicons name="sunny" size={13} color="#FFFFFF" />
+            <Text weight="bold" color="#FFFFFF" style={styles.pillText}>
               {t('home.closedReopen')}
             </Text>
           </View>
@@ -81,6 +81,7 @@ export default function ClosedBanner() {
 const styles = StyleSheet.create({
   outer: {
     marginHorizontal: Spacing.lg,
+    marginTop:        Spacing.sm,
     marginBottom:     Spacing.xs,
   },
   card: {
@@ -94,7 +95,7 @@ const styles = StyleSheet.create({
   iconWrap: {
     width: 48, height: 48, borderRadius: 24,
     backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1, borderColor: 'rgba(255,210,125,0.35)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.30)',
     justifyContent: 'center', alignItems: 'center',
   },
   copy: { flex: 1 },
@@ -106,8 +107,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingHorizontal: 12, paddingVertical: 6,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    borderWidth: 1, borderColor: 'rgba(255,199,90,0.45)',
+    backgroundColor: '#FF6B35',   // brand orange — a warm, urgent "come back" cue
+    ...Shadow.sm,
   },
   pillText: { fontSize: 13, lineHeight: 17 },
 });

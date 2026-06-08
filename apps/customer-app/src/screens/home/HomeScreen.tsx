@@ -5,7 +5,7 @@ import type { AddressResponse } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
-import { isOpenNow } from '../../utils/operatingHours';
+import { useStoreClosed } from '../../hooks/useStoreClosed';
 import { api } from '../../services/api.service';
 import { fetchCategories, type ApiCategory } from '../../services/catalog';
 import { useAuth } from '../../context/AuthContext';
@@ -41,23 +41,13 @@ export default function HomeScreen({ navigation }: Props) {
     }
   }, []);
 
-  // Outside delivery hours the header + banner go night-themed. Kept in state so
-  // the UI flips back to the normal (daytime) interface at opening time even if
-  // the home screen is left open across the boundary — re-checked on focus and
-  // on a 1-min interval. setState bails out when the value is unchanged, so this
-  // only re-renders at the actual open↔close transition.
-  const [closed, setClosed] = useState(!isOpenNow());
-  useEffect(() => {
-    const id = setInterval(() => setClosed(!isOpenNow()), 60_000);
-    return () => clearInterval(id);
-  }, []);
+  // Outside delivery hours the header + banner go night-themed (shared hook
+  // handles the open↔close transition + auto-restore at opening time).
+  const closed = useStoreClosed();
 
   useEffect(() => { void loadAddresses(); }, [loadAddresses]);
   useEffect(
-    () => navigation.addListener('focus', () => {
-      setClosed(!isOpenNow());
-      void loadAddresses();
-    }),
+    () => navigation.addListener('focus', () => { void loadAddresses(); }),
     [navigation, loadAddresses],
   );
 

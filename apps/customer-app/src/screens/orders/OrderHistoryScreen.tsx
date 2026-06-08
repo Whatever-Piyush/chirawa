@@ -23,6 +23,8 @@ import ProductCard, { type ProductCardData } from '../../components/product/Prod
 import BringlyBag from '../../components/illustrations/BringlyBag';
 import Header from '../home/Header';
 import SearchBar from '../home/SearchBar';
+import ClosedBanner from '../home/ClosedBanner';
+import { useStoreClosed } from '../../hooks/useStoreClosed';
 import LocationSheet from '../../components/location/LocationSheet';
 
 // Rotating pastel placeholders for re-order product thumbnails (no images yet).
@@ -152,6 +154,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const { state } = useAuth();
+  const closed = useStoreClosed();
 
   const [orders,      setOrders]      = useState<OrderListItem[]>([]);
   const [shopMap,     setShopMap]     = useState<Map<string, string>>(new Map());
@@ -478,6 +481,8 @@ export default function OrderHistoryScreen({ navigation }: Props) {
           onPress={() => navigation.navigate('Search')}
         />
       </View>
+
+      {closed && <ClosedBanner />}
 
       {renderBody()}
 

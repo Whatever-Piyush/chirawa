@@ -13,6 +13,8 @@ import { api } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
 import Header from '../home/Header';
 import SearchBar from '../home/SearchBar';
+import ClosedBanner from '../home/ClosedBanner';
+import { useStoreClosed } from '../../hooks/useStoreClosed';
 import LocationSheet from '../../components/location/LocationSheet';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
@@ -78,6 +80,7 @@ export default function CategoriesScreen() {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const { state } = useAuth();
+  const closed = useStoreClosed();
 
   const [categories, setCategories] = useState<ApiCategory[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -137,6 +140,8 @@ export default function CategoriesScreen() {
           onPress={() => navigation.navigate('Search')}
         />
       </View>
+
+      {closed && <ClosedBanner />}
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={Colors.primary} /></View>
