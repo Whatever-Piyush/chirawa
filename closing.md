@@ -7,6 +7,23 @@ changed before/after I implement.
 
 ---
 
+## Round 4 — Operating hours = service window ✅
+
+The night theme is gated on `isOpenNow()` (the store's operating hours), so the
+theme automatically shows only when closed and reverts during service. Per the
+requested window, hours are now **open 9 AM – 8 PM, closed 8 PM – 9 AM**:
+
+- Frontend `operatingHours.ts`: `OPEN_HOUR 8→9`, `CLOSE_HOUR 21→20`, label `9 AM – 8 PM`.
+- Backend `operating-hours.ts`: `openHour 8→9`, `closeHour 21→20`, label `9 AM – 8 PM`
+  (kept in sync — this also gates order acceptance at checkout).
+- Strings: pill `Opens 9 AM`; order-closed notice `We deliver 9 AM – 8 PM`.
+- Auto-restore (focus + 1-min interval via `useStoreClosed`) flips header/banner/
+  cart back to the daytime look at 9 AM and to night at 8 PM, on every tab.
+
+> ⚠️ This also changed the **order-acceptance window** (backend rejects orders
+> outside 9 AM – 8 PM). Frontend + backend are in sync. The store DB hours aren't
+> involved — this config is the single source of truth.
+
 ## Round 3 — IMPLEMENTED ✅
 
 - **Banner scrolls with content** — the closed banner now lives *inside* each

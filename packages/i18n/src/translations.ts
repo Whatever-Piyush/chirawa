@@ -37,7 +37,7 @@ export const translations = {
     tabHome:           { en: 'Home',                                 hi: 'होम' },
     closedTitle:       { en: "We're closed for tonight", hi: 'आज रात के लिए हम बंद हैं' },
     closedSub:         { en: 'Browse now — order first thing tomorrow.', hi: 'अभी देखें — कल सुबह ऑर्डर करें।' },
-    closedReopen:      { en: 'Opens 8 AM', hi: 'सुबह 8 बजे खुलेगा' },
+    closedReopen:      { en: 'Opens 9 AM', hi: 'सुबह 9 बजे खुलेगा' },
     tabOrders:         { en: 'Orders',                               hi: 'ऑर्डर' },
     tabProfile:        { en: 'Profile',                              hi: 'प्रोफाइल' },
     // ── HomeScreen redesign — Chunk 8 (bottom nav: 4 tabs) ───────────
@@ -176,7 +176,7 @@ export const translations = {
     tipThanks:         { en: 'Thank you for your kindness 💛',        hi: 'आपकी दरियादिली के लिए धन्यवाद 💛' },
     cancellationTitle: { en: 'Cancellation Policy',                  hi: 'रद्द करने की नीति' },
     cancellationBody:  { en: 'Once placed, cancellations may incur a fee. If we cause an unexpected delay leading to cancellation, you get a full refund.', hi: 'ऑर्डर के बाद रद्द करने पर शुल्क लग सकता है। यदि हमारी देरी से ऑर्डर रद्द होता है, तो आपको पूरा रिफंड मिलेगा।' },
-    closedNotice:      { en: 'We deliver 8 AM – 9 PM. Please order during these hours.', hi: 'हम 8 AM – 9 PM डिलीवरी करते हैं। कृपया इसी समय ऑर्डर करें।' },
+    closedNotice:      { en: 'We deliver 9 AM – 8 PM. Please order during these hours.', hi: 'हम 9 AM – 8 PM डिलीवरी करते हैं। कृपया इसी समय ऑर्डर करें।' },
     chirawa:           { en: 'Chirawa — 333026',                     hi: 'चिरावा — 333026' },
     safeSecure:        { en: 'Safe & Secure Checkout',               hi: 'सुरक्षित और भरोसेमंद चेकआउट' },
     trustBadge:        { en: 'Secure Checkout — 100% Safe',          hi: 'सुरक्षित चेकआउट — 100% Safe' },

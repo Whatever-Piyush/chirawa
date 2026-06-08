@@ -41,7 +41,7 @@ const STARS: TextStyle[] = [
 
 // Shown outside delivery hours. Browsing is still allowed, so instead of a flat
 // warning strip this is a calm "good night" card: a night-sky gradient, a moon,
-// a few stars, and a warm "Opens 8 AM" pill — friendly enough that the user
+// a few stars, and an "Opens 9 AM" pill — friendly enough that the user
 // happily comes back tomorrow.
 export default function ClosedBanner() {
   const t = useT();
