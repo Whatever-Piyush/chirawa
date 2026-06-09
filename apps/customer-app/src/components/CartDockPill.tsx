@@ -36,7 +36,7 @@ const CART_STARS: TextStyle[] = [
 export default function CartDockPill({ activeRoute }: { activeRoute?: string }) {
   const insets = useSafeAreaInsets();
   const t = useT();
-  const { count, subtotalPaise, recentlyAdded } = useCart();
+  const { count, subtotalPaise, recentlyAdded, quantities } = useCart();
   // Night theme when closed — re-checked on navigation (activeRoute) + every min.
   const [closed, setClosed] = useState(!isOpenNow());
   useEffect(() => {
@@ -89,6 +89,12 @@ export default function CartDockPill({ activeRoute }: { activeRoute?: string }) 
   const rupees     = Math.round(subtotalPaise / 100);
   const itemsWord  = count === 1 ? t('cart.itemOne') : t('cart.itemMany');
 
+  // Only show thumbnails for items still in the cart, so removing an item also
+  // slides its circle out (CartThumbs animates the exit to the left).
+  const inCart = (productId: string) =>
+    Object.entries(quantities).some(([k, q]) => q > 0 && (k === productId || k.startsWith(`${productId}::`)));
+  const thumbs = recentlyAdded.filter((it) => inCart(it.productId));
+
   return (
     <Animated.View
       pointerEvents="box-none"
@@ -109,9 +115,9 @@ export default function CartDockPill({ activeRoute }: { activeRoute?: string }) 
           </>
         )}
 
-        {/* Left — stacked thumbnails of the last 3 added items */}
+        {/* Left — stacked thumbnails of the last 3 added items still in the cart */}
         <View style={styles.left}>
-          <CartThumbs items={recentlyAdded} />
+          <CartThumbs items={thumbs} />
         </View>
 
         {/* Center — view cart + summary */}
