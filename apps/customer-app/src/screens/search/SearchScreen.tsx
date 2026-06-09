@@ -19,6 +19,7 @@ import { useT } from '@chirawa/i18n';
 import { useToast } from '../../components/ui/Toast';
 import Shimmer from '../../components/ui/Shimmer';
 import { Text } from '../../components/ui';
+import { Ionicons } from '@expo/vector-icons';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -447,13 +448,20 @@ export default function SearchScreen({ navigation }: Props) {
                     <Text style={styles.clearText}>{t('search.clearRecent')}</Text>
                   </TouchableOpacity>
                 </View>
-                <View style={styles.chipRow}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.recentScroll}
+                  contentContainerStyle={styles.recentRow}
+                  keyboardShouldPersistTaps="handled"
+                >
                   {recent.map((term) => (
-                    <TouchableOpacity key={term} style={styles.chip} onPress={() => fireQuery(term)} activeOpacity={0.75}>
-                      <Text style={styles.chipText}>🕐 {term}</Text>
+                    <TouchableOpacity key={term} style={styles.recentChip} onPress={() => fireQuery(term)} activeOpacity={0.8}>
+                      <Ionicons name="time-outline" size={14} color={Colors.textSecondary} />
+                      <Text style={styles.recentChipText} numberOfLines={1}>{term}</Text>
                     </TouchableOpacity>
                   ))}
-                </View>
+                </ScrollView>
               </View>
             )}
             {feedCards.length > 0 && (
@@ -526,17 +534,16 @@ export default function SearchScreen({ navigation }: Props) {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
 
-      {/* Header bar */}
+      {/* Header — one clean rectangular field with an inline back chevron */}
       <View style={styles.headerBar}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backBtn}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Text style={styles.backArrow}>←</Text>
-        </TouchableOpacity>
         <View style={styles.searchBox}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.backInline}
+            hitSlop={{ top: 10, bottom: 10, left: 8, right: 4 }}
+          >
+            <Ionicons name="chevron-back" size={22} color={Colors.textSecondary} />
+          </TouchableOpacity>
           <TextInput
             ref={inputRef}
             style={styles.searchInput}
@@ -557,7 +564,7 @@ export default function SearchScreen({ navigation }: Props) {
               }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Text style={styles.clearBtn}>×</Text>
+              <Ionicons name="close" size={18} color={Colors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
@@ -777,32 +784,42 @@ const makeStyles = (Colors: ColorPalette) =>
 
   // Header
   headerBar: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical:   Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingTop:        Spacing.sm,
+    paddingBottom:     Spacing.md,
     backgroundColor:   Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    gap: Spacing.sm,
   },
-  backBtn:   { padding: Spacing.xs, minWidth: MIN_TAP, minHeight: MIN_TAP, justifyContent: 'center', alignItems: 'center' },
-  backArrow: { fontSize: FontSize.xl, fontWeight: '800', color: Colors.textPrimary },
   searchBox: {
-    flex:              1,
     flexDirection:     'row',
     alignItems:        'center',
-    backgroundColor:   Colors.background,
-    borderRadius:      Radius.full,
-    paddingHorizontal: Spacing.md,
-    height:            44,
+    backgroundColor:   Colors.surface,
+    borderRadius:      12,            // rectangular (rounded corners), not a pill
+    paddingHorizontal: Spacing.sm,
+    height:            52,
     gap:               Spacing.xs,
     borderWidth:       1,
     borderColor:       Colors.border,
+    // soft, clean lift
+    shadowColor:   '#000',
+    shadowOpacity: 0.05,
+    shadowRadius:  6,
+    shadowOffset:  { width: 0, height: 2 },
+    elevation:     2,
   },
-  searchIcon:  { fontSize: 15, color: Colors.textTertiary },
-  searchInput: { flex: 1, fontSize: FontSize.md, color: Colors.textPrimary },
-  clearBtn:    { fontSize: 22, color: Colors.textMuted, fontWeight: '700', paddingHorizontal: 4 },
+  backInline:  { paddingHorizontal: 4, justifyContent: 'center', alignItems: 'center' },
+  searchInput: { flex: 1, fontSize: FontSize.md, color: Colors.textPrimary, marginLeft: 2 },
+
+  // Recent searches — horizontal scroll, rectangular chips
+  recentScroll: { marginHorizontal: -Spacing.lg },
+  recentRow:    { flexDirection: 'row', gap: 10, paddingHorizontal: Spacing.lg, paddingVertical: 2 },
+  recentChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 14, paddingVertical: 11,
+    borderRadius: 10,                 // rectangular chip
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  recentChipText: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: '600', maxWidth: 160 },
 
   // Body / skeleton
   body:         { padding: Spacing.lg, gap: Spacing.md },
