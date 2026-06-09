@@ -2,7 +2,40 @@
 
 Target the search experience to the reference screens. Review/edit, then say "go".
 
-> Status: **IMPLEMENTED ✅**
+> Status: **IMPLEMENTED ✅** (base) — one refinement pending below.
+
+---
+
+## REFINEMENT — fix the suggestions dropdown (⏳ to implement next)
+
+**Problems now:**
+- The suggestion dropdown is **too long** (up to 6).
+- It's **not specific** — it includes loose "contains" matches.
+- It **stays open even after the item is searched** (it shows whenever there's a
+  query + results, overlapping the results grid).
+
+**What to implement:**
+1. **Auto-hide once searched.** Show the dropdown only while the user is typing a
+   query that **hasn't been searched yet**; the moment results for that query are
+   shown, the dropdown disappears. Also close it immediately when a suggestion is
+   tapped or the search is submitted (Enter). Reopen only when the text changes
+   again.
+   - Concretely: `visible = focused && q.length≥2 && q !== lastSearched &&
+     !justPicked && suggestions.length`. `lastSearched` is set when results land;
+     `justPicked` is set on tap/submit and cleared on the next keystroke.
+2. **Shorter + specific.** Cap at **4**, and **prefix matches only** (names that
+   start with the typed text, case-insensitive) so suggestions are tight and
+   relevant — drop the loose substring matches.
+3. **Instant + independent of the grid.** Build suggestions from a small **pool of
+   known product names** (the browse feed loaded on mount + names seen in recent
+   results), prefix-filtered — so they appear *while typing* (before the server
+   responds) and aren't tied to the already-visible results list.
+
+**Result:** type → a short, relevant prefix list appears → as soon as the search
+runs and the grid fills, the dropdown closes; tapping a suggestion closes it too.
+
+---
+_Base implementation notes below._
 
 ### As built
 - **Exact-match-first ranking** — `searchCatalog` adds a boost on top of the
