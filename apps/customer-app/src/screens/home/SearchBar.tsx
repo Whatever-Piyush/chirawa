@@ -8,10 +8,10 @@ import { useToast } from '../../components/ui';
 import { Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 
-const ROTATE_MS  = 1500;   // how long each placeholder dwells
-const FADE_OUT   = 100;
-const FADE_IN    = 200;
-const SLIDE_UP   = 8;      // px the new line slides up from
+const ROTATE_MS  = 3000;   // how long each placeholder dwells (slower)
+const FADE_OUT   = 260;    // gentle fade-out
+const FADE_IN    = 480;    // slow, smooth fade-in
+const SLIDE_UP   = 10;     // px the new line slides up from
 const BAR_HEIGHT = 48;
 
 interface Props {
@@ -55,10 +55,10 @@ export default function SearchBar({
       // ease-out — matches spec §2).
       Animated.parallel([
         Animated.timing(opacity, {
-          toValue: 0, duration: FADE_OUT, useNativeDriver: true,
+          toValue: 0, duration: FADE_OUT, easing: Easing.inOut(Easing.ease), useNativeDriver: true,
         }),
         Animated.timing(translateY, {
-          toValue: -SLIDE_UP, duration: FADE_OUT, useNativeDriver: true,
+          toValue: -SLIDE_UP, duration: FADE_OUT, easing: Easing.inOut(Easing.ease), useNativeDriver: true,
         }),
       ]).start(({ finished }) => {
         if (!finished) return;

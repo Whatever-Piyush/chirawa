@@ -186,7 +186,7 @@ export default function AppNavigator() {
                 <Stack.Screen
                   name="Search"
                   component={SearchScreen}
-                  options={{ headerShown: false }}
+                  options={{ headerShown: false, animation: 'slide_from_bottom' }}
                 />
                 <Stack.Screen name="EditProfile" component={SetupProfileScreen} />
                 <Stack.Screen

@@ -53,10 +53,6 @@ export default function Header({
             <Text color={Colors.white} weight="bold" style={styles.eta}>
               {t('home.etaMinutes')}
             </Text>
-            <View style={styles.etaChip}>
-              <Ionicons name="flash" size={11} color={Colors.white} />
-              <Text color={Colors.white} weight="bold" style={styles.etaChipText}>24×7</Text>
-            </View>
           </View>
         </View>
 
