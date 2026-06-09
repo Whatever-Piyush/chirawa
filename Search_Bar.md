@@ -4,6 +4,18 @@ Target the search experience to the reference screens. Review/edit, then say "go
 
 > Status: **PROPOSAL — not yet coded.**
 
+### Locked decisions (from feedback)
+- **No promo banner / brand strip** anywhere — not in Search, not on Home. (Home's
+  banner was already removed; Search won't add one.)
+- **Placeholder:** the `Search for` text stays **fixed**; only the quoted **item
+  name** rotates, e.g. `Search for "atta"` → `Search for "milk"` → … . Today the
+  whole string animates (`Search "atta"`); we'll split it so only the name swaps.
+  (`SearchBar.tsx`: static prefix + animated rotating name. Hindi keeps a fixed
+  `खोजें` suffix with the rotating name.)
+- **Card size:** the empty-state feed and the results both use the **3-per-row
+  compact `ProductCard`** (`size="compact"`) — same dimensions as the reference
+  screens.
+
 ---
 
 ## 1. What the reference screens show
@@ -68,12 +80,11 @@ So a partial word still returns related items, but anything that literally
 contains the query — exact first — ranks above fuzzy matches.
 
 ### 4b. Empty-state product feed — ask #1
-When the query is empty, below the recent-searches row, render a **product grid**
-of items to add (reuse the app's `ProductCard`, so ADD/stepper/price/“OFF” all
-come for free). Source: `fetchProducts({ limit })` (existing catalog endpoint) —
-a "Popular / You may like" feed.
-- ❓ *Decision: feed source — generic popular products, or a specific category?
-  Default: generic popular (first N active products).*
+When the query is empty, below the recent-searches row, render a **3-per-row grid**
+of compact `ProductCard`s to add (ADD/stepper/price/“OFF” come for free). Source:
+`fetchProducts({ limit })` (existing catalog endpoint) — a "Popular" feed.
+**No promo banner** above or within it.
+- Feed source: generic popular products (first N active). *(confirmed)*
 
 ### 4c. Autocomplete suggestions while typing (reference list)
 Under the field, show up to ~6 **name suggestions** that match the query, with the
@@ -84,20 +95,20 @@ fills the field and runs the search.
   Default: **derive from results' names** (no backend addition).
 
 ### 4d. Results as a grid (match the reference)
-Switch product results from list rows to a **2–3 col grid** using `ProductCard`
-(consistent with Home/Category). Keep the existing filter/sort/price controls
-above the grid.
-- ❓ *Decision: switch to grid (recommended) or keep current list rows?*
+Switch product results from list rows to a **3-per-row grid** using compact
+`ProductCard` (same size as the reference). Keep the existing filter/sort/price
+controls above the grid. *(grid confirmed)*
 
 ---
 
-## 5. Out of scope (unless you want them)
-- Promo banner + brand strip in the empty state (IMG_3621) — purely marketing.
+## 5. Out of scope / excluded
+- **Promo banner + brand strip — excluded** (Search and Home), per request.
 - "Ad" tags, "low return rate" badges from the reference.
 - Voice (mic) input — leave as-is.
 
-## 6. Open questions (answer or say "go" for defaults)
-1. Empty-state feed = generic **popular products** [default] or a chosen category?
-2. Suggestions = **derived from results** [default] or a new suggest endpoint?
-3. Results layout = **grid via ProductCard** [default] or keep list rows?
-4. Keep the existing **filter/sort/price** controls above results? [default: yes]
+## 6. Remaining open question
+1. Suggestions = **derived from results' names** [default] or a new
+   `/search/suggest` endpoint?
+
+(Everything else is locked: no promo banner; fixed `Search for` + rotating name;
+3-up compact cards for the empty feed and results; exact-match-first ranking.)
