@@ -2,7 +2,27 @@
 
 Target the search experience to the reference screens. Review/edit, then say "go".
 
-> Status: **PROPOSAL — not yet coded.**
+> Status: **IMPLEMENTED ✅**
+
+### As built
+- **Exact-match-first ranking** — `searchCatalog` adds a boost on top of the
+  trigram score: exact name (+10) → prefix (+5) → contains (+2) → fuzzy/related.
+- **Empty state** — recent searches + a **3-up grid of products to add**
+  (compact `ProductCard`s from `fetchProducts`). No promo banner. Popular chips
+  removed in favour of the product feed.
+- **Results** — switched from list rows to a **3-up `ProductCard` grid**
+  (shops still listed above). Add/stepper now use the global cart (capsule
+  updates too).
+- **Autocomplete suggestions** — derived from result names (exact→prefix→
+  contains, max 6) shown under the input.
+- **Placeholder** — home `SearchBar` keeps a fixed `Search for` with only the
+  quoted item name rotating; the Search screen's input placeholder rotates the
+  same way (`Search for "milk"`).
+- _Note: the old list-row product renderer + local cart handlers remain as dead
+  code (harmless; `noUnusedLocals` off). Can be pruned on request._
+
+---
+_Original proposal below._
 
 ### Locked decisions (from feedback)
 - **No promo banner / brand strip** anywhere — not in Search, not on Home. (Home's

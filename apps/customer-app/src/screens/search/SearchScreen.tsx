@@ -9,7 +9,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { SearchProductResult, SearchShopResult, SearchFilters, SearchSort } from '@chirawa/types';
-import { fetchCategories, type ApiCategory } from '../../services/catalog';
+import { fetchCategories, fetchProducts, toProductCard, type ApiCategory, type ApiProduct } from '../../services/catalog';
+import ProductCard, { type ProductCardData } from '../../components/product/ProductCard';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { FontSize, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
@@ -203,6 +204,17 @@ export default function SearchScreen({ navigation }: Props) {
   const [recent,   setRecent]   = useState<string[]>([]);
   // productId → quantity map, mirrors the live cart
   const [cartMap,  setCartMap]  = useState<Record<string, number>>({});
+  // Browse feed shown while the query is empty (3-up product grid to add from).
+  const [feedProducts, setFeedProducts] = useState<ApiProduct[]>([]);
+  // Rotating placeholder item name ("Search for" stays fixed).
+  const [phIndex, setPhIndex] = useState(0);
+  const phNames = useMemo(
+    () => [
+      t('home.searchRotate1'), t('home.searchRotate2'), t('home.searchRotate3'),
+      t('home.searchRotate4'), t('home.searchRotate5'),
+    ],
+    [t],
+  );
 
   // ── Filters (Chunk 4 — Task 4.2) ───────────────────────────────────────────
   const [categories, setCategories]       = useState<ApiCategory[]>([]);
@@ -255,6 +267,10 @@ export default function SearchScreen({ navigation }: Props) {
 
     fetchCategories()
       .then((cats) => { if (alive) setCategories(cats); })
+      .catch(() => undefined);
+
+    fetchProducts({ limit: 30 })
+      .then((p) => { if (alive) setFeedProducts(p); })
       .catch(() => undefined);
 
     const focusTimer = setTimeout(() => {
@@ -328,6 +344,12 @@ export default function SearchScreen({ navigation }: Props) {
     if (debounceRef.current) clearTimeout(debounceRef.current);
   }, []);
 
+  // Rotate the placeholder item name every 1.8s ("Search for" stays fixed).
+  useEffect(() => {
+    const id = setInterval(() => setPhIndex((i) => (i + 1) % phNames.length), 1800);
+    return () => clearInterval(id);
+  }, [phNames.length]);
+
   const fireQuery = useCallback((term: string) => {
     setQuery(term);
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -379,37 +401,70 @@ export default function SearchScreen({ navigation }: Props) {
   const showEmpty   = queryActive && !loading && searched === query.trim() && !hasResults;
   const showIdle    = !queryActive;
 
+  // Map search results + browse feed to ProductCard data (3-up grid).
+  const resultCards = useMemo<ProductCardData[]>(
+    () => products.map((p) => ({
+      productId: p.id, name: p.name, pricePaise: p.pricePaise,
+      mrpPaise: null, weightLabel: null,
+      imageUrl: p.imageUrl, images: p.imageUrl ? [p.imageUrl] : [],
+    })),
+    [products],
+  );
+  const feedCards = useMemo(() => feedProducts.map(toProductCard), [feedProducts]);
+
+  // Autocomplete suggestions derived from result names: exact → prefix → contains.
+  const suggestions = useMemo(() => {
+    const ql = query.trim().toLowerCase();
+    if (ql.length < MIN_QUERY_LEN) return [];
+    const rank = (n: string) => {
+      const l = n.toLowerCase();
+      return l === ql ? 0 : l.startsWith(ql) ? 1 : l.includes(ql) ? 2 : 3;
+    };
+    return Array.from(new Set(products.map((p) => p.name)))
+      .sort((a, b) => rank(a) - rank(b))
+      .slice(0, 6);
+  }, [products, query]);
+
+  // Idle (empty query): recent searches + a 3-up grid of products to add.
   function renderIdlePanel() {
     return (
-      <View style={styles.idlePanel}>
-        {recent.length > 0 && (
-          <View style={styles.idleSection}>
-            <View style={styles.idleSectionHeader}>
-              <Text style={styles.idleSectionTitle}>{t('search.recentTitle')}</Text>
-              <TouchableOpacity onPress={() => void clearRecent()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Text style={styles.clearText}>{t('search.clearRecent')}</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.chipRow}>
-              {recent.map((term) => (
-                <TouchableOpacity key={term} style={styles.chip} onPress={() => fireQuery(term)} activeOpacity={0.75}>
-                  <Text style={styles.chipText}>🕐 {term}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+      <FlatList
+        key="idle-grid"
+        data={feedCards}
+        numColumns={3}
+        keyExtractor={(it) => it.productId}
+        columnWrapperStyle={styles.gridRow}
+        contentContainerStyle={[styles.gridContent, { paddingBottom: insets.bottom + Spacing.xxl }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          <View>
+            {recent.length > 0 && (
+              <View style={styles.idleSection}>
+                <View style={styles.idleSectionHeader}>
+                  <Text style={styles.idleSectionTitle}>{t('search.recentTitle')}</Text>
+                  <TouchableOpacity onPress={() => void clearRecent()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Text style={styles.clearText}>{t('search.clearRecent')}</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.chipRow}>
+                  {recent.map((term) => (
+                    <TouchableOpacity key={term} style={styles.chip} onPress={() => fireQuery(term)} activeOpacity={0.75}>
+                      <Text style={styles.chipText}>🕐 {term}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+            {feedCards.length > 0 && (
+              <Text style={styles.idleSectionTitle}>{t('search.popularTitle')}</Text>
+            )}
           </View>
+        }
+        renderItem={({ item }) => (
+          <ProductCard product={item} size="compact" />
         )}
-        <View style={styles.idleSection}>
-          <Text style={styles.idleSectionTitle}>{t('search.popularTitle')}</Text>
-          <View style={styles.chipRow}>
-            {POPULAR_CHIPS.map((chip) => (
-              <TouchableOpacity key={chip} style={styles.chipPopular} onPress={() => fireQuery(chip)} activeOpacity={0.75}>
-                <Text style={styles.chipPopularText}>{chip}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      </View>
+      />
     );
   }
 
@@ -485,7 +540,7 @@ export default function SearchScreen({ navigation }: Props) {
           <TextInput
             ref={inputRef}
             style={styles.searchInput}
-            placeholder={t('search.placeholder')}
+            placeholder={`${t('home.searchPrefix')} "${phNames[phIndex]}"`}
             placeholderTextColor={Colors.textTertiary}
             value={query}
             onChangeText={handleQueryChange}
@@ -507,6 +562,23 @@ export default function SearchScreen({ navigation }: Props) {
           )}
         </View>
       </View>
+
+      {/* Autocomplete suggestions — exact → prefix → contains (from results). */}
+      {queryActive && suggestions.length > 0 && (
+        <View style={styles.suggestBox}>
+          {suggestions.map((name) => (
+            <TouchableOpacity
+              key={name}
+              style={styles.suggestRow}
+              onPress={() => fireQuery(name)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.suggestIcon}>🔍</Text>
+              <Text style={styles.suggestText} numberOfLines={1}>{name}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       {/* Filter row — category chips + Filter button (only while searching) */}
       {queryActive && (
@@ -577,26 +649,39 @@ export default function SearchScreen({ navigation }: Props) {
         </View>
       )}
 
-      {/* Results */}
+      {/* Results — 3-up product grid (shops listed above) */}
       {!loading && hasResults && (
         <FlatList
-          data={sections}
-          keyExtractor={(item, index) =>
-            item.type === 'shop'    ? `shop-${item.item.id}` :
-            item.type === 'product' ? `prod-${item.item.id}` :
-            `${item.type}-${index}`
-          }
+          key="results-grid"
+          data={resultCards}
+          numColumns={3}
+          keyExtractor={(it) => it.productId}
+          columnWrapperStyle={styles.gridRow}
           ListHeaderComponent={
-            total > 0 ? (
-              <Text style={styles.resultCount}>
-                {total} {t('search.resultsFound')}
-              </Text>
-            ) : null
+            <View>
+              {shops.length > 0 && (
+                <>
+                  <Text style={styles.sectionHeader}>{t('search.shopsSection')}</Text>
+                  {shops.map((s) => (
+                    <ShopCard
+                      key={s.id}
+                      shop={s}
+                      openLabel={t('search.open')}
+                      closedLabel={t('search.closed')}
+                      onPress={() => navigation.navigate('ShopDetail', { shopId: s.id, shopName: s.name })}
+                    />
+                  ))}
+                </>
+              )}
+              {total > 0 && (
+                <Text style={styles.resultCount}>{total} {t('search.resultsFound')}</Text>
+              )}
+            </View>
           }
-          contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + Spacing.xxl }]}
+          contentContainerStyle={[styles.gridContent, { paddingBottom: insets.bottom + Spacing.xxl }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          renderItem={renderItem}
+          renderItem={({ item }) => <ProductCard product={item} size="compact" />}
         />
       )}
 
@@ -851,6 +936,23 @@ const makeStyles = (Colors: ColorPalette) =>
     fontSize: FontSize.sm, fontWeight: '600', color: Colors.textSecondary,
     paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, paddingBottom: Spacing.xs,
   },
+
+  // 3-up product grid (idle feed + results)
+  gridContent: { paddingTop: Spacing.md, paddingHorizontal: Spacing.lg },
+  gridRow:     { gap: 12, marginBottom: 12 },
+
+  // Autocomplete suggestions
+  suggestBox: {
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Spacing.lg,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  suggestRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
+  },
+  suggestIcon: { fontSize: 13, opacity: 0.6 },
+  suggestText: { flex: 1, fontSize: FontSize.md, color: Colors.textPrimary },
 
   // Filter bar (category chips + Filter button)
   filterBar: {

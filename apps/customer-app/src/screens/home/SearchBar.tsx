@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, TouchableOpacity, StyleSheet, Animated, Easing,
+  View, Text, TouchableOpacity, StyleSheet, Animated, Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useT } from '@chirawa/i18n';
@@ -105,18 +105,20 @@ export default function SearchBar({
           style={styles.leftIcon}
         />
 
-        {/* Clipping the placeholder area so the translateY slide doesn't bleed
-            above or below the bar. */}
-        <View style={styles.placeholderClip}>
-          <Animated.Text
-            numberOfLines={1}
-            style={[
-              styles.placeholder,
-              { opacity, transform: [{ translateY }] },
-            ]}
-          >
-            {placeholders[index]}
-          </Animated.Text>
+        {/* "Search for" stays fixed; only the quoted item name rotates. The clip
+            keeps the translateY slide from bleeding above/below the bar. */}
+        <View style={styles.placeholderRow}>
+          <Text style={styles.placeholder} numberOfLines={1}>
+            {t('home.searchPrefix')}{' '}
+          </Text>
+          <View style={styles.placeholderClip}>
+            <Animated.Text
+              numberOfLines={1}
+              style={[styles.placeholder, { opacity, transform: [{ translateY }] }]}
+            >
+              {`"${placeholders[index]}"`}
+            </Animated.Text>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -158,6 +160,11 @@ const makeStyles = (Colors: ColorPalette) =>
   },
   leftIcon: {
     marginRight: 10,
+  },
+  placeholderRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   placeholderClip: {
     flex: 1,
