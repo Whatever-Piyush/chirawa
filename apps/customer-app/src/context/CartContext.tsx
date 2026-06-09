@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/api.service';
 import { useAuth } from './AuthContext';
 import { useToast } from '../components/ui';
@@ -57,21 +57,37 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [quantities, setQuantities]     = useState<Record<string, number>>({});
   const [subtotalPaise, setSubtotal]    = useState(0);
   const [lastAddedItem, setLastAdded]   = useState<LastAddedItem | null>(null);
-  // Rolling window of the last 3 distinct items added (oldest→newest), powering
-  // the cart capsule's stacked thumbnails. Cleared when the cart empties.
-  const [recentlyAdded, setRecentlyAdded] = useState<LastAddedItem[]>([]);
+  // Lightweight current cart contents (with images) for the capsule thumbnails,
+  // plus recency tracking so the capsule shows the 3 most-recently-added items.
+  const [cartItems, setCartItems] = useState<{ productId: string; name: string; imageUrl: string | null }[]>([]);
+  const addOrderRef   = useRef<string[]>([]);              // productIds, most-recent last
+  const colorByPidRef = useRef<Record<string, string>>({});
 
   const count = useMemo(
     () => Object.values(quantities).reduce((s, q) => s + q, 0),
     [quantities],
   );
 
-  useEffect(() => { if (count === 0) setRecentlyAdded([]); }, [count]);
+  // The 3 most-recently-added items STILL IN THE CART (oldest→newest). Derived
+  // from live cart contents, so it stays at 3 while the cart has >3 items
+  // (removing one backfills) and counts down 3→2→1 once ≤3 remain.
+  const recentlyAdded = useMemo<LastAddedItem[]>(() => {
+    const order = addOrderRef.current;
+    const rank = (pid: string) => order.indexOf(pid); // -1 (unknown) → oldest
+    return [...cartItems]
+      .sort((a, b) => rank(a.productId) - rank(b.productId))
+      .slice(-3)
+      .map((it) => ({
+        productId: it.productId, name: it.name, imageUrl: it.imageUrl,
+        imageColor: colorByPidRef.current[it.productId] ?? DEFAULT_COLOR,
+      }));
+  }, [cartItems]);
 
   const refresh = useCallback(async () => {
     if (!isAuthed) {
       setQuantities({});
       setSubtotal(0);
+      setCartItems([]);
       return;
     }
     try {
@@ -82,9 +98,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       }
       setQuantities(map);
       setSubtotal(cart.subtotal);
+      setCartItems(cart.items.map((it) => ({ productId: it.productId, name: it.productName, imageUrl: it.imageUrl })));
     } catch {
       setQuantities({});
       setSubtotal(0);
+      setCartItems([]);
     }
   }, [isAuthed]);
 
@@ -100,8 +118,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       imageColor: item.imageColor ?? DEFAULT_COLOR,
     };
     setLastAdded(added);
-    // Dedupe (re-adding bumps it to newest) then keep only the last 3.
-    setRecentlyAdded((prev) => [...prev.filter((p) => p.productId !== added.productId), added].slice(-3));
+    // Track recency (re-adding bumps to newest) + remember the placeholder colour,
+    // and optimistically reflect the item in cartItems for instant thumbnails.
+    addOrderRef.current = [...addOrderRef.current.filter((p) => p !== item.productId), item.productId];
+    colorByPidRef.current[item.productId] = added.imageColor;
+    setCartItems((prev) => prev.some((p) => p.productId === item.productId)
+      ? prev
+      : [...prev, { productId: item.productId, name: item.name, imageUrl: item.imageUrl ?? null }]);
     try {
       if (cur > 0) await api.updateCartItem(item.productId, cur + 1, item.variantId);
       else         await api.addToCart({ productId: item.productId, quantity: 1, ...(item.variantId ? { variantId: item.variantId } : {}) });
@@ -122,6 +145,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       else copy[key] = next;
       return copy;
     });
+    // Optimistically drop the thumbnail when a line is removed (slides out).
+    if (next === 0) setCartItems((prev) => prev.filter((p) => p.productId !== productId));
     try {
       await api.updateCartItem(productId, next, variantId);
       await refresh();

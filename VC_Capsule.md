@@ -19,9 +19,14 @@ I implement.
   Bottom offset adapts: tab screens (above tab bar), Product Detail (above its
   footer), other pushed screens (just above safe-area). Night theme retained.
 - Removed the old per-`MainTabs` pill.
-- **Removal sync:** thumbnails show only recent items **still in the cart**
-  (`recentlyAdded` filtered by live quantities), so removing items slides their
-  circles out one-by-one (3→2→1); the capsule hides when the cart hits 0.
+- **Removal sync (count-aware):** `recentlyAdded` is now derived from the live
+  cart contents (server items carry name + imageUrl) — the 3 most-recently-added
+  items **still in the cart**. So:
+  - cart **>3** → stays at **3 circles**; removing a shown item slides it out and
+    the next most-recent item backfills in.
+  - cart **≤3** → circle count follows the cart: removing slides out one-by-one
+    (3→2→1); capsule hides at 0.
+  - Adds/removes update optimistically (instant), reconciled on `refresh()`.
 
 ---
 _Original proposal below._
