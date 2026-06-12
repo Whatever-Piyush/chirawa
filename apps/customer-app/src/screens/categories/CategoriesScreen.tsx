@@ -13,6 +13,8 @@ import { api } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
 import Header from '../home/Header';
 import SearchBar from '../home/SearchBar';
+import ClosedBanner from '../home/ClosedBanner';
+import { useStoreClosed } from '../../hooks/useStoreClosed';
 import LocationSheet from '../../components/location/LocationSheet';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
@@ -78,6 +80,7 @@ export default function CategoriesScreen() {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const { state } = useAuth();
+  const closed = useStoreClosed();
 
   const [categories, setCategories] = useState<ApiCategory[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -126,6 +129,7 @@ export default function CategoriesScreen() {
       <Header
         entranceOpacity={headerOpacity}
         addressLine={addressLine}
+        night={closed}
         onProfilePress={() => navigation.navigate('MainTabs', { screen: 'Profile' })}
         onLocationPress={() => setSheetOpen(true)}
       />
@@ -146,6 +150,11 @@ export default function CategoriesScreen() {
           keyExtractor={(item) => item.name}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            closed ? (
+              <View style={styles.bannerBleed}><ClosedBanner /></View>
+            ) : null
+          }
           renderItem={({ item, index }) => (
             <CategoryRow
               item={item}
@@ -177,6 +186,8 @@ const makeStyles = (Colors: ColorPalette) =>
   searchOverlap: { marginTop: -20 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   list:   { padding: Spacing.lg, gap: 10, paddingBottom: Spacing.xxxl },
+  // Cancel the list's padding so the banner bleeds to the screen edges.
+  bannerBleed: { marginHorizontal: -Spacing.lg, marginTop: -Spacing.lg },
   row: {
     flexDirection:   'row',
     alignItems:      'center',

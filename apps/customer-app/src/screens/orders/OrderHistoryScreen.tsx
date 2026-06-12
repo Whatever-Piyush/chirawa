@@ -23,6 +23,8 @@ import ProductCard, { type ProductCardData } from '../../components/product/Prod
 import BringlyBag from '../../components/illustrations/BringlyBag';
 import Header from '../home/Header';
 import SearchBar from '../home/SearchBar';
+import ClosedBanner from '../home/ClosedBanner';
+import { useStoreClosed } from '../../hooks/useStoreClosed';
 import LocationSheet from '../../components/location/LocationSheet';
 
 // Rotating pastel placeholders for re-order product thumbnails (no images yet).
@@ -152,6 +154,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const { state } = useAuth();
+  const closed = useStoreClosed();
 
   const [orders,      setOrders]      = useState<OrderListItem[]>([]);
   const [shopMap,     setShopMap]     = useState<Map<string, string>>(new Map());
@@ -369,7 +372,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
     );
   }, [Colors, styles, shopMap, t, reorderingId, navigation, handleReorder]);
 
-  // ─── Body: skeleton / error / Blinkit-style list ───────────────────────────
+  // ─── Body: skeleton / error / list ───────────────────────────
   // Hero/order-again grid + bestsellers live in the list header; past orders are
   // the (possibly empty) virtualised list; the faded tagline is the footer. We
   // never early-return on empty so the hero + bestsellers always greet the user.
@@ -406,6 +409,8 @@ export default function OrderHistoryScreen({ navigation }: Props) {
         renderItem={renderOrder}
         ListHeaderComponent={
           <View>
+            {closed && <View style={styles.bannerBleed}><ClosedBanner /></View>}
+
             {/* Order-again grid when the user has history; hero card otherwise */}
             {reorderProducts.length > 0 ? (
               <View style={styles.grid}>
@@ -467,6 +472,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
       <Header
         entranceOpacity={headerOpacity}
         addressLine={addressLine}
+        night={closed}
         onProfilePress={() => navigation.navigate('MainTabs', { screen: 'Profile' })}
         onLocationPress={() => setSheetOpen(true)}
       />
@@ -499,6 +505,8 @@ const makeStyles = (Colors: ColorPalette) =>
   StyleSheet.create({
   container:   { flex: 1, backgroundColor: Colors.background },
   listContent: { padding: Spacing.lg, gap: Spacing.md, paddingBottom: Spacing.huge },
+  // Cancel the list's padding so the banner bleeds to the screen edges.
+  bannerBleed: { marginHorizontal: -Spacing.lg, marginTop: -Spacing.lg, marginBottom: Spacing.md },
 
   // Sticky search straddles the orange header bottom (matches Home / Categories).
   searchOverlap: { marginTop: -20 },

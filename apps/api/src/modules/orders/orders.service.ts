@@ -134,7 +134,7 @@ export async function releaseOrderAssignment(
 export function createOrdersService(prisma: PrismaClient, redis: Redis) {
 
   async function placeOrder(userId: string, input: PlaceOrderInput) {
-    // Operating-hours gate — Bringly delivers 8 AM – 9 PM IST.
+    // Operating-hours gate — Bringly delivers 9 AM – 8 PM IST.
     if (!isWithinOperatingHours()) {
       throw new AppError(
         422,

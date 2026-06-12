@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   NavigationContainer,
   DefaultTheme as NavDefaultTheme,
@@ -112,7 +112,6 @@ function MainTabs() {
         <Tab.Screen name="Special" component={ChirawaSpecialScreen} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
       </Tab.Navigator>
-      <CartDockPill />
     </View>
   );
 }
@@ -132,6 +131,9 @@ export default function AppNavigator() {
   const { state } = useAuth();
   const { hasChosen } = useLanguage();
   const { colors, scheme } = useTheme();
+  // Active leaf route name — drives the global cart capsule's visibility + offset.
+  const [activeRoute, setActiveRoute] = useState<string | undefined>(undefined);
+  const syncRoute = () => setActiveRoute(navigationRef.getCurrentRoute()?.name);
 
   if (hasChosen === null) {
     return <View style={{ flex: 1, backgroundColor: Colors.primary }} />;
@@ -159,7 +161,7 @@ export default function AppNavigator() {
   };
 
   return (
-    <NavigationContainer ref={navigationRef} theme={navTheme} linking={linking}>
+    <NavigationContainer ref={navigationRef} theme={navTheme} linking={linking} onReady={syncRoute} onStateChange={syncRoute}>
       <CartProvider>
         <Stack.Navigator
           screenOptions={{
@@ -184,7 +186,7 @@ export default function AppNavigator() {
                 <Stack.Screen
                   name="Search"
                   component={SearchScreen}
-                  options={{ headerShown: false }}
+                  options={{ headerShown: false, animation: 'slide_from_bottom' }}
                 />
                 <Stack.Screen name="EditProfile" component={SetupProfileScreen} />
                 <Stack.Screen
@@ -251,6 +253,9 @@ export default function AppNavigator() {
             </>
           )}
         </Stack.Navigator>
+
+        {/* Global cart capsule — floats over every screen (visibility/offset by route). */}
+        {state.isAuthenticated && !!state.name && <CartDockPill activeRoute={activeRoute} />}
       </CartProvider>
     </NavigationContainer>
   );

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, TouchableOpacity, StyleSheet, Animated, Easing,
+  View, Text, TouchableOpacity, StyleSheet, Animated, Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useT } from '@chirawa/i18n';
@@ -8,10 +8,10 @@ import { useToast } from '../../components/ui';
 import { Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 
-const ROTATE_MS  = 1500;   // how long each placeholder dwells
-const FADE_OUT   = 100;
-const FADE_IN    = 200;
-const SLIDE_UP   = 8;      // px the new line slides up from
+const ROTATE_MS  = 3000;   // how long each placeholder dwells (slower)
+const FADE_OUT   = 260;    // gentle fade-out
+const FADE_IN    = 480;    // slow, smooth fade-in
+const SLIDE_UP   = 10;     // px the new line slides up from
 const BAR_HEIGHT = 48;
 
 interface Props {
@@ -55,10 +55,10 @@ export default function SearchBar({
       // ease-out — matches spec §2).
       Animated.parallel([
         Animated.timing(opacity, {
-          toValue: 0, duration: FADE_OUT, useNativeDriver: true,
+          toValue: 0, duration: FADE_OUT, easing: Easing.inOut(Easing.ease), useNativeDriver: true,
         }),
         Animated.timing(translateY, {
-          toValue: -SLIDE_UP, duration: FADE_OUT, useNativeDriver: true,
+          toValue: -SLIDE_UP, duration: FADE_OUT, easing: Easing.inOut(Easing.ease), useNativeDriver: true,
         }),
       ]).start(({ finished }) => {
         if (!finished) return;
@@ -105,18 +105,20 @@ export default function SearchBar({
           style={styles.leftIcon}
         />
 
-        {/* Clipping the placeholder area so the translateY slide doesn't bleed
-            above or below the bar. */}
-        <View style={styles.placeholderClip}>
-          <Animated.Text
-            numberOfLines={1}
-            style={[
-              styles.placeholder,
-              { opacity, transform: [{ translateY }] },
-            ]}
-          >
-            {placeholders[index]}
-          </Animated.Text>
+        {/* "Search for" stays fixed; only the quoted item name rotates. The clip
+            keeps the translateY slide from bleeding above/below the bar. */}
+        <View style={styles.placeholderRow}>
+          <Text style={styles.placeholder} numberOfLines={1}>
+            {t('home.searchPrefix')}{' '}
+          </Text>
+          <View style={styles.placeholderClip}>
+            <Animated.Text
+              numberOfLines={1}
+              style={[styles.placeholder, { opacity, transform: [{ translateY }] }]}
+            >
+              {`"${placeholders[index]}"`}
+            </Animated.Text>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -158,6 +160,11 @@ const makeStyles = (Colors: ColorPalette) =>
   },
   leftIcon: {
     marginRight: 10,
+  },
+  placeholderRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   placeholderClip: {
     flex: 1,

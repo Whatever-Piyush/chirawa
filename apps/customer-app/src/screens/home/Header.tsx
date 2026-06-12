@@ -6,6 +6,8 @@ import { Text } from '../../components/ui';
 import { Colors, Spacing } from '../../theme';
 import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
+import { NIGHT_FROM } from './nightTheme';
+import NightHeaderBackground from './NightHeaderBackground';
 
 const HEADER_BLEED = 28; // bottom padding so the SearchBar can overlap upward
 
@@ -15,10 +17,12 @@ interface Props {
   addressLine?:    string | null;
   style?:          ViewStyle;
   entranceOpacity?: Animated.Value;
+  /** When true (store closed) the header wears the night theme instead of orange. */
+  night?:          boolean;
 }
 
 export default function Header({
-  onProfilePress, onLocationPress, addressLine, style, entranceOpacity,
+  onProfilePress, onLocationPress, addressLine, style, entranceOpacity, night = false,
 }: Props) {
   const insets = useSafeAreaInsets();
   const t = useT();
@@ -30,11 +34,15 @@ export default function Header({
     <Animated.View
       style={[
         styles.header,
+        night && styles.headerNight,
         { paddingTop: insets.top + Spacing.md },
         entranceOpacity ? { opacity: entranceOpacity } : null,
         style,
       ]}
     >
+      {/* Night background, stars + planets — behind the content so taps land. */}
+      {night && <NightHeaderBackground topInset={insets.top} />}
+
       {/* Row 1 — delivery promise + profile avatar */}
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
@@ -45,10 +53,6 @@ export default function Header({
             <Text color={Colors.white} weight="bold" style={styles.eta}>
               {t('home.etaMinutes')}
             </Text>
-            <View style={styles.etaChip}>
-              <Ionicons name="flash" size={11} color={Colors.white} />
-              <Text color={Colors.white} weight="bold" style={styles.etaChipText}>24×7</Text>
-            </View>
           </View>
         </View>
 
@@ -62,7 +66,7 @@ export default function Header({
           <Text style={styles.avatarText}>
             {state.name ? state.name.charAt(0).toUpperCase() : '?'}
           </Text>
-          <View style={styles.activeDot} />
+          <View style={[styles.activeDot, night && { borderColor: NIGHT_FROM }]} />
         </TouchableOpacity>
       </View>
 
@@ -94,6 +98,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     paddingHorizontal: Spacing.lg,
     paddingBottom: HEADER_BLEED,
+    overflow: 'hidden',          // clip the absolute night gradient to the header
+  },
+  headerNight: {
+    backgroundColor: NIGHT_FROM, // fallback base behind the gradient
   },
   row: {
     flexDirection: 'row',

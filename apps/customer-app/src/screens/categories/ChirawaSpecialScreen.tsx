@@ -6,6 +6,10 @@ import { Text } from '../../components/ui';
 import { Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import ChirawaSpecialSection from '../home/ChirawaSpecialSection';
+import ClosedBanner from '../home/ClosedBanner';
+import NightHeaderBackground from '../home/NightHeaderBackground';
+import { NIGHT_FROM } from '../home/nightTheme';
+import { useStoreClosed } from '../../hooks/useStoreClosed';
 
 // "Special" tab — the full Chirawa's Special surface. For now it reuses the
 // ChirawaSpecialSection carousel from Chunk 7; it can grow into a richer,
@@ -15,10 +19,18 @@ export default function ChirawaSpecialScreen() {
   const insets = useSafeAreaInsets();
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const closed = useStoreClosed();
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
+      <View
+        style={[
+          styles.header,
+          { paddingTop: insets.top + Spacing.sm },
+          closed && styles.headerNight,
+        ]}
+      >
+        {closed && <NightHeaderBackground topInset={insets.top} />}
         <Text weight="bold" color={Colors.white} style={styles.title}>
           {t('home.specialTitle')}
         </Text>
@@ -31,6 +43,7 @@ export default function ChirawaSpecialScreen() {
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
+        {closed && <ClosedBanner />}
         <ChirawaSpecialSection />
         <View style={{ height: Spacing.huge }} />
       </ScrollView>
@@ -46,6 +59,10 @@ const makeStyles = (Colors: ColorPalette) =>
     backgroundColor:   Colors.specialAccent,
     paddingHorizontal: Spacing.lg,
     paddingBottom:     Spacing.lg,
+  },
+  headerNight: {
+    backgroundColor: NIGHT_FROM,   // night base behind the gradient when closed
+    overflow:        'hidden',     // clip the absolute gradient/stars/planets
   },
   title:    { fontSize: 22, lineHeight: 28 },
   subtitle: { fontSize: 13, lineHeight: 18, opacity: 0.9, marginTop: 2 },
