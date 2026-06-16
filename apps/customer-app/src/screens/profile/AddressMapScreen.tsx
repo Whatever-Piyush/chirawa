@@ -12,7 +12,9 @@ import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { FontSize, FontWeight, Radius, Shadow, Spacing } from '../../theme';
 import { useT } from '@chirawa/i18n';
 import { CHIRAWA_CENTER, distanceKm, isInsideServiceArea } from '../../utils/geo';
-import { reverseGeocode, type ResolvedAddress } from '../../utils/geocode';
+import { isPlusCode } from '../../utils/location';
+import { api } from '../../services/api.service';
+import type { ReverseGeocodeResult } from '@chirawa/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddressMap'>;
 
@@ -20,9 +22,43 @@ const PINCODE = '333026';
 const SNAP_KM = 0.03;  // ≤30 m → treat the map centre as the exact GPS fix
 
 type LatLng = { lat: number; lng: number };
+// Display shape for the bottom card — guaranteed Plus-Code-free.
+type Resolved = { title: string; subtitle: string; locality: string; city: string; pincode: string };
 
-function fallbackResolved(label: string): ResolvedAddress {
+const clean = (s: string | null | undefined): string | null => (s && !isPlusCode(s) ? s : null);
+
+function fallbackResolved(label: string): Resolved {
   return { title: label, subtitle: label, locality: 'Chirawa', city: 'Chirawa', pincode: PINCODE };
+}
+
+// Backend ReverseGeocodeResult → card shape. Backend already strips Plus Codes;
+// `clean()` is a belt-and-braces guard so one can never reach the UI.
+function toResolved(r: ReverseGeocodeResult, label: string): Resolved {
+  const title = clean(r.area) ?? clean(r.street) ?? clean(r.city) ?? label;
+  const subtitle =
+    clean(r.formatted) ??
+    ([clean(r.area), clean(r.city), r.state].filter(Boolean).join(', ') || label);
+  return {
+    title,
+    subtitle,
+    locality: clean(r.area) ?? clean(r.city) ?? 'Chirawa',
+    city:     clean(r.city) ?? 'Chirawa',
+    pincode:  r.pincode ?? PINCODE,
+  };
+}
+
+// On-device geocoder fallback (used when the backend has no key / no result, e.g.
+// in dev) — also Plus-Code-guarded.
+function deviceResolved(g: Location.LocationGeocodedAddress, label: string): Resolved {
+  const area = clean(g.name) ?? clean(g.street) ?? clean(g.district) ?? clean(g.subregion);
+  const city = clean(g.city) ?? clean(g.subregion) ?? clean(g.region);
+  return {
+    title:    area ?? city ?? label,
+    subtitle: clean(g.formattedAddress) ?? ([area, city, g.region].filter(Boolean).join(', ') || label),
+    locality: area ?? city ?? 'Chirawa',
+    city:     city ?? 'Chirawa',
+    pincode:  g.postalCode ?? PINCODE,
+  };
 }
 
 export default function AddressMapScreen({ navigation, route }: Props) {
@@ -33,8 +69,10 @@ export default function AddressMapScreen({ navigation, route }: Props) {
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const mapRef = useRef<MapView | null>(null);
 
-  const [pin, setPin]             = useState<LatLng>({ lat: CHIRAWA_CENTER.lat, lng: CHIRAWA_CENTER.lng });
-  const [resolved, setResolved]   = useState<ResolvedAddress | null>(null);
+  // Start at a searched place (if one was picked) else the Chirawa centre.
+  const startCenter = route.params?.center ?? CHIRAWA_CENTER;
+  const [pin, setPin]             = useState<LatLng>({ lat: startCenter.lat, lng: startCenter.lng });
+  const [resolved, setResolved]   = useState<Resolved | null>(null);
   const [resolving, setResolving] = useState(true);
   const [locating, setLocating]   = useState(false);
   const [userLoc, setUserLoc]     = useState<LatLng | null>(null);
@@ -53,13 +91,19 @@ export default function AddressMapScreen({ navigation, route }: Props) {
   const resolvePin = useCallback(async (next: LatLng) => {
     const seq = ++reqSeq.current;
     setResolving(true);
+    const label = t('address.pickedLocation');
     try {
-      const r = await reverseGeocode(next.lat, next.lng);
+      // 1 — secure backend proxy (Plus-Code-clean, key server-side).
+      const r = await api.reverseGeocode(next.lat, next.lng);
       if (seq !== reqSeq.current) return;
-      setResolved(r);
+      if (r.source !== 'none') { setResolved(toResolved(r, label)); return; }
+      // 2 — backend had no key/result → on-device geocoder fallback.
+      const hits = await Location.reverseGeocodeAsync({ latitude: next.lat, longitude: next.lng });
+      if (seq !== reqSeq.current) return;
+      setResolved(hits[0] ? deviceResolved(hits[0], label) : fallbackResolved(label));
     } catch {
       if (seq !== reqSeq.current) return;
-      setResolved(fallbackResolved(t('address.pickedLocation')));
+      setResolved(fallbackResolved(label));
     } finally {
       if (seq === reqSeq.current) setResolving(false);
     }
@@ -126,7 +170,7 @@ export default function AddressMapScreen({ navigation, route }: Props) {
   }
 
   const initialRegion: Region = {
-    latitude: CHIRAWA_CENTER.lat, longitude: CHIRAWA_CENTER.lng,
+    latitude: startCenter.lat, longitude: startCenter.lng,
     latitudeDelta: 0.012, longitudeDelta: 0.012,
   };
 

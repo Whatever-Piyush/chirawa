@@ -300,6 +300,8 @@ export const translations = {
     phoneNumber:       { en: 'Phone number',                    hi: 'फ़ोन नंबर' },
     noneSaved:         { en: 'No saved addresses yet',          hi: 'अभी कोई पता सेव नहीं है' },
     deliverHere:       { en: 'Deliver here',                    hi: 'यहाँ डिलीवर करें' },
+    searching:         { en: 'Searching…',                      hi: 'खोज रहे हैं…' },
+    noResults:         { en: 'No matching places in Chirawa',   hi: 'चिरावा में कोई मिलती-जुलती जगह नहीं' },
     requestMessage:    { en: "Hey, I'm trying to place an order for you 😄.\n\nPlease share your delivery location to ensure a hassle-free delivery by clicking on this link 👇", hi: 'नमस्ते, मैं आपके लिए एक ऑर्डर करने की कोशिश कर रहा हूँ 😄।\n\nहैसल-फ्री डिलीवरी के लिए कृपया इस लिंक पर क्लिक करके अपनी लोकेशन शेयर करें 👇' },
   },
   shareAddress: {
@@ -463,6 +465,9 @@ export const translations = {
     typeOther:      { en: 'Other',                          hi: 'अन्य' },
     defaultBadge:   { en: 'Default',                        hi: 'डिफ़ॉल्ट' },
     setDefault:     { en: 'Set as default',                 hi: 'डिफ़ॉल्ट बनाएं' },
+    edit:           { en: 'Edit',                           hi: 'बदलें' },
+    share:          { en: 'Share',                          hi: 'शेयर करें' },
+    delete:         { en: 'Delete',                         hi: 'हटाएं' },
     deleteConfirm:  { en: 'Delete this address?',           hi: 'यह पता हटाएं?' },
     selectAddress:  { en: 'Select delivery address',        hi: 'डिलीवरी पता चुनें' },
     save:           { en: 'Save Address',                   hi: 'पता सेव करें' },
@@ -514,7 +519,7 @@ export const translations = {
     // City / area cards
     cityLabel:       { en: 'City',                          hi: 'शहर' },
     areaStreetLabel: { en: 'Area, street',                  hi: 'इलाका, गली' },
-    mapsLink:        { en: 'Add google maps link (optional)', hi: 'गूगल मैप्स लिंक जोड़ें (वैकल्पिक)' },
+    mapsLink:        { en: 'Add google maps link',          hi: 'गूगल मैप्स लिंक जोड़ें' },
     // Contact details
     contactDetails:  { en: 'Contact details',               hi: 'संपर्क जानकारी' },
     myself:          { en: 'Myself',                        hi: 'मैं खुद' },

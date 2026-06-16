@@ -63,7 +63,7 @@ export type RootStackParamList = {
   OrderTracking: { orderId: string };
   OrderPlaced: { orderId: string };
   AddressList: undefined;
-  AddressMap: { autoLocate?: boolean; returnTo?: 'Checkout' } | undefined;
+  AddressMap: { autoLocate?: boolean; returnTo?: 'Checkout'; center?: { lat: number; lng: number } } | undefined;
   AddressDetails: {
     lat: number;
     lng: number;
@@ -77,6 +77,11 @@ export type RootStackParamList = {
     returnTo?: 'Checkout';
     receiverName?: string;
     receiverPhone?: string;
+    // Edit mode: when editId is set, Save PATCHes that address (prefilled below).
+    editId?: string;
+    initialHouse?: string;
+    initialLandmark?: string;
+    initialLabel?: 'home' | 'work' | 'hotel' | 'other';
   };
   // Address-sharing deep links (bringly://share-address, bringly://receive-address)
   ShareAddress: { from?: string; phone?: string } | undefined;

@@ -9,3 +9,17 @@ export const reverseGeocodeSchema = z.object({
 });
 
 export type ReverseGeocodeInput = z.infer<typeof reverseGeocodeSchema>;
+
+// Place Autocomplete — a query + per-session token (Google billing grouping).
+export const autocompleteSchema = z.object({
+  q:            z.string().trim().min(1).max(120),
+  sessionToken: z.string().trim().min(1).max(120),
+});
+export type AutocompleteInput = z.infer<typeof autocompleteSchema>;
+
+// Place Details — resolve a chosen prediction to coordinates + a clean address.
+export const placeDetailsSchema = z.object({
+  placeId:      z.string().trim().min(1).max(400),
+  sessionToken: z.string().trim().min(1).max(120),
+});
+export type PlaceDetailsInput = z.infer<typeof placeDetailsSchema>;

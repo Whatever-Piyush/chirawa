@@ -17,6 +17,8 @@ import type {
   CreateAddressRequest,
   AddressResponse,
   ReverseGeocodeResult,
+  PlacePrediction,
+  PlaceDetailsResult,
   SearchResponse,
   SearchSuggestResponse,
   SearchFilters,
@@ -334,6 +336,10 @@ export class ChirawaApiClient {
     return this.request<AddressResponse>('POST', '/users/me/addresses', data);
   }
 
+  async updateAddress(id: string, data: Partial<CreateAddressRequest>): Promise<AddressResponse> {
+    return this.request<AddressResponse>('PUT', `/users/me/addresses/${id}`, data);
+  }
+
   async getAddresses(): Promise<AddressResponse[]> {
     return this.request<AddressResponse[]>('GET', '/users/me/addresses');
   }
@@ -350,6 +356,17 @@ export class ChirawaApiClient {
   // backend; this just relays lat/lng and receives the parsed result.
   async reverseGeocode(lat: number, lng: number): Promise<ReverseGeocodeResult> {
     return this.request<ReverseGeocodeResult>('POST', '/geo/reverse', { lat, lng });
+  }
+
+  // Place search — Chirawa-restricted autocomplete. `sessionToken` (UUID v4) must
+  // be the same for a search session's autocomplete calls + its final placeDetails.
+  async autocompletePlaces(q: string, sessionToken: string): Promise<PlacePrediction[]> {
+    return this.request<PlacePrediction[]>('POST', '/geo/autocomplete', { q, sessionToken });
+  }
+
+  // Resolve a chosen prediction → coordinates + a clean (Plus-Code-free) address.
+  async placeDetails(placeId: string, sessionToken: string): Promise<PlaceDetailsResult | null> {
+    return this.request<PlaceDetailsResult | null>('POST', '/geo/place', { placeId, sessionToken });
   }
 
   // ─── Pricing ─────────────────────────────────────────────────────────────

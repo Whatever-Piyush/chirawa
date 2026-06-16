@@ -18,7 +18,7 @@ import { FontSize, FontWeight, Radius, Shadow, Spacing } from '../../theme';
 import { useT } from '@chirawa/i18n';
 import { api } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
-import { reverseGeocode } from '../../utils/geocode';
+import { resolveCurrentAddress } from '../../utils/location';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddressDetails'>;
 
@@ -59,24 +59,33 @@ export default function AddressDetailsScreen({ route, navigation }: Props) {
   const [locOff, setLocOff]   = useState(false);
   const [enabling, setEnabling] = useState(false);
 
+  // Edit mode prefill (route.params.editId set from My Addresses → Edit).
+  const editId = route.params.editId;
+  const editReceiver = route.params.receiverName?.trim();
+
   // Address boxes
-  const [house, setHouse]       = useState('');
+  const [house, setHouse]       = useState(route.params.initialHouse ?? '');
   const [areaStreet, setAreaStreet] = useState('');
-  const [landmark, setLandmark] = useState('');
+  const [landmark, setLandmark] = useState(route.params.initialLandmark ?? '');
   const [mapsLink, setMapsLink] = useState('');
 
-  // Contact details
-  const [contactType, setContactType] = useState<ContactType>('myself');
-  const [receiverName, setReceiverName]   = useState(state.name ?? '');
-  const [receiverPhone, setReceiverPhone] = useState(state.phone ? normalizePhone(state.phone) : '');
+  // Contact details — prefill from the address being edited, else the user.
+  const [contactType, setContactType] = useState<ContactType>(editReceiver ? 'other' : 'myself');
+  const [receiverName, setReceiverName]   = useState(editReceiver ?? state.name ?? '');
+  const [receiverPhone, setReceiverPhone] = useState(
+    normalizePhone(route.params.receiverPhone ?? state.phone ?? ''),
+  );
 
-  const [label, setLabel]   = useState<LabelChoice>('home');
+  const [label, setLabel]   = useState<LabelChoice>(route.params.initialLabel ?? 'home');
   const [saving, setSaving] = useState(false);
 
-  // v3: House/Apartment optional; Area + Landmark required.
+  // v3: House/Apartment optional; Area + Landmark required. In edit mode the
+  // existing street prefills House, so require House instead of Area+Landmark.
+  const addressOk = editId
+    ? house.trim().length > 0
+    : areaStreet.trim().length > 0 && landmark.trim().length > 0;
   const canSave =
-    areaStreet.trim().length > 0 &&
-    landmark.trim().length > 0 &&
+    addressOk &&
     receiverName.trim().length > 0 &&
     receiverPhone.trim().length === 10 &&
     !saving;
@@ -93,17 +102,22 @@ export default function AddressDetailsScreen({ route, navigation }: Props) {
   async function enableAndAutofill() {
     setEnabling(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        void Linking.openSettings();
+      // GPS + secure backend geocode + device fallback, all Plus-Code-free.
+      const res = await resolveCurrentAddress();
+      if (!res.ok) {
+        if (res.reason === 'denied') void Linking.openSettings();
         return;
       }
       setLocOff(false);
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
-      const r = await reverseGeocode(loc.coords.latitude, loc.coords.longitude);
+      const a = res.address;
+      const area = a.area ?? a.city ?? 'Chirawa';
       setResolved({
-        lat: loc.coords.latitude, lng: loc.coords.longitude,
-        title: r.title, subtitle: r.subtitle, locality: r.locality, city: r.city, pincode: r.pincode,
+        lat: a.lat, lng: a.lng,
+        title:    area,
+        subtitle: [a.street, a.area, a.city].filter(Boolean).join(', ') || area,
+        locality: area,
+        city:     a.city ?? 'Chirawa',
+        pincode:  a.pincode ?? '333026',
       });
     } catch {
       /* tolerate — fields stay manual */
@@ -154,10 +168,10 @@ export default function AddressDetailsScreen({ route, navigation }: Props) {
     try {
       // House is optional; Area is required so `street` is always non-empty.
       const street = [house.trim(), areaStreet.trim()].filter(Boolean).join(', ');
-      const addr = await api.createAddress({
+      const payload = {
         label:    LABEL_VALUE[label],
         street,
-        landmark: landmark.trim(),
+        landmark: landmark.trim() || resolved.locality,
         locality: resolved.locality,
         city:     resolved.city,
         pincode:  resolved.pincode,
@@ -167,8 +181,14 @@ export default function AddressDetailsScreen({ route, navigation }: Props) {
         receiverName:  receiverName.trim(),
         receiverPhone: receiverPhone.trim(),
         mapsLink: mapsLink.trim() || undefined,
-        isDefault: route.params.returnTo === 'Checkout' ? true : undefined,
-      });
+      };
+      // Edit → PATCH the existing address; otherwise create a new one.
+      const addr = editId
+        ? await api.updateAddress(editId, payload)
+        : await api.createAddress({
+            ...payload,
+            isDefault: route.params.returnTo === 'Checkout' ? true : undefined,
+          });
       // When launched from Checkout, bounce back with the new address (+ a
       // "Someone else" receiver) so Checkout auto-selects + applies them.
       if (route.params.returnTo === 'Checkout') {

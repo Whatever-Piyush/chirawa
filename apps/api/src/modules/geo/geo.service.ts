@@ -1,5 +1,5 @@
 import { env } from '../../config/env';
-import type { ReverseGeocodeResult } from '@chirawa/types';
+import type { ReverseGeocodeResult, PlacePrediction, PlaceDetailsResult } from '@chirawa/types';
 
 // Reverse-geocode proxy. The Google Geocoding key lives ONLY here (server-side);
 // the client never sees it. We build the request, call Google, then post-process
@@ -93,6 +93,137 @@ export async function reverseGeocode(
   } catch {
     // Network / timeout / parse error → graceful "none"; never throw into a request.
     return NONE;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ─── Place search — Places API (New), hard-restricted to Chirawa ──────────────
+// The app serves only Chirawa for now, so search must surface ONLY Chirawa-area
+// matches. We use `locationRestriction` (a circle around the town) which Google
+// guarantees excludes results outside it — never another city/state.
+
+const CHIRAWA_CENTER = { lat: 28.240303949239777, lng: 75.64655776908275 };
+const SEARCH_RADIUS_M = 15000; // ~15 km: town + nearby villages
+const PLACES_AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocomplete';
+const PLACES_DETAILS_URL = (id: string): string =>
+  `https://places.googleapis.com/v1/places/${encodeURIComponent(id)}`;
+
+function toRad(d: number): number { return (d * Math.PI) / 180; }
+function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371, dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+interface PlacesAutoResp {
+  suggestions?: Array<{
+    placePrediction?: {
+      placeId?: string;
+      structuredFormat?: { mainText?: { text?: string }; secondaryText?: { text?: string } };
+      text?: { text?: string };
+      distanceMeters?: number;
+    };
+  }>;
+}
+
+export async function autocompletePlaces(
+  input: { q: string; sessionToken: string },
+  deps: ReverseGeocodeDeps = {},
+): Promise<PlacePrediction[]> {
+  const key = env.GOOGLE_MAPS_API_KEY;
+  if (!key || key === 'placeholder') return [];
+
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetchImpl(PLACES_AUTOCOMPLETE_URL, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask':
+          'suggestions.placePrediction.placeId,suggestions.placePrediction.structuredFormat,suggestions.placePrediction.distanceMeters',
+      },
+      body: JSON.stringify({
+        input: input.q,
+        sessionToken: input.sessionToken,
+        includedRegionCodes: ['in'],
+        // Hard restriction → results outside this circle are NOT returned.
+        locationRestriction: {
+          circle: {
+            center: { latitude: CHIRAWA_CENTER.lat, longitude: CHIRAWA_CENTER.lng },
+            radius: SEARCH_RADIUS_M,
+          },
+        },
+        origin: { latitude: CHIRAWA_CENTER.lat, longitude: CHIRAWA_CENTER.lng },
+      }),
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as PlacesAutoResp;
+    return (json.suggestions ?? [])
+      .map((s) => s.placePrediction)
+      .filter((p): p is NonNullable<typeof p> => !!p && !!p.placeId)
+      .map((p) => ({
+        placeId:       p.placeId!,
+        primaryText:   p.structuredFormat?.mainText?.text ?? p.text?.text ?? '',
+        secondaryText: p.structuredFormat?.secondaryText?.text ?? '',
+        distanceKm:    typeof p.distanceMeters === 'number' ? Math.round(p.distanceMeters / 100) / 10 : null,
+      }));
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+interface PlacesDetailsResp {
+  location?: { latitude?: number; longitude?: number };
+  formattedAddress?: string;
+  addressComponents?: Array<{ longText?: string; types?: string[] }>;
+}
+
+export async function placeDetails(
+  input: { placeId: string; sessionToken: string },
+  deps: ReverseGeocodeDeps = {},
+): Promise<PlaceDetailsResult | null> {
+  const key = env.GOOGLE_MAPS_API_KEY;
+  if (!key || key === 'placeholder') return null;
+
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const url = `${PLACES_DETAILS_URL(input.placeId)}?sessionToken=${encodeURIComponent(input.sessionToken)}`;
+    const res = await fetchImpl(url, {
+      headers: {
+        'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask': 'location,formattedAddress,addressComponents',
+      },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as PlacesDetailsResp;
+    const lat = json.location?.latitude, lng = json.location?.longitude;
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+
+    const comp = (wanted: string[]): string | null => {
+      for (const c of json.addressComponents ?? []) {
+        if ((c.types ?? []).some((t) => wanted.includes(t)) && c.longText && !isPlusCode(c.longText)) return c.longText;
+      }
+      return null;
+    };
+    return {
+      lat, lng,
+      area:      comp(['sublocality_level_1', 'sublocality', 'neighborhood']) ?? comp(['locality']),
+      city:      comp(['locality', 'administrative_area_level_3', 'administrative_area_level_2']),
+      pincode:   comp(['postal_code']),
+      formatted: json.formattedAddress ? stripPlusCodePrefix(json.formattedAddress) : null,
+    };
+  } catch {
+    return null;
   } finally {
     clearTimeout(timer);
   }

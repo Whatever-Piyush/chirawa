@@ -9,6 +9,179 @@ Reworked the customer-app address/location flow to match the reference screens
 
 ---
 
+# v4 — High-class polish + functional search (✅ IMPLEMENTED on `feat/address-v4`)
+
+> Built. types + api-client + i18n + customer-app typecheck **0 errors**; backend
+> geo files clean; the three `/geo/*` routes return **200** (empty in dev until a
+> real key is set). **One thing you must do:** in apps/api `.env`, set a real
+> `GOOGLE_MAPS_API_KEY` whose Google Cloud project has **Geocoding API** *and*
+> **Places API (New)** enabled — until then reverse-geocode falls back to the
+> on-device geocoder and search returns empty (by design, no crash).
+>
+> **As built:**
+> - Backend `apps/api/.../geo/`: `POST /geo/autocomplete` + `POST /geo/place`
+>   (Places API New, `locationRestriction` circle 15 km around Chirawa, session
+>   tokens, field masks, distance from centre). Key stays server-side.
+> - `packages/types` (Place DTOs) + `packages/api-client`
+>   (`autocompletePlaces`, `placeDetails`, `updateAddress`).
+> - **Plus Codes killed:** `AddressMapScreen` + `AddressDetailsScreen` now use
+>   `api.reverseGeocode` (+ on-device fallback); **deleted `utils/geocode.ts` &
+>   `config/maps.ts`** (in-JS key gone).
+> - New shared `AddressCard` (category avatar · pin=default · share · ⋯) +
+>   `AddressActionsSheet` (Edit·Share·Set default·Delete) + `usePlaceSearch` hook +
+>   `utils/shareAddress`.
+> - `AddressListScreen` rebuilt → IMG #12; `LocationSheet` → functional
+>   Chirawa-only search + `AddressCard`. Edit flow PATCHes via `updateAddress`.
+> - i18n strings added; "(optional)" dropped from the maps-link label.
+
+---
+
+## ORIGINAL PLAN (for reference)
+
+
+From the user's review of the *current* build (IMG_3823–3828). Reference for the
+sheet + saved cards = **IMG_3525** (Blinkit "Select delivery location"). Keep
+Bringly **orange**. Goal: make it behave like a top-tier real app — fully
+functional, secure, optimized.
+
+> **Architectural backbone (decided by the codebase):** `main` already ships a
+> **secure server-side geo proxy** — `POST /api/v1/geo/reverse` (`apps/api/.../geo/`)
+> that reverse-geocodes via Google with the **key kept server-side** and a
+> **Plus-Code guard** (`isPlusCode`, `parseGoogleResults`). But our
+> `AddressMapScreen` + `AddressDetailsScreen` still call the **client-side**
+> `utils/geocode.ts` I added in v2 — which has **no Plus-Code filter** and embeds
+> the Maps key in app JS. **That single mismatch is the root of items B & part of
+> D.** v4 consolidates everything onto the backend proxy and **deletes
+> `utils/geocode.ts` + `config/maps.ts`.**
+
+## A. Polish the delivery-location sheet → IMG_3525 look (IMG_3823)
+`LocationSheet.tsx`. Structure already matches; this is visual craft:
+- Saved-address cards: rounded surface, **category avatar tile** (see F), bold
+  name, 2-line muted address, phone line, and a trailing **pin / ⋯ / share** action
+  row — exactly like the reference. Selected = orange ring + check.
+- Quick-action card (Use current / Add new / Request from someone else): keep, tidy
+  spacing + chevrons. (No "Import from Zomato".)
+- Search field stays rectangular; becomes functional (item D).
+
+## B. Kill Plus Codes — show real place names (IMG_3824, IMG_3825, IMG_3826)
+The map card title and the "Area, street" card show Open Location Codes like
+`6JRR+P49`, `6JQV+MPR`, `6MW2+J7F` because client `geocode.ts` picks Google's
+`plus_code` as the name. Fix:
+- **Route both screens through `api.reverseGeocode(lat,lng)`** (backend proxy),
+  which returns a cleaned `{ area, street, city, pincode, source }` that is
+  **never a Plus Code** (`parseGoogleResults` already strips them; falls back to
+  sublocality → neighbourhood → route → locality, then the on-device geocoder).
+- Map card title = `area` (or `street`), subtitle = the cleaned full line.
+- `AddressDetailsScreen` City/Area cards = the cleaned values, never a Plus Code.
+- Delete `utils/geocode.ts` + `config/maps.ts`; drop the in-JS Maps key.
+- Add a final guard in the UI: if any displayed string still matches the Plus-Code
+  regex, show the locality/`city` instead.
+
+## C. Remove "(optional)" from the maps-link field (IMG_3826)
+i18n `address.mapsLink`: `'Add google maps link (optional)'` → `'Add google maps
+link'` (en + hi). The field stays optional in logic; just drop the word.
+
+## D. Make the search actually work — Places Autocomplete (IMG_3827)
+Today the sheet search only filters saved addresses (`No saved addresses yet`).
+Make it a real **navigational place search** the high-class way:
+
+**New backend proxy** in the existing geo module (key stays server-side, mirrors
+`/geo/reverse`), using **Places API (New)** — *Autocomplete (New)* + *Place Details
+(New)*; legacy can no longer be enabled:
+- `POST /api/v1/geo/autocomplete` `{ q, sessionToken }` →
+  `[{ placeId, primaryText, secondaryText, distanceKm }]`. Server calls Places
+  Autocomplete (New) with:
+  - **`locationRestriction`** = a **circle around `CHIRAWA_CENTER`** (start ~15 km,
+    covers Chirawa town + nearby villages) — a **hard restriction, not a bias**, so
+    results from other cities/states **never appear**.
+  - `includedRegionCodes:['in']` as a backstop.
+  - **Server-side safety net:** drop any prediction whose resolved
+    region/locality isn't Chirawa/Jhunjhunu (so a stray Jaipur/Haryana/UP hit like
+    the reference's `132 km`/`248 km` rows can't slip through).
+  - `distanceKm` computed from `CHIRAWA_CENTER` (or the device GPS if shared) →
+    shown on the result tile.
+- `POST /api/v1/geo/place` `{ placeId, sessionToken }` → `{ lat, lng, area, city,
+  pincode, formatted }` via Place Details (New) with a **field mask**
+  (`location,formattedAddress,displayName,addressComponents`) — only what we need.
+
+> **Chirawa-only is the core rule:** the app serves only Chirawa for now, so a
+> Chirawa user searching their locality must see **only Chirawa-area matches** —
+> never another city/state. Enforced by `locationRestriction` + the region filter
+> above (not merely ranking them lower).
+
+**Result row (per IMG #13):** pin-icon tile with the **distance** under it,
+**primary text** (e.g. *Near Shyam Mandir*) bold + **secondary text** (e.g.
+*Ambika Nagar, Chirawa, Rajasthan*) muted. Saved matches first, then place results
+under a "Search results" heading.
+
+**Optimization (real-app grade):**
+- **Session tokens** — one UUID v4 per search session, sent on every autocomplete
+  call *and* the final place-details call, so Google bills the whole session once
+  (per their guidance). New token after each pick.
+- **Debounce** input ~250 ms; ignore <3 chars; cancel in-flight on change.
+- Redis-cache popular `q`→predictions briefly server-side (like product suggest).
+- Client merges results: **saved addresses first** (instant, offline) **then**
+  place predictions under a "Search results" heading.
+
+**Flow:** type → suggestions → tap → `/geo/place` → coords → push `AddressMap`
+pre-centred there (then Confirm → details). Quota/error → graceful fallback to
+"Use current location".
+
+## E. Redesign "My Addresses" page → IMG #12 (IMG_3828)
+`AddressListScreen.tsx` looks crude (emoji + "Default"/"Delete" text buttons).
+Rebuild it as the **full-page twin of the sheet**, matching IMG #12:
+- Header **"My Addresses"** + back.
+- Top action rows (same component as the sheet): **+ Add new address**, **Request
+  address from someone else** (WhatsApp). *Skip "Import from Zomato"* — not a real
+  feature for us.
+- **"Your saved addresses"** heading, then the shared **`AddressCard`** (item F)
+  per address: category **avatar tile** · name · 2-line address · `Phone number:`,
+  with a **📌 pin** top-right and an inline **⋯ (more)** + **share (↑)** button row —
+  pixel-faithful to IMG #12.
+- Default address surfaces first; remove the old star/Delete text buttons and the
+  separate `+` FAB (the top "Add new address" row replaces it). Empty state stays.
+- Same `AddressCard` is reused in `LocationSheet` so the two stay identical.
+
+## F. Saved-address cards: category avatar + share + edit + pin (IMG_3525 / #11)
+Applies to **both** the sheet and My Addresses:
+- **Category avatar** from the label: Home → house, Work → briefcase/building,
+  Hotel → bed, Other/person → people — tinted tile (matches the reference's
+  yellow-icon tiles, in our orange/neutral palette). Map via the existing
+  `LABEL_VALUE` (घर/दुकान/होटल/अन्य).
+- **Pin** = set as default (`api.setDefaultAddress`) — the 📌 in the reference.
+- **Share** = share the formatted address (reuse the WhatsApp/`ShareAddress`
+  deep-link flow already in the repo) + native Share sheet.
+- **Edit** = open the add-address form **prefilled** for that address and **update**
+  it via `api.updateAddress(id, …)` (already exists). Needs `AddressDetails`/add
+  flow to accept an `editId` + initial values, and to PATCH instead of create.
+
+## Files v4 will touch
+- `components/location/LocationSheet.tsx` (cards + search results UI)
+- `screens/profile/AddressMapScreen.tsx`, `AddressDetailsScreen.tsx` (→ backend geo)
+- `screens/profile/AddressListScreen.tsx` (redesign + actions)
+- **New** `components/location/AddressCard.tsx` + `AddressActionsSheet.tsx` (shared)
+- `apps/api/src/modules/geo/` (+ autocomplete + place-details routes/service)
+- `packages/api-client` (+ `autocomplete`, `placeDetails`), `packages/types` (DTOs)
+- `packages/i18n/translations.ts` (search results, actions, drop "(optional)")
+- **Delete** `utils/geocode.ts`, `config/maps.ts`
+- Edit flow: extend `AddressDetails` params (`editId` + prefill) + save path
+
+## Decisions to confirm before building
+1. **Places API enablement** — the search needs **Places API (New)** enabled on the
+   server Maps key (separate SKU, billed per session; ~free within the monthly
+   credit at low volume). OK to enable, or defer item D and ship A/B/C/E/F first?
+2. **Edit flow** — reuse the existing add-address screen prefilled + PATCH
+   (recommended), vs a separate edit screen?
+3. **Share format** — WhatsApp deep link (reuses existing) + native share sheet, or
+   native share only?
+4. **Avatar style** — flat tinted icon tiles (recommended, matches reference) vs
+   illustrated/emoji.
+
+_Sources for the search design:_ Places API (New) Autocomplete + session-token &
+field-mask billing guidance (developers.google.com/maps/documentation/places).
+
+---
+
 # v3 — UX refinements (✅ IMPLEMENTED)
 
 > Built; customer-app + i18n typecheck clean. Not yet run on a device. No new
@@ -432,3 +605,4 @@ if receiver-on-address is wanted and we'll wire it end-to-end.
   offset that lifts the pin into the visible area above the card.
 - **Serviceability polish:** mirror the references' "X km away from your current
   location" line in addition to the in/out-of-zone warning.
+  

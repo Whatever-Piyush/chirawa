@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { authenticate } from '../../shared/middleware/auth.middleware';
-import { reverseGeocodeSchema } from './geo.schema';
-import { reverseGeocode } from './geo.service';
+import { reverseGeocodeSchema, autocompleteSchema, placeDetailsSchema } from './geo.schema';
+import { reverseGeocode, autocompletePlaces, placeDetails } from './geo.service';
 import { ValidationError } from '../../shared/errors/app-errors';
 
 export default async function geoRoutes(app: FastifyInstance): Promise<void> {
@@ -18,6 +18,35 @@ export default async function geoRoutes(app: FastifyInstance): Promise<void> {
         throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid coordinates');
       }
       const result = await reverseGeocode(parsed.data);
+      return reply.send(result);
+    },
+  );
+
+  // POST /api/v1/geo/autocomplete — place search, hard-restricted to Chirawa.
+  // Auth-gated + key server-side (same secure-proxy pattern as /reverse).
+  app.post(
+    '/autocomplete',
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      const parsed = autocompleteSchema.safeParse(request.body);
+      if (!parsed.success) {
+        throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid query');
+      }
+      const result = await autocompletePlaces(parsed.data);
+      return reply.send(result);
+    },
+  );
+
+  // POST /api/v1/geo/place — resolve a chosen prediction → coords + clean address.
+  app.post(
+    '/place',
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      const parsed = placeDetailsSchema.safeParse(request.body);
+      if (!parsed.success) {
+        throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid place');
+      }
+      const result = await placeDetails(parsed.data);
       return reply.send(result);
     },
   );

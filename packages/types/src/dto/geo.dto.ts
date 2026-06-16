@@ -18,3 +18,33 @@ export interface ReverseGeocodeResult {
   formatted: string | null;   // full one-line address (Plus Codes stripped)
   source:    'google' | 'device' | 'none';
 }
+
+// ─── Place search (Places Autocomplete (New), proxied server-side) ────────────
+// The Places key lives only on the backend. Results are hard-restricted to the
+// Chirawa service area — the app is Chirawa-only for now.
+
+export interface PlaceAutocompleteRequest {
+  q:            string;
+  sessionToken: string;   // UUID v4 per search session (Google billing grouping)
+}
+
+export interface PlacePrediction {
+  placeId:       string;
+  primaryText:   string;        // bold line, e.g. "Near Shyam Mandir"
+  secondaryText: string;        // muted line, e.g. "Ambika Nagar, Chirawa, Rajasthan"
+  distanceKm:    number | null; // from Chirawa centre
+}
+
+export interface PlaceDetailsRequest {
+  placeId:      string;
+  sessionToken: string;   // same token as the autocomplete session
+}
+
+export interface PlaceDetailsResult {
+  lat:       number;
+  lng:       number;
+  area:      string | null;
+  city:      string | null;
+  pincode:   string | null;
+  formatted: string | null;
+}
