@@ -144,3 +144,72 @@ export function toProductCard(p: ApiProduct): ProductCardData {
     hasVariants: p.hasVariants ?? false,
   };
 }
+
+// ─── Aggregated "one store" feed (Catalog Engine Phase 4) ────────────────────
+// GET /catalog/feed returns AggTile[] — one tile per master at the lowest
+// in-stock price, shop identity hidden. Each tile maps onto the existing
+// ProductCardData so the Home cards need zero new shape. `productId` is the
+// cheapest representative SKU; adding it to the cart lets the Phase-5 checkout
+// resolver re-route to the concrete lowest-price in-stock shop.
+export interface AggTile {
+  masterId:   string | null;   // null = passthrough (no approved master)
+  productId:  string;          // cheapest representative product → cart
+  name:       string;          // canonical (master) name
+  imageUrl:   string | null;   // canonical R2 WebP
+  pricePaise: number;          // lowest in-stock price among carrying shops
+  mrpPaise:   number | null;
+  unit:       string | null;
+  brand:      string | null;
+  shopCount:  number;          // identity hidden, count only
+}
+
+// One aggregated tile → a ProductCard. The feed gives a single canonical image,
+// so `images` is a 1-length array (the card's carousel dots stay hidden).
+export function toFeedCard(t: AggTile): ProductCardData {
+  return {
+    productId:   t.productId,
+    name:        t.name,
+    pricePaise:  t.pricePaise,
+    mrpPaise:    t.mrpPaise,
+    weightLabel: t.unit,
+    imageUrl:    t.imageUrl,
+    images:      t.imageUrl ? [t.imageUrl] : [],
+    hasVariants: false,   // an aggregated tile is a single representative SKU
+  };
+}
+
+export async function fetchFeed(): Promise<ProductCardData[]> {
+  const data = await api.getFeed();
+  const tiles = Array.isArray(data) ? (data as AggTile[]) : [];
+  return tiles.map(toFeedCard);
+}
+
+// Daily Essentials (TOP_SELLING_SKUS.md): the curated everyday top-selling SKUs,
+// already ordered + lowest-priced by the backend. Same AggTile → ProductCard map.
+export async function fetchDailyEssentials(): Promise<ProductCardData[]> {
+  const data = await api.getDailyEssentials();
+  const tiles = Array.isArray(data) ? (data as AggTile[]) : [];
+  return tiles.map(toFeedCard);
+}
+
+// ─── Bestsellers cluster cards (image-1 / 1.md) ──────────────────────────────
+// GET /catalog/bestsellers → one entry per category with up to 4 sample product
+// image URLs (the 2×2 cluster). Eggs excluded + no counts server-side.
+export interface BestsellerCluster {
+  name:   string;
+  images: string[];   // up to 4 R2 image URLs
+}
+
+export async function fetchBestsellers(): Promise<BestsellerCluster[]> {
+  const data = await api.getBestsellers();
+  return Array.isArray(data) ? (data as BestsellerCluster[]) : [];
+}
+
+// Per-category sample images for the home tiles (image-2 / 2.md): a
+// { [categoryName]: imageUrl[] } map (up to 3 each). Tolerant of a non-object.
+export async function fetchCategoryImages(): Promise<Record<string, string[]>> {
+  const data = await api.getCategoryImages();
+  return data && typeof data === 'object' && !Array.isArray(data)
+    ? (data as Record<string, string[]>)
+    : {};
+}

@@ -9,6 +9,7 @@ export async function setupSchedules(queues: {
   settlement:     Queue;
   reconciliation: Queue;
   cleanup:        Queue;
+  enrichment:     Queue;
 }): Promise<void> {
   console.log('⏰ Setting up job schedules...');
 
@@ -89,6 +90,20 @@ export async function setupSchedules(queues: {
       repeat:     { every: 60 * 60 * 1000 },
       jobId:      'cart-cleanup-recurring',
       removeOnComplete: { count: 5 },
+    },
+  );
+
+  // ── Catalog image enrichment — nightly 1 AM IST (19:30 UTC), off-peak ──────
+  // Sweeps un-imaged MasterCatalog rows against the OFF dump (Phase 2). Async,
+  // rate-limited, idempotent — safe to repeat.
+  await queues.enrichment.add(
+    JobNames.CATALOG_ENRICH,
+    {},
+    {
+      repeat:     { pattern: '30 19 * * *' },
+      jobId:      'catalog-enrich-recurring',
+      removeOnComplete: { count: 7 },
+      removeOnFail:     { count: 5 },
     },
   );
 

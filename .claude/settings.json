@@ -1,0 +1,17 @@
+{
+  "enabledMcpjsonServers": ["context7"],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *apps/api/*) jq -n '{hookSpecificOutput:{hookEventName:\"PreToolUse\",additionalContext:\"CONTEXT7 RULE: before writing or modifying backend code under apps/api, first call Context7 (resolve-library-id then get-library-docs) for the latest docs of the pinned versions — Fastify v4, BullMQ v5, Socket.io v4, Prisma v5, Razorpay. See apps/api/CLAUDE.md for library IDs and version gotchas.\"}}' ;; esac",
+            "statusMessage": "Checking Context7 rule…"
+          }
+        ]
+      }
+    ]
+  }
+}

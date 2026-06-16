@@ -1,122 +1,126 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
-  View, Image, FlatList, TouchableOpacity, StyleSheet, Dimensions, ActivityIndicator,
+  View, Image, FlatList, TouchableOpacity, StyleSheet, Dimensions,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Text, SectionContainer } from '../../components/ui';
+import { Text } from '../../components/ui';
 import { useTheme } from '../../theme/ThemeContext';
-import { fetchCategories, type ApiCategory } from '../../services/catalog';
-import type { RootStackParamList } from '../../navigation/AppNavigator';
+import type { BestsellerCluster } from '../../services/catalog';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Real category cards backed by /catalog/categories. Each shows a sample
-// image + live product count and opens that category's product grid.
+// "Bestsellers" — image-1 design (see 1.md): 3-col cards, each a 2×2 cluster of
+// up to 4 real in-stock product images + a 2-line category name. Chirawa-skinned.
+// No "+N more" counts, eggs excluded (both server-side). Missing cluster slots
+// render a themed placeholder tile — never a broken image. Presentational.
+//
+// Layout matches CategorySections (HPAD 16 · GAP 10 · title 17/marginTop 18) so
+// the section lines up consistently with the Grocery & Kitchen grids below it.
 const PALETTE = ['#FFF8E1', '#FFF0F5', '#E8F5E9', '#FFF5EE', '#F3F0FF', '#E6F7F4'];
 
-const SECTION_HPAD = 16;
-const CARD_GAP     = 8;
-const CARD_WIDTH   = Math.floor((SCREEN_WIDTH - SECTION_HPAD * 2 - CARD_GAP * 2) / 3);
-const IMG_SIZE     = CARD_WIDTH - 20;
+const HPAD  = 16;
+const GAP   = 10;
+const COLS  = 3;
+const CARD_W   = Math.floor((SCREEN_WIDTH - HPAD * 2 - GAP * (COLS - 1)) / COLS);
+const INNER_PAD = 8;
+const TILE_GAP  = 6;
+const TILE_W    = Math.floor((CARD_W - INNER_PAD * 2 - TILE_GAP) / 2);
 const LABEL_LINE   = 16;
 const LABEL_HEIGHT = LABEL_LINE * 2;
 
 interface CardProps {
-  category: ApiCategory;
-  bg:       string;
-  onPress:  () => void;
+  cluster: BestsellerCluster;
+  bg:      string;
+  onPress: () => void;
 }
 
-function BestsellerCard({ category, bg, onPress }: CardProps) {
+function ClusterCard({ cluster, bg, onPress }: CardProps) {
   const { colors: Colors } = useTheme();
+  // Always 4 slots → real image or a themed placeholder tile (no "and more").
+  const slots = [0, 1, 2, 3].map((i) => cluster.images[i] ?? null);
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={[styles.card, { backgroundColor: bg }]}>
-      <View style={styles.imageBox}>
-        {category.imageUrl ? (
-          <Image source={{ uri: category.imageUrl }} style={styles.image} resizeMode="contain" />
-        ) : (
-          <View style={[styles.image, { backgroundColor: bg }]} />
-        )}
+      <View style={styles.cluster}>
+        {slots.map((url, i) => (
+          <View key={i} style={[styles.tile, !url && { backgroundColor: Colors.surfaceAlt }]}>
+            {url ? <Image source={{ uri: url }} style={styles.tileImg} resizeMode="contain" /> : null}
+          </View>
+        ))}
       </View>
 
-      <Text color={Colors.textSecondary} style={styles.countText}>
-        {category.productCount} item{category.productCount === 1 ? '' : 's'}
-      </Text>
-
-      <Text weight="semibold" color={Colors.textPrimary} numberOfLines={2} style={styles.label}>
-        {category.name}
+      <Text weight="medium" color={Colors.textPrimary} numberOfLines={2} style={styles.label}>
+        {cluster.name}
       </Text>
     </TouchableOpacity>
   );
 }
 
-export default function BestsellersSection() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+interface Props {
+  clusters: BestsellerCluster[];
+  onSelect: (name: string) => void;
+}
+
+function BestsellersSection({ clusters, onSelect }: Props) {
   const { colors: Colors } = useTheme();
-  const [categories, setCategories] = useState<ApiCategory[]>([]);
-  const [loading, setLoading]       = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    fetchCategories()
-      .then((c) => { if (active) setCategories(c); })
-      .catch(() => { /* tolerate */ })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, []);
-
-  if (!loading && categories.length === 0) return null;
+  if (clusters.length === 0) return null;
 
   return (
-    <SectionContainer title="Shop by category">
-      {loading ? (
-        <View style={styles.loading}><ActivityIndicator color={Colors.primary} /></View>
-      ) : (
-        <FlatList
-          data={categories}
-          keyExtractor={(item) => item.name}
-          numColumns={3}
-          scrollEnabled={false}                /* lives inside HomeScreen's ScrollView */
-          columnWrapperStyle={styles.row}
-          contentContainerStyle={styles.grid}
-          renderItem={({ item, index }) => (
-            <BestsellerCard
-              category={item}
-              bg={PALETTE[index % PALETTE.length]}
-              onPress={() => navigation.navigate('CategoryProducts', { category: item.name })}
-            />
-          )}
-        />
-      )}
-    </SectionContainer>
+    <View style={styles.section}>
+      <Text weight="bold" color={Colors.textPrimary} style={styles.sectionTitle}>
+        Bestsellers
+      </Text>
+      <FlatList
+        data={clusters}
+        keyExtractor={(c) => c.name}
+        numColumns={COLS}
+        scrollEnabled={false}                /* lives inside HomeScreen's ScrollView */
+        columnWrapperStyle={styles.row}
+        contentContainerStyle={styles.grid}
+        renderItem={({ item, index }) => (
+          <ClusterCard
+            cluster={item}
+            bg={PALETTE[index % PALETTE.length]}
+            onPress={() => onSelect(item.name)}
+          />
+        )}
+      />
+    </View>
   );
 }
 
+// Memoised — re-renders only when the clusters / handler change.
+export default React.memo(BestsellersSection);
+
 const styles = StyleSheet.create({
-  loading: { height: 120, justifyContent: 'center', alignItems: 'center' },
-  grid: { paddingHorizontal: SECTION_HPAD, rowGap: CARD_GAP },
-  row:  { gap: CARD_GAP, justifyContent: 'flex-start' },
+  // Mirror CategorySections so titles + left edges line up across the home page.
+  section:      { marginTop: 18 },
+  sectionTitle: { fontSize: 17, lineHeight: 22, marginHorizontal: HPAD, marginBottom: 12 },
+  grid:         { paddingHorizontal: HPAD, rowGap: 12 },
+  row:          { gap: GAP, justifyContent: 'flex-start' },
   card: {
-    width:        CARD_WIDTH,
-    borderRadius: 14,
+    width:        CARD_W,
+    borderRadius: 16,
     borderWidth:  1,
     borderColor:  'rgba(0,0,0,0.05)',
-    paddingHorizontal: 10,
-    paddingVertical:   12,
+    padding:      INNER_PAD,
     overflow:     'hidden',
   },
-  imageBox: {
-    width:          IMG_SIZE,
-    height:         IMG_SIZE,
-    borderRadius:   10,
-    overflow:       'hidden',
+  cluster: {
+    flexDirection: 'row',
+    flexWrap:      'wrap',
+    width:         TILE_W * 2 + TILE_GAP,
+    gap:           TILE_GAP,
+    alignSelf:     'center',
+    marginBottom:  8,
+  },
+  tile: {
+    width:          TILE_W,
+    height:         TILE_W,
+    borderRadius:   8,
     backgroundColor:'#FFFFFF',
+    overflow:       'hidden',
     justifyContent: 'center',
     alignItems:     'center',
-    marginBottom:   8,
   },
-  image:     { width: '100%', height: '100%' },
-  countText: { fontSize: 10, lineHeight: 13, marginBottom: 6 },
-  label:     { fontSize: 12, lineHeight: LABEL_LINE, height: LABEL_HEIGHT },
+  tileImg: { width: '88%', height: '88%' },
+  label:   { fontSize: 12, lineHeight: LABEL_LINE, height: LABEL_HEIGHT },
 });

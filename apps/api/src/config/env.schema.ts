@@ -56,6 +56,19 @@ export const envSchema = z
     R2_SECRET_ACCESS_KEY: z.string().default('placeholder'),
     R2_BUCKET_NAME: z.string().default('chirawa-assets'),
     R2_PUBLIC_URL: z.string().default('http://localhost:3000'),
+    // Canonical fallback tile for missing images (Catalog Engine Phase 1). Used
+    // where a concrete URL is required (e.g. aggregated feed served from
+    // MasterCatalog, notifications); the customer apps render their own native
+    // placeholder for null images, so this never overrides that.
+    PLACEHOLDER_IMAGE_URL: z.string().default('https://placehold.co/1200x1200/EEEEEE/999999.webp?text=No+Image'),
+    // ── Catalog enrichment (Phase 2) ──────────────────────────────────────────
+    // Path to a local Open Food Facts JSONL bulk dump for image enrichment. Empty
+    // = no dump (the worker marks items needs_manual). Bulk enrichment never uses
+    // the live OFF API (rate-limit / IP-ban risk).
+    OFF_DUMP_PATH: z.string().default(''),
+    // Descriptive User-Agent for the live OFF API (seller-scan single-item lookup,
+    // Phase 3). OFF requires identifying yourself; include a real contact.
+    OFF_USER_AGENT: z.string().default('Bringly/1.0 (catalog@bringly.example)'),
 
     // ── Observability ─────────────────────────────────────────────────────────
     // Sentry is OPTIONAL: an empty DSN disables it (no-op), so dev/local don't

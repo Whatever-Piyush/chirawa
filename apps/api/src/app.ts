@@ -30,6 +30,7 @@ import adminRoutes         from './modules/admin/admin.routes';
 import loyaltyRoutes       from './modules/loyalty/loyalty.routes';
 import notificationsRoutes from './modules/notifications/notifications.routes';
 import sellersRoutes       from './modules/sellers/sellers.routes';
+import geoRoutes           from './modules/geo/geo.routes';
 import { initSentry, captureError } from './shared/observability/sentry';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -180,6 +181,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(loyaltyRoutes,       { prefix: '/api/v1/loyalty' });
   await app.register(notificationsRoutes, { prefix: '/api/v1/notifications' });
   await app.register(sellersRoutes,       { prefix: '/api/v1/sellers' });
+  await app.register(geoRoutes,           { prefix: '/api/v1/geo' });
 
   return app;
 }

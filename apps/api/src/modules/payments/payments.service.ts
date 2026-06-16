@@ -250,6 +250,49 @@ export async function refundCapturedOrderPayment(
   return order.totalAmount;
 }
 
+// ── Partial line refund (Catalog Engine Phase 5 safety net) ─────────────────
+// Refunds a SPECIFIC amount (one order line) on a prepaid order without changing
+// order status or fully refunding it — used when the rider finds one item out of
+// stock but the rest of the order proceeds. The payment row's `refundedPaise` is
+// incremented (status stays 'captured' since the order isn't fully refunded).
+// Returns the refunded paise, or null when there's nothing to refund via Razorpay
+// (COD / unpaid / no captured payment — those are reconciled as reduced cash due).
+export async function refundOrderLine(
+  prisma: PrismaClient,
+  orderId: string,
+  amountPaise: number,
+  reason: string,
+): Promise<number | null> {
+  if (amountPaise <= 0) return null;
+  const order = await prisma.order.findUnique({
+    where: { id: orderId }, include: { payments: true },
+  });
+  if (!order || order.paymentMethod === 'cod') return null;
+
+  const captured = order.payments.find((p) => p.status === 'captured' && p.razorpayPaymentId);
+  if (!captured?.razorpayPaymentId) return null;
+
+  if (isRazorpayConfigured()) {
+    await createRefund(captured.razorpayPaymentId, amountPaise, { reason, orderId });
+  }
+
+  await prisma.$transaction([
+    prisma.payment.update({
+      where: { id: captured.id },
+      data:  { refundedPaise: { increment: amountPaise } },
+    }),
+    prisma.transaction.create({
+      data: {
+        type: 'refund', amountPaise,
+        referenceId: orderId, referenceType: 'order',
+        description: `Line refund: ${reason}`,
+      },
+    }),
+  ]);
+
+  return amountPaise;
+}
+
 export async function markOrderPaid(
   prisma: PrismaClient,
   orderId: string,

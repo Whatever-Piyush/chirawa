@@ -2,8 +2,9 @@ import { Prisma } from '@prisma/client';
 import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import { NotFoundError } from '../../shared/errors/app-errors';
+import { AGG_CACHE_KEY } from './aggregation.service';
 
-const CACHE_TTL = { shopList: 600, shopDetail: 300 };
+const CACHE_TTL = { shopList: 600, shopDetail: 300, bestsellers: 300 };
 const ALIAS_CACHE_TTL = 3600;
 
 // Validate UUIDs before hitting Prisma so a malformed :id returns 404, not 500.
@@ -39,10 +40,79 @@ export function parsePricePaise(raw?: string): number | undefined {
 }
 
 const keys = {
-  shopList:    ()           => `catalog:shops:active`,
-  shopDetail:  (shopId: string) => `catalog:shop:${shopId}:full`,
-  aliasExpand: (q: string)  => `search:aliases:expanded:${q.toLowerCase().trim()}`,
+  shopList:       ()           => `catalog:shops:active`,
+  shopDetail:     (shopId: string) => `catalog:shop:${shopId}:full`,
+  bestsellers:    ()           => `catalog:bestsellers`,
+  categoryImages: ()           => `catalog:catimages`,
+  aliasExpand:    (q: string)  => `search:aliases:expanded:${q.toLowerCase().trim()}`,
 };
+
+// Collapse search rows so a product carried by N shops shows once (Catalog Engine
+// Phase 4 — the aggregated illusion in search too). Keeps the FIRST occurrence per
+// masterId; since rows arrive already ranked (exact-match-first), that first row is
+// the right representative. Null-master rows stay distinct (long-tail items).
+export function dedupeByMaster<T extends { id: string; masterId: string | null }>(rows: T[], limit: number): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const r of rows) {
+    const key = r.masterId ?? `p:${r.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+// ─── Bestsellers cluster (image-1 design — see 1.md) ─────────────────────────
+// Collapse each category's sample products into up to 4 image URLs for the 2×2
+// cluster card: aggregated by category NAME across shops, EGGS EXCLUDED, and
+// NO counts. Pure + testable; the service fn does the Prisma read and feeds it
+// these rows. Bilingual egg match (egg / अंडा / anda).
+const EGG_RE = /egg|अंडा|अण्डा|anda/i;
+
+export interface BestsellerProduct { name: string; images: Array<{ url: string }> }
+export interface BestsellerCategoryRow { name: string; sortOrder: number; products: BestsellerProduct[] }
+export interface BestsellerCluster { name: string; images: string[] }
+
+export function buildBestsellers(cats: BestsellerCategoryRow[], limit = 9): BestsellerCluster[] {
+  const byName = new Map<string, { name: string; sortOrder: number; images: string[] }>();
+  for (const c of cats) {
+    if (EGG_RE.test(c.name)) continue;                       // never surface an "Eggs" category
+    const urls = c.products
+      .filter((p) => !EGG_RE.test(p.name))                   // drop egg products
+      .map((p) => p.images[0]?.url)
+      .filter((u): u is string => !!u);
+    const existing = byName.get(c.name);
+    if (existing) {
+      for (const u of urls) if (existing.images.length < 4 && !existing.images.includes(u)) existing.images.push(u);
+    } else {
+      byName.set(c.name, { name: c.name, sortOrder: c.sortOrder, images: [...new Set(urls)].slice(0, 4) });
+    }
+  }
+  return [...byName.values()]
+    .filter((c) => c.images.length > 0)                      // no images → card omitted
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+    .slice(0, limit)
+    .map((c) => ({ name: c.name, images: c.images }));        // ← no count field
+}
+
+// ─── Category tile images (image-2 design — see 2.md) ────────────────────────
+// Per-category sample image URLs (up to `perCat`) for the home category tiles,
+// as a { [categoryName]: url[] } map. Aggregated by NAME across shops, deduped.
+// Categories with no usable image are omitted → the tile falls back to its emoji.
+export interface CategoryImageRow { name: string; products: Array<{ images: Array<{ url: string }> }> }
+
+export function buildCategoryImages(cats: CategoryImageRow[], perCat = 3): Record<string, string[]> {
+  const map: Record<string, string[]> = {};
+  for (const c of cats) {
+    const urls = c.products.map((p) => p.images[0]?.url).filter((u): u is string => !!u);
+    if (urls.length === 0) continue;
+    const arr = (map[c.name] ??= []);
+    for (const u of urls) if (arr.length < perCat && !arr.includes(u)) arr.push(u);
+  }
+  return map;
+}
 
 function computeIsOpen(shop: {
   isOpen: boolean; openTime: string; closeTime: string;
@@ -97,6 +167,14 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
 
     await redis.setex(keys.shopList(), CACHE_TTL.shopList, JSON.stringify(result));
     return result;
+  }
+
+  // Chirawa Specials (Catalog Engine Phase 6) — the featured shops shown WITH
+  // branding + their own menu (marketplace mode), the opposite of the aggregated
+  // grocery feed. Reuses the cached shop list; the menu is the existing getShop().
+  async function getSpecials() {
+    const shops = await getShops() as Array<{ isFeatured?: boolean }>;
+    return shops.filter((s) => s.isFeatured);
   }
 
   async function getShop(shopId: string) {
@@ -294,6 +372,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
     type ProductRow = {
       id: string; name: string; pricePaise: number | bigint;
       shopId: string; shopName: string; imageUrl: string | null; inStock: boolean;
+      masterId: string | null;
     };
     type ShopRow = {
       id: string; name: string; address: string;
@@ -303,7 +382,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
 
     const [productRows, shopRows, countRows] = await Promise.all([
       prisma.$queryRaw<ProductRow[]>`
-        SELECT id, name, "pricePaise", "shopId", "shopName", "imageUrl", "inStock"
+        SELECT id, name, "pricePaise", "shopId", "shopName", "imageUrl", "inStock", "masterId"
         FROM (
           SELECT
             p.id::text,
@@ -313,6 +392,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
             s.name             AS "shopName",
             pi.url             AS "imageUrl",
             (p.stock_status = 'available') AS "inStock",
+            p.master_id::text  AS "masterId",
             ${scoreExpr}       AS score,
             COALESCE((
               SELECT AVG(o.rating) FROM orders o
@@ -329,7 +409,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
           WHERE ${whereBody}
         ) sub
         ORDER BY ${orderExpr}
-        LIMIT 20
+        LIMIT 60
       `,
 
       // Shops: fuzzy match on name only (shop names are in English)
@@ -353,19 +433,24 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
         LIMIT 5
       `,
 
-      // Full match count (ignores the LIMIT 20) for the "Showing X results" label
+      // Full match count for the "Showing X results" label — DISTINCT by master so
+      // it matches the deduped list (a product across N shops counts once).
       prisma.$queryRaw<CountRow[]>`
-        SELECT COUNT(*)::int AS count
+        SELECT COUNT(DISTINCT COALESCE(p.master_id::text, p.id::text))::int AS count
         FROM products p
         ${joins}
         WHERE ${whereBody}
       `,
     ]);
 
+    // Dedupe by master so the same product carried by several shops shows once,
+    // preserving the score order (exact-match-first), then cap at 20.
+    const dedupedRows = dedupeByMaster(productRows, 20);
+
     return {
       query: q,
       total: Number(countRows[0]?.count ?? 0),
-      products: productRows.map((p) => ({
+      products: dedupedRows.map((p) => ({
         id:         p.id,
         name:       p.name,
         pricePaise: Number(p.pricePaise),
@@ -373,6 +458,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
         shopName:   p.shopName,
         imageUrl:   p.imageUrl,
         inStock:    p.inStock,
+        masterId:   p.masterId,
       })),
       shops: shopRows.map((s) => ({
         id:      s.id,
@@ -455,6 +541,64 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
   }
 
+  // Bestsellers cluster cards (image-1 / 1.md): up to 4 sample in-stock product
+  // images per category, aggregated by name across shops, eggs excluded, NO
+  // counts. Cached + busted on any inventory write (see invalidateShopCache).
+  async function getBestsellers(limit = 9): Promise<BestsellerCluster[]> {
+    const cached = await redis.get(keys.bestsellers()).catch(() => null);
+    if (cached) return JSON.parse(cached) as BestsellerCluster[];
+
+    const cats = await prisma.category.findMany({
+      where:   { isActive: true, shop: { isActive: true } },
+      orderBy: { sortOrder: 'asc' },
+      select: {
+        name: true,
+        sortOrder: true,
+        products: {
+          where: {
+            isActive:    true,
+            stockStatus: 'available',
+            images:      { some: {} },
+            NOT:         { name: { contains: 'egg', mode: 'insensitive' } },
+          },
+          orderBy: { sortOrder: 'asc' },
+          take:    8,            // headroom; buildBestsellers dedupes to 4
+          select:  { name: true, images: { orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true } } },
+        },
+      },
+    });
+
+    const result = buildBestsellers(cats as BestsellerCategoryRow[], limit);
+    await redis.setex(keys.bestsellers(), CACHE_TTL.bestsellers, JSON.stringify(result)).catch(() => {});
+    return result;
+  }
+
+  // Per-category sample product images (image-2 / 2.md): up to 3 image URLs per
+  // category for the home tiles, as a { [name]: url[] } map. Cached + busted on
+  // any inventory write.
+  async function getCategoryImages(perCat = 3): Promise<Record<string, string[]>> {
+    const cached = await redis.get(keys.categoryImages()).catch(() => null);
+    if (cached) return JSON.parse(cached) as Record<string, string[]>;
+
+    const cats = await prisma.category.findMany({
+      where:   { isActive: true, shop: { isActive: true } },
+      orderBy: { sortOrder: 'asc' },
+      select: {
+        name: true,
+        products: {
+          where:   { isActive: true, stockStatus: 'available', images: { some: {} } },
+          orderBy: { sortOrder: 'asc' },
+          take:    perCat * 2,
+          select:  { images: { orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true } } },
+        },
+      },
+    });
+
+    const result = buildCategoryImages(cats as CategoryImageRow[], perCat);
+    await redis.setex(keys.categoryImages(), CACHE_TTL.bestsellers, JSON.stringify(result)).catch(() => {});
+    return result;
+  }
+
   // Single product detail for the Product Detail Page (PDP). Returns the full
   // product + all its images + up to 6 related products from the same shop.
   async function getProductDetail(productId: string) {
@@ -520,8 +664,15 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
     await Promise.all([
       redis.del(keys.shopDetail(shopId)),
       redis.del(keys.shopList()),
+      // Any inventory write (price/stock/add) can change the aggregated feed —
+      // bust it too so the lowest-price tile stays accurate (Phase 4).
+      redis.del(AGG_CACHE_KEY),
+      // The bestseller clusters (sample images per category) can shift as well.
+      redis.del(keys.bestsellers()),
+      // …as can the per-category tile images (image-2 tiles).
+      redis.del(keys.categoryImages()),
     ]);
   }
 
-  return { getShops, getShop, getProducts, getCategories, getProductDetail, searchProducts, searchCatalog, invalidateShopCache };
+  return { getShops, getSpecials, getShop, getProducts, getCategories, getBestsellers, getCategoryImages, getProductDetail, searchProducts, searchCatalog, invalidateShopCache };
 }

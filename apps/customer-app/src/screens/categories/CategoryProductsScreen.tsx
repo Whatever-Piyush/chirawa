@@ -1,11 +1,12 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { View, FlatList, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, FlatList, StyleSheet } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { Text } from '../../components/ui';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import ProductCard from '../../components/product/ProductCard';
+import ProductGridSkeleton from '../../components/product/ProductGridSkeleton';
 import { fetchProducts, toProductCard, type ApiProduct } from '../../services/catalog';
 
 type Props = {
@@ -36,7 +37,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
   }, [category]);
 
   if (loading) {
-    return <View style={styles.center}><ActivityIndicator color={Colors.primary} /></View>;
+    return <ProductGridSkeleton />;
   }
   if (products.length === 0) {
     return <View style={styles.center}><Text color={Colors.textSecondary}>No items here yet</Text></View>;

@@ -6,6 +6,7 @@ export const QueueNames = {
   NOTIFICATION:    'chirawa-notification',
   ORDER_ASSIGNMENT: 'chirawa-order-assignment',
   SELLER_ACCEPT:    'chirawa-seller-accept',
+  ENRICHMENT:       'chirawa-enrichment',
 } as const;
 
 export const JobNames = {
@@ -22,6 +23,7 @@ export const JobNames = {
   UNLOCK_REFERRAL:       'unlock-referral',
   SEND_PUSH:             'send-push',
   SEND_SMS:              'send-sms',
+  CATALOG_ENRICH:        'catalog-enrich',
 } as const;
 
 export interface AssignBatchPayload {

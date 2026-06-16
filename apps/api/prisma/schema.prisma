@@ -49,6 +49,14 @@ enum StockStatus {
   hidden
 }
 
+// Moderation gate for a MasterCatalog (dictionary) row before it's publicly
+// usable — community/OFF data lands as needs_review until an admin approves it.
+enum MasterStatus {
+  needs_review
+  approved
+  rejected
+}
+
 enum RiderAvailabilityStatus {
   online
   offline
@@ -109,13 +117,13 @@ model User {
   riderProfile       RiderProfile?
   adminProfile       AdminProfile?
   addresses          Address[]
-  orders             Order[]              @relation("CustomerOrders")
+  orders             Order[]             @relation("CustomerOrders")
   refreshTokens      RefreshToken[]
   walletTransactions WalletTransaction[]
   notifications      Notification[]
   auditLogs          AuditLog[]
   referralCode       ReferralCode?
-  referralRedemption ReferralRedemption?  @relation("ReferredUser")
+  referralRedemption ReferralRedemption? @relation("ReferredUser")
   promoRedemptions   PromoRedemption[]
 
   @@index([role])
@@ -139,25 +147,25 @@ model CustomerProfile {
 }
 
 model SellerProfile {
-  id             String    @id @default(uuid()) @db.Uuid
-  userId         String    @unique @map("user_id") @db.Uuid
-  ownerName      String    @map("owner_name") @db.VarChar(100)
-  upiId          String?   @map("upi_id") @db.VarChar(100)
-  bankAccount    String?   @map("bank_account") @db.VarChar(20)
-  bankIfsc       String?   @map("bank_ifsc") @db.VarChar(15)
-  gstin          String?   @db.VarChar(15)
+  id                    String    @id @default(uuid()) @db.Uuid
+  userId                String    @unique @map("user_id") @db.Uuid
+  ownerName             String    @map("owner_name") @db.VarChar(100)
+  upiId                 String?   @map("upi_id") @db.VarChar(100)
+  bankAccount           String?   @map("bank_account") @db.VarChar(20)
+  bankIfsc              String?   @map("bank_ifsc") @db.VarChar(15)
+  gstin                 String?   @db.VarChar(15)
   // RazorpayX contact + fund-account ids, cached after first payout so we don't
   // recreate them every settlement run (0.3).
-  razorpayContactId     String? @map("razorpay_contact_id") @db.VarChar(100)
-  razorpayFundAccountId String? @map("razorpay_fund_account_id") @db.VarChar(100)
-  pinHash        String?   @map("pin_hash") @db.VarChar(60)
-  pinFailCount   Int       @default(0) @map("pin_fail_count")
-  pinLockedUntil DateTime? @map("pin_locked_until")
+  razorpayContactId     String?   @map("razorpay_contact_id") @db.VarChar(100)
+  razorpayFundAccountId String?   @map("razorpay_fund_account_id") @db.VarChar(100)
+  pinHash               String?   @map("pin_hash") @db.VarChar(60)
+  pinFailCount          Int       @default(0) @map("pin_fail_count")
+  pinLockedUntil        DateTime? @map("pin_locked_until")
   // Times an order was auto-accepted because the seller didn't respond in the
   // acceptance window (Chunk 8.2) — flags chronically unresponsive sellers.
-  missedAcceptances Int    @default(0) @map("missed_acceptances")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  missedAcceptances     Int       @default(0) @map("missed_acceptances")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   shop        Shop?
@@ -246,17 +254,17 @@ model Shop {
 }
 
 model Category {
-  id        String   @id @default(uuid()) @db.Uuid
-  shopId    String   @map("shop_id") @db.Uuid
-  parentId  String?  @map("parent_id") @db.Uuid
-  name      String   @db.VarChar(100)
-  sortOrder Int      @default(0) @map("sort_order")
-  isActive  Boolean  @default(true) @map("is_active")
+  id             String   @id @default(uuid()) @db.Uuid
+  shopId         String   @map("shop_id") @db.Uuid
+  parentId       String?  @map("parent_id") @db.Uuid
+  name           String   @db.VarChar(100)
+  sortOrder      Int      @default(0) @map("sort_order")
+  isActive       Boolean  @default(true) @map("is_active")
   // Category-level commission rate as a fraction (0.13 = 13%). A shop's own
   // commissionRate (if > 0) overrides this. Defaults to 0.
-  commissionRate Decimal @default(0) @map("commission_rate") @db.Decimal(5, 4)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  commissionRate Decimal  @default(0) @map("commission_rate") @db.Decimal(5, 4)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   shop     Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
   parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
@@ -284,6 +292,12 @@ model Product {
   isActive    Boolean     @default(true) @map("is_active")
   sortOrder   Int         @default(0) @map("sort_order")
   unit        String?     @db.VarChar(50)
+  // GTIN/EAN join key (Catalog Engine Phase 0). Nullable — only set for barcoded
+  // goods; NOT unique (the same GTIN legitimately recurs as one row per shop).
+  barcode     String?     @db.VarChar(14)
+  // Link to the global MasterCatalog "dictionary" row this shop-product realizes.
+  // Nullable — products added before/without a barcode flow through the manual path.
+  masterId    String?     @map("master_id") @db.Uuid
   // Free-form product highlights shown as chips on the detail page, e.g.
   // [{ "label": "Shelf Life", "value": "150 days" }, { "label": "Flavour", "value": "Spicy" }]
   attributes  Json?       @map("attributes")
@@ -292,6 +306,7 @@ model Product {
 
   shop           Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
   category       Category?        @relation(fields: [categoryId], references: [id])
+  master         MasterCatalog?   @relation(fields: [masterId], references: [id])
   images         ProductImage[]
   variants       ProductVariant[]
   cartItems      CartItem[]
@@ -301,6 +316,9 @@ model Product {
   @@index([shopId, stockStatus, isActive])
   @@index([categoryId])
   @@index([name])
+  @@index([barcode])
+  // Drives the cross-shop aggregation query (group by master, in-stock + active).
+  @@index([masterId, stockStatus, isActive])
   @@map("products")
 }
 
@@ -325,16 +343,96 @@ model ProductVariant {
 }
 
 model ProductImage {
-  id        String   @id @default(uuid()) @db.Uuid
-  productId String   @map("product_id") @db.Uuid
-  url       String
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid()) @db.Uuid
+  productId   String   @map("product_id") @db.Uuid
+  url         String
+  sortOrder   Int      @default(0) @map("sort_order")
+  // Provenance for legal/attribution + one-click takedowns (Catalog Engine Phase
+  // 0). Populated by the image pipeline (Phase 1) — null for pre-existing rows.
+  source      String?  @db.VarChar(50) // 'open_food_facts' | 'distributor' | 'manual'
+  license     String?  @db.VarChar(50) // 'CC-BY-SA' | 'owned'
+  attribution String? // e.g. the OFF product URL, for the credits page
+  createdAt   DateTime @default(now()) @map("created_at")
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId])
   @@map("product_images")
+}
+
+// NEW (Catalog Engine Phase 0) — the global product "dictionary", one row per
+// real-world product keyed by barcode (GTIN). Canonical name/image/MRP that
+// per-shop Product rows reference. NOT sellable — a lookup/enrichment table only.
+model MasterCatalog {
+  id                    String       @id @default(uuid()) @db.Uuid
+  barcode               String       @unique @db.VarChar(14) // EAN-13/UPC — the join key
+  name                  String       @db.VarChar(200)
+  brand                 String?      @db.VarChar(120)
+  unit                  String?      @db.VarChar(50)
+  mrpPaise              Int?         @map("mrp_paise")
+  categoryName          String?      @map("category_name") // generic, deduped-by-name like existing categories
+  imageUrl              String?      @map("image_url") // canonical, on OUR R2 (never hotlinked)
+  imageSource           String?      @map("image_source") // 'open_food_facts' | 'distributor' | 'manual'
+  imageLicense          String?      @map("image_license") // 'CC-BY-SA' | 'owned'
+  imageAttribution      String?      @map("image_attribution") // OFF product URL for the credits page
+  status                MasterStatus @default(needs_review) // gate before it's publicly usable
+  // Enrichment tracking (Catalog Engine Phase 2). enrichmentStatus: null = never
+  // attempted, 'enriched' = image set from a source, 'needs_manual' = no source
+  // match (a human photo is needed), 'error' = transient failure (retried next
+  // run). Drives resumability + the Phase 7 coverage dashboard.
+  enrichmentStatus      String?      @map("enrichment_status") @db.VarChar(20)
+  enrichmentAttemptedAt DateTime?    @map("enrichment_attempted_at")
+  enrichmentNote        String?      @map("enrichment_note") // last skip/failure reason
+  createdAt             DateTime     @default(now()) @map("created_at")
+  updatedAt             DateTime     @updatedAt @map("updated_at")
+
+  products Product[]
+
+  @@index([name])
+  @@index([status])
+  @@index([enrichmentStatus])
+  @@map("master_catalog")
+}
+
+// NEW (Catalog Engine Phase 0) — demand capture ("Request this item"). Captures
+// minimal PII (pincode only) so unmet demand can rank the sourcing roadmap.
+model ProductRequest {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid // null = anonymous
+  rawText   String?  @map("raw_text") // free-text wish
+  barcode   String?  @db.VarChar(14)
+  masterId  String?  @map("master_id") @db.Uuid
+  pincode   String?  @db.VarChar(10)
+  // Restock "notify me" (Catalog Engine Phase 6). When notifyOnRestock is set, the
+  // requester is FCM'd once the item's master is back in stock; notifiedAt stamps
+  // that send so the fan-out stays at-most-once even if the trigger re-fires.
+  notifyOnRestock Boolean   @default(false) @map("notify_on_restock")
+  notifiedAt      DateTime? @map("notified_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([masterId])
+  @@index([barcode])
+  @@index([createdAt])
+  @@map("product_requests")
+}
+
+// NEW (Catalog Engine Phase 3) — "report wrong image". A seller/customer flags a
+// product or master image as wrong; on report the linked master is re-gated to
+// needs_review (leaves the public pool until fixed). Feeds the Phase 7 moderation
+// queue; resolvedAt marks it handled. Bare columns (no FKs), like ProductRequest.
+model ImageReport {
+  id           String    @id @default(uuid()) @db.Uuid
+  productId    String?   @map("product_id") @db.Uuid
+  masterId     String?   @map("master_id") @db.Uuid
+  reportedById String?   @map("reported_by_id") @db.Uuid // null = anonymous
+  reason       String?   @db.VarChar(255)
+  resolvedAt   DateTime? @map("resolved_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([masterId])
+  @@index([resolvedAt])
+  @@index([createdAt])
+  @@map("image_reports")
 }
 
 // ─── Address ──────────────────────────────────────────────────────────────────
@@ -409,6 +507,10 @@ model Order {
   deliveryPincode  String  @map("delivery_pincode") @db.VarChar(10)
   deliveryLat      Decimal @map("delivery_lat") @db.Decimal(10, 8)
   deliveryLng      Decimal @map("delivery_lng") @db.Decimal(11, 8)
+  // Optional receiver contact — set when ordering for someone else; the rider
+  // calls this instead of the account owner. Editable before pickup.
+  receiverName     String? @map("receiver_name") @db.VarChar(100)
+  receiverPhone    String? @map("receiver_phone") @db.VarChar(20)
 
   // Pricing — all in paise (integer, never float)
   cartSubtotalAtPricing Int     @map("cart_subtotal_at_pricing")
@@ -432,29 +534,34 @@ model Order {
   // Optional references
   promoCodeId String? @map("promo_code_id") @db.Uuid
   addressId   String? @map("address_id") @db.Uuid
-  batchId     String? @map("batch_id") @db.Uuid   // delivery batch (Chunk 5.4)
+  batchId     String? @map("batch_id") @db.Uuid // delivery batch (Chunk 5.4)
+  // Ties this per-shop child order to the ONE customer-facing OrderGroup it was
+  // split from (Catalog Engine Phase 0/5). Nullable — legacy single-shop orders
+  // and orders placed before aggregation have no group.
+  groupId     String? @map("group_id") @db.Uuid
 
   // Timestamps
   confirmedAt      DateTime? @map("confirmed_at")
   sellerAcceptedAt DateTime? @map("seller_accepted_at")
   pickedUpAt       DateTime? @map("picked_up_at")
-  deliveredAt  DateTime? @map("delivered_at")
-  cancelledAt  DateTime? @map("cancelled_at")
-  cancelReason String?   @map("cancel_reason") @db.VarChar(255)
+  deliveredAt      DateTime? @map("delivered_at")
+  cancelledAt      DateTime? @map("cancelled_at")
+  cancelReason     String?   @map("cancel_reason") @db.VarChar(255)
 
   // Customer rating (post-delivery)
   rating        Int?      @map("rating")
   ratingComment String?   @map("rating_comment") @db.VarChar(500)
   ratedAt       DateTime? @map("rated_at")
 
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   customer            User                 @relation("CustomerOrders", fields: [customerId], references: [id])
   shop                Shop                 @relation(fields: [shopId], references: [id])
   address             Address?             @relation(fields: [addressId], references: [id])
   promoCode           PromoCode?           @relation(fields: [promoCodeId], references: [id])
   batch               Batch?               @relation(fields: [batchId], references: [id])
+  group               OrderGroup?          @relation(fields: [groupId], references: [id])
   items               OrderItem[]
   statusHistory       OrderStatusHistory[]
   payments            Payment[]
@@ -464,7 +571,21 @@ model Order {
   @@index([status, createdAt])
   @@index([shopId, createdAt(sort: Desc)])
   @@index([riderId, status])
+  @@index([groupId])
   @@map("orders")
+}
+
+// NEW (Catalog Engine Phase 0) — unifies the per-shop child orders into ONE
+// customer-facing order. The existing per-shop split (orders.service) stays; the
+// group only gives the customer one order + one tracking view on top of N children.
+model OrderGroup {
+  id         String   @id @default(uuid()) @db.Uuid
+  customerId String   @map("customer_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  orders Order[]
+
+  @@map("order_groups")
 }
 
 model OrderItem {
@@ -475,6 +596,12 @@ model OrderItem {
   unitPrice   Int      @map("unit_price")
   quantity    Int
   subtotal    Int
+  // Per-line fulfillment (Catalog Engine Phase 5 safety net). 'fulfilled' =
+  // normal; 'unavailable_refunded' = the rider found this item out of stock at
+  // pickup, so the line was refunded (prepaid) / deducted from cash due (COD) and
+  // its `refundedPaise` recorded. The rest of the order still proceeds.
+  fulfillmentStatus String @default("fulfilled") @map("fulfillment_status") @db.VarChar(20)
+  refundedPaise     Int    @default(0) @map("refunded_paise")
   createdAt   DateTime @default(now()) @map("created_at")
 
   order   Order   @relation(fields: [orderId], references: [id])
@@ -502,18 +629,18 @@ model OrderStatusHistory {
 // ─── Payments ─────────────────────────────────────────────────────────────────
 
 model Payment {
-  id                String        @id @default(uuid()) @db.Uuid
-  orderId           String        @map("order_id") @db.Uuid
-  razorpayOrderId   String?       @map("razorpay_order_id") @db.VarChar(100)
-  razorpayPaymentId String?       @unique @map("razorpay_payment_id") @db.VarChar(100)
+  id                String         @id @default(uuid()) @db.Uuid
+  orderId           String         @map("order_id") @db.Uuid
+  razorpayOrderId   String?        @map("razorpay_order_id") @db.VarChar(100)
+  razorpayPaymentId String?        @unique @map("razorpay_payment_id") @db.VarChar(100)
   method            PaymentMethod?
-  status            PaymentStatus @default(pending)
-  amountPaise       Int           @map("amount_paise")
-  refundedPaise     Int           @default(0) @map("refunded_paise")
-  failureReason     String?       @map("failure_reason") @db.VarChar(255)
-  capturedAt        DateTime?     @map("captured_at")
-  createdAt         DateTime      @default(now()) @map("created_at")
-  updatedAt         DateTime      @updatedAt @map("updated_at")
+  status            PaymentStatus  @default(pending)
+  amountPaise       Int            @map("amount_paise")
+  refundedPaise     Int            @default(0) @map("refunded_paise")
+  failureReason     String?        @map("failure_reason") @db.VarChar(255)
+  capturedAt        DateTime?      @map("captured_at")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
 
   order Order @relation(fields: [orderId], references: [id])
 
@@ -589,7 +716,7 @@ model DeliveryZone {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  riderZones  RiderZone[]
+  riderZones RiderZone[]
 
   @@map("delivery_zones")
 }
@@ -599,11 +726,11 @@ model DeliveryZone {
 model Batch {
   id        String   @id @default(uuid()) @db.Uuid
   zoneId    String?  @map("zone_id") @db.Uuid
-  riderId   String?  @map("rider_id") @db.Uuid     // RiderProfile.id once assigned
+  riderId   String?  @map("rider_id") @db.Uuid // RiderProfile.id once assigned
   status    String   @default("open") @db.VarChar(20)
-  anchorLat Decimal  @map("anchor_lat") @db.Decimal(10, 8)  // first order's drop point
+  anchorLat Decimal  @map("anchor_lat") @db.Decimal(10, 8) // first order's drop point
   anchorLng Decimal  @map("anchor_lng") @db.Decimal(11, 8)
-  closesAt  DateTime @map("closes_at")              // accumulation window end
+  closesAt  DateTime @map("closes_at") // accumulation window end
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -617,10 +744,10 @@ model Batch {
 model RiderZone {
   id      String @id @default(uuid()) @db.Uuid
   riderId String @map("rider_id") @db.Uuid
-  zoneId  String @map("zone_id")  @db.Uuid
+  zoneId  String @map("zone_id") @db.Uuid
 
   rider RiderProfile @relation(fields: [riderId], references: [id], onDelete: Cascade)
-  zone  DeliveryZone @relation(fields: [zoneId],  references: [id], onDelete: Cascade)
+  zone  DeliveryZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
 
   @@unique([riderId, zoneId])
   @@index([zoneId])
@@ -688,17 +815,17 @@ model Settlement {
 }
 
 model RiderSettlement {
-  id           String           @id @default(uuid()) @db.Uuid
-  riderId      String           @map("rider_id") @db.Uuid
-  month        Int
-  year         Int
-  salaryPaise  Int              @map("salary_paise")
-  petrolPaise  Int              @default(0) @map("petrol_paise")
-  totalPaise   Int              @map("total_paise")
-  status       SettlementStatus @default(pending)
-  upiRef       String?          @map("upi_ref") @db.VarChar(100)
-  paidAt       DateTime?        @map("paid_at")
-  createdAt    DateTime         @default(now()) @map("created_at")
+  id          String           @id @default(uuid()) @db.Uuid
+  riderId     String           @map("rider_id") @db.Uuid
+  month       Int
+  year        Int
+  salaryPaise Int              @map("salary_paise")
+  petrolPaise Int              @default(0) @map("petrol_paise")
+  totalPaise  Int              @map("total_paise")
+  status      SettlementStatus @default(pending)
+  upiRef      String?          @map("upi_ref") @db.VarChar(100)
+  paidAt      DateTime?        @map("paid_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
 
   rider RiderProfile @relation(fields: [riderId], references: [id])
 
@@ -773,7 +900,7 @@ model ReferralRedemption {
 model PromoCode {
   id             String    @id @default(uuid()) @db.Uuid
   code           String    @unique @db.VarChar(30)
-  type           String    @db.VarChar(20)   // flat | percent | free_delivery
+  type           String    @db.VarChar(20) // flat | percent | free_delivery
   valuePaise     Int       @map("value_paise")
   minCartPaise   Int       @default(0) @map("min_cart_paise")
   maxUsesTotal   Int?      @map("max_uses_total")

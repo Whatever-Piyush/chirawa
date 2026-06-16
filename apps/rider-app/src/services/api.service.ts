@@ -114,6 +114,11 @@ export const RiderApi = {
   // Prepaid (non-COD) completion — COD orders use collectCod instead (0.1).
   markDelivered: (orderId: string, token: string) =>
     request('POST', `/orders/${orderId}/delivered`, {}, token),
+  // Item out of stock at pickup (Catalog Engine Phase 5): refunds the line (or
+  // cancels the order if it was the only item) and returns a substitute suggestion.
+  reportItemUnavailable: (orderId: string, itemId: string, token: string) =>
+    request<{ cancelled: boolean; refundedPaise: number; suggestion: { productId: string; name: string; pricePaise: number } | null }>(
+      'POST', `/delivery/orders/${orderId}/items/${itemId}/unavailable`, {}, token),
   getMyOrders: (token: string) =>
     request<unknown[]>('GET', '/orders', undefined, token),
 

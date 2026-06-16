@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, ScrollView, Animated } from 'react-native';
+import { View, StyleSheet, ScrollView, RefreshControl, Animated } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { AddressResponse } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
@@ -7,20 +7,23 @@ import { Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { useStoreClosed } from '../../hooks/useStoreClosed';
 import { api } from '../../services/api.service';
-import { fetchCategories, type ApiCategory } from '../../services/catalog';
+import { fetchCategories, fetchDailyEssentials, fetchBestsellers, fetchCategoryImages, type ApiCategory, type BestsellerCluster } from '../../services/catalog';
+import type { ProductCardData } from '../../components/product/ProductCard';
 import { useAuth } from '../../context/AuthContext';
 import LocationSheet from '../../components/location/LocationSheet';
 import Header from './Header';
 import SearchBar from './SearchBar';
-import ProductCarouselSection from './ProductCarouselSection';
+import DailyEssentialsShelf from './DailyEssentialsShelf';
+import BestsellersSection from './BestsellersSection';
 import CategorySections from './CategorySections';
 import ClosedBanner from './ClosedBanner';
-import { SECTION_GROUPS, CAROUSEL_SECTIONS } from './categoryMeta';
+import { SECTION_GROUPS } from './categoryMeta';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 
-// Category-first home: a fixed header + search, then two horizontally-scrollable
-// category strips (chips + icons) and themed category sections below.
+// Aggregated-feed home: a fixed header + search, then the scrolling sections —
+// Daily Essentials (top-selling SKU rail) · Bestsellers (image clusters) ·
+// category grids. All sections are bounded, so a ScrollView is the right container.
 export default function HomeScreen({ navigation }: Props) {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
@@ -30,6 +33,22 @@ export default function HomeScreen({ navigation }: Props) {
   const [addresses, setAddresses] = useState<AddressResponse[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [categories, setCategories] = useState<ApiCategory[]>([]);
+  // Real product images per category for the tiles (image-2 / 2.md).
+  const [categoryImages, setCategoryImages] = useState<Record<string, string[]>>({});
+
+  // Daily Essentials (TOP_SELLING_SKUS.md) — the curated everyday top-selling
+  // SKUs, ordered by buy-frequency, drawn from the aggregated feed server-side.
+  const [essentials, setEssentials] = useState<ProductCardData[]>([]);
+  const [essLoading, setEssLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Bestsellers 2×2 cluster cards (image-1 / 1.md) — up to 4 sample product
+  // images per category, eggs excluded, no counts (all server-side).
+  const [bestsellers, setBestsellers] = useState<BestsellerCluster[]>([]);
+
+  // Outside delivery hours the header + banner go night-themed and cart actions
+  // disable gracefully (shared hook handles the open↔close transition).
+  const closed = useStoreClosed();
 
   const loadAddresses = useCallback(async () => {
     try {
@@ -41,11 +60,29 @@ export default function HomeScreen({ navigation }: Props) {
     }
   }, []);
 
-  // Outside delivery hours the header + banner go night-themed (shared hook
-  // handles the open↔close transition + auto-restore at opening time).
-  const closed = useStoreClosed();
+  const loadEssentials = useCallback(async () => {
+    try {
+      setEssentials(await fetchDailyEssentials());
+    } catch {
+      /* tolerate — rail hides; category browse still works */
+    } finally {
+      setEssLoading(false);
+    }
+  }, []);
 
-  useEffect(() => { void loadAddresses(); }, [loadAddresses]);
+  const loadBestsellers = useCallback(async () => {
+    try { setBestsellers(await fetchBestsellers()); }
+    catch { /* tolerate — section collapses */ }
+  }, []);
+
+  const loadCategoryImages = useCallback(async () => {
+    try { setCategoryImages(await fetchCategoryImages()); }
+    catch { /* tolerate — tiles fall back to emoji */ }
+  }, []);
+
+  useEffect(() => {
+    void loadAddresses(); void loadEssentials(); void loadBestsellers(); void loadCategoryImages();
+  }, [loadAddresses, loadEssentials, loadBestsellers, loadCategoryImages]);
   useEffect(
     () => navigation.addListener('focus', () => { void loadAddresses(); }),
     [navigation, loadAddresses],
@@ -58,10 +95,15 @@ export default function HomeScreen({ navigation }: Props) {
     const known = new Set(SECTION_GROUPS.flatMap((g) => g.tiles.map((tl) => tl.category)));
     fetchCategories()
       .then((all) => { if (active) setCategories(all.filter((c) => known.has(c.name))); })
-      .catch(() => { /* tolerate */ })
-      .finally(() => { /* no-op */ });
+      .catch(() => { /* tolerate */ });
     return () => { active = false; };
   }, []);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([loadEssentials(), loadAddresses(), loadBestsellers(), loadCategoryImages()]);
+    setRefreshing(false);
+  }, [loadEssentials, loadAddresses, loadBestsellers, loadCategoryImages]);
 
   const activeAddress = addresses.find((a) => a.isDefault) ?? addresses[0] ?? null;
   const addressLine = activeAddress
@@ -73,7 +115,7 @@ export default function HomeScreen({ navigation }: Props) {
     [navigation],
   );
 
-  // Entrance animations: header fades in, search + banner slide up just after.
+  // Entrance animations: header fades in, search slides up just after.
   const headerOpacity   = useRef(new Animated.Value(0)).current;
   const searchTranslate = useRef(new Animated.Value(20)).current;
   const searchOpacity   = useRef(new Animated.Value(0)).current;
@@ -111,25 +153,20 @@ export default function HomeScreen({ navigation }: Props) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-      >
-        {/* ── Closed banner — scrolls with the content ───────────────────── */}
-        {closed && <ClosedBanner />}
-
-        {/* ── Two product carousels, each with a category tab bar ────────── */}
-        {CAROUSEL_SECTIONS.map((s) => (
-          <ProductCarouselSection
-            key={s.title}
-            title={s.title}
-            subtitle={s.subtitle}
-            tabs={s.tabs}
-            onSeeAll={openCategory}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors.primary}
+            colors={[Colors.primary]}
           />
-        ))}
-
-        {/* ── Themed category sections — 4 equal tiles per row ───────────── */}
-        <CategorySections categories={categories} onSelect={openCategory} />
-
-        <View style={{ height: Spacing.huge }} />
+        }
+      >
+        {closed && <ClosedBanner />}
+        <DailyEssentialsShelf tiles={essentials} loading={essLoading} />
+        <BestsellersSection clusters={bestsellers} onSelect={openCategory} />
+        <CategorySections categories={categories} onSelect={openCategory} imagesByCategory={categoryImages} />
+        <View style={{ height: Spacing.huge * 2 }} />
       </ScrollView>
 
       {/* Delivery-location bottom sheet (opens from the header address row) */}
@@ -147,8 +184,8 @@ export default function HomeScreen({ navigation }: Props) {
 
 const makeStyles = (Colors: ColorPalette) =>
   StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  scrollContent: { paddingBottom: Spacing.xxxl },
-  // Pull the SearchBar up into the orange header's bottom padding zone.
-  searchOverlap: { marginTop: -20 },
-});
+    container: { flex: 1, backgroundColor: Colors.background },
+    // Pull the SearchBar up into the orange header's bottom padding zone.
+    searchOverlap: { marginTop: -20 },
+    scrollContent: { paddingBottom: 0 },
+  });

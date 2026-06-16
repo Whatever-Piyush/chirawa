@@ -5,7 +5,6 @@ import {
   ScrollView,
   Image,
   TouchableOpacity,
-  ActivityIndicator,
   Dimensions,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
@@ -19,6 +18,7 @@ import { Radius, Shadow, Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { useCart, cartKey } from '../../context/CartContext';
 import ProductCard, { type ProductCardData } from '../../components/product/ProductCard';
+import BrandedLoader from '../../components/BrandedLoader';
 import {
   fetchProductDetail, fetchProducts, toProductCard,
   type ApiProductDetail,
@@ -68,11 +68,7 @@ export default function ProductDetailScreen({ navigation, route }: Props) {
   }, [productId]);
 
   if (loading) {
-    return (
-      <View style={[styles.container, styles.center]}>
-        <ActivityIndicator color={Colors.primary} size="large" />
-      </View>
-    );
+    return <BrandedLoader />;
   }
 
   if (error || !detail) {

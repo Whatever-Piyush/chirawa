@@ -2,13 +2,21 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import { createCatalogService } from './catalog.service';
 import { createInventoryService, type AuthCtx } from './inventory.service';
+import { createMasterService } from './master.service';
+import { createAggregationService } from './aggregation.service';
+import { createRequestsService } from './requests.service';
 import {
-  createProductSchema, updateProductSchema, setStockQtySchema,
+  createProductSchema, updateProductSchema, setStockQtySchema, stockThisSchema,
   createCategorySchema, updateCategorySchema,
-  createVariantSchema, updateVariantSchema,
+  createVariantSchema, updateVariantSchema, createRequestSchema,
 } from './catalog.schema';
 import { authenticate, requireRole } from '../../shared/middleware/auth.middleware';
-import { ValidationError, ForbiddenError } from '../../shared/errors/app-errors';
+import { ValidationError, ForbiddenError, NotFoundError } from '../../shared/errors/app-errors';
+import { processImage } from '../../services/image-pipeline';
+import { createOffLiveSource } from '../../services/off-live';
+import { ALLOWED_IMAGE_MIME } from '../../services/r2.service';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Parse a body with a zod schema, surfacing the first issue as a ValidationError.
 function parse<T extends z.ZodTypeAny>(schema: T, body: unknown): z.infer<T> {
@@ -20,14 +28,26 @@ function parse<T extends z.ZodTypeAny>(schema: T, body: unknown): z.infer<T> {
 export default async function catalogRoutes(app: FastifyInstance): Promise<void> {
   const catalogService   = createCatalogService(app.prisma, app.redis);
   const inventoryService = createInventoryService(app.prisma, app.redis);
+  // Master lookup with a live OFF fallback (the only place we hit the live API).
+  const masterService    = createMasterService(app.prisma, { offLive: createOffLiveSource() });
+  const aggregationService = createAggregationService(app.prisma, app.redis);
+  const requestsService    = createRequestsService(app.prisma, app.redis);
 
   // Seller + admin may write inventory; ownership is enforced in the service.
   const writeGuard = { preHandler: [authenticate, requireRole('seller', 'admin')] };
+  // Any authenticated user (e.g. report-wrong-image).
+  const authGuard  = { preHandler: [authenticate] };
   const authCtx = (request: FastifyRequest): AuthCtx => ({ userId: request.auth!.userId, role: request.auth!.role });
 
   // GET /api/v1/catalog/shops — public
   app.get('/shops', async (_req, reply) => {
     return reply.send(await catalogService.getShops());
+  });
+
+  // GET /api/v1/catalog/specials — public. Chirawa Special (featured) shops shown
+  // WITH branding (marketplace mode), the opposite of the aggregated feed (Phase 6).
+  app.get('/specials', async (_req, reply) => {
+    return reply.send(await catalogService.getSpecials());
   });
 
   // GET /api/v1/catalog/shops/:id — public
@@ -45,6 +65,40 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
     return reply.send(await catalogService.getProducts(opts));
   });
 
+  // GET /api/v1/catalog/feed — public. The aggregated "one store" feed: one tile
+  // per master at the lowest in-stock price, shop hidden (Catalog Engine Phase 4).
+  app.get('/feed', async (_req, reply) => {
+    return reply.send(await aggregationService.getFeed());
+  });
+
+  // GET /api/v1/catalog/daily-essentials — public. Curated everyday top-selling
+  // SKUs for Chirawa (TOP_SELLING_SKUS.md): a VIEW over the aggregated feed,
+  // ordered by buy-frequency (milk, atta, bread, eggs…). Real in-stock SKUs at
+  // the aggregated lowest price, shop hidden. Powers the Home "Daily Essentials" rail.
+  app.get('/daily-essentials', async (_req, reply) => {
+    return reply.send(await aggregationService.getDailyEssentials());
+  });
+
+  // GET /api/v1/catalog/credits — public CC-BY-SA image attributions (legal
+  // compliance for Open Food Facts pack-shots, Phase 1/7). One entry per approved
+  // master whose image came from a CC-BY-SA source.
+  app.get('/credits', async (_req, reply) => {
+    const masters = await app.prisma.masterCatalog.findMany({
+      where:   { status: 'approved', imageLicense: 'CC-BY-SA', imageAttribution: { not: null } },
+      orderBy: { name: 'asc' },
+      take:    1000,
+      select:  { name: true, imageAttribution: true, imageLicense: true },
+    });
+    return reply.send({ count: masters.length, license: 'CC-BY-SA', data: masters });
+  });
+
+  // POST /api/v1/catalog/requests — "request this item" demand capture (Phase 6).
+  // Authenticated so restock-notify has a target; barcode (if valid) links a master.
+  app.post('/requests', authGuard, async (request, reply) => {
+    const body = parse(createRequestSchema, request.body);
+    return reply.send(await requestsService.createRequest(request.auth!.userId, body));
+  });
+
   // GET /api/v1/catalog/products/:id — public (full product detail for PDP)
   app.get('/products/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
     return reply.send(await catalogService.getProductDetail(request.params.id));
@@ -53,6 +107,20 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
   // GET /api/v1/catalog/categories — public (distinct categories w/ counts)
   app.get('/categories', async (_req, reply) => {
     return reply.send(await catalogService.getCategories());
+  });
+
+  // GET /api/v1/catalog/bestsellers — public. Category "bestseller" cluster cards:
+  // up to 4 sample in-stock product images per category, eggs excluded, NO counts
+  // (image-1 design — see 1.md). Powers the Home Bestsellers 2×2 grid.
+  app.get('/bestsellers', async (_req, reply) => {
+    return reply.send(await catalogService.getBestsellers());
+  });
+
+  // GET /api/v1/catalog/category-images — public. { [categoryName]: url[] } map of
+  // up to 3 sample product images per category for the home category tiles
+  // (image-2 design — see 2.md). Names + image URLs only (no shop/price/PII).
+  app.get('/category-images', async (_req, reply) => {
+    return reply.send(await catalogService.getCategoryImages());
   });
 
   // GET /api/v1/catalog/search — public
@@ -105,6 +173,13 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
 
       // Invalidate catalog cache
       await catalogService.invalidateShopCache(product.shopId);
+
+      // Restock notify (Phase 6): when a master-linked product flips back to
+      // available, FCM the customers who requested it. Non-blocking — the toggle
+      // must never fail on a notification hiccup.
+      if (oldStatus !== 'available' && stockStatus === 'available' && product.masterId) {
+        void requestsService.notifyRestock(product.masterId).catch(() => {});
+      }
 
       return reply.send({ id: updated.id, stockStatus: updated.stockStatus, message: 'Stock update ho gaya' });
     },
@@ -186,4 +261,60 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
     const report = await inventoryService.importProductsCsv(shopId, buffer.toString('utf8'), authCtx(request));
     return reply.send(report);
   });
+
+  // ── Seller scan → autocomplete → toggle (Catalog Engine Phase 3) ───────────
+
+  // GET /api/v1/catalog/master/:barcode — scan lookup → prefill (name/image/MRP).
+  // Unknown barcode falls back to one live OFF lookup that bootstraps a master.
+  app.get('/master/:barcode', writeGuard,
+    async (request: FastifyRequest<{ Params: { barcode: string } }>, reply) => {
+      return reply.send(await masterService.lookupByBarcode(request.params.barcode));
+    });
+
+  // POST /api/v1/catalog/upload-image — seller-scoped product image upload.
+  // Normalized through the Phase 1 pipeline (square WebP, EXIF-stripped, re-hosted).
+  app.post('/upload-image', { preHandler: [authenticate, requireRole('seller', 'admin')] },
+    async (request, reply) => {
+      const data = await request.file();
+      if (!data) throw new ValidationError('No image file provided');
+      if (!ALLOWED_IMAGE_MIME.includes(data.mimetype)) {
+        throw new ValidationError(`Unsupported image type: ${data.mimetype}. Use jpg, png or webp.`);
+      }
+      const buffer = await data.toBuffer();
+      if (data.file.truncated) throw new ValidationError('Image too large (max 5MB)');
+
+      const { url } = await processImage({ buffer, source: 'manual', license: 'owned' });
+      return reply.status(201).send({ url });
+    });
+
+  // POST /api/v1/catalog/products/stock-this — "I stock this": one idempotent
+  // upsert keyed by (shopId, barcode). Re-scanning updates rather than duplicates
+  // (the offline-sync queue relies on this). 201 when created, 200 when updated.
+  app.post('/products/stock-this', writeGuard, async (request, reply) => {
+    const input = parse(stockThisSchema, request.body);
+    const result = await inventoryService.upsertProductByBarcode(input, authCtx(request));
+    return reply.status(result.created ? 201 : 200).send(result);
+  });
+
+  // POST /api/v1/catalog/products/:id/report-image — "report wrong image". Any
+  // authenticated user; records the report and re-gates the linked master to
+  // needs_review (pulls it from the public pool until an admin fixes it, Phase 7).
+  app.post('/products/:id/report-image', authGuard,
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+      const { id } = request.params;
+      if (!UUID_RE.test(id)) throw new NotFoundError('Product');
+      const product = await app.prisma.product.findUnique({ where: { id }, select: { id: true, masterId: true } });
+      if (!product) throw new NotFoundError('Product');
+
+      const body = request.body as { reason?: unknown } | undefined;
+      const reason = typeof body?.reason === 'string' ? body.reason.slice(0, 255) : null;
+      await app.prisma.imageReport.create({
+        data: { productId: id, masterId: product.masterId, reportedById: request.auth!.userId, reason },
+      });
+      // Re-gate the master so the suspect image leaves the public pool.
+      if (product.masterId) {
+        await app.prisma.masterCatalog.update({ where: { id: product.masterId }, data: { status: 'needs_review' } });
+      }
+      return reply.status(201).send({ reported: true });
+    });
 }

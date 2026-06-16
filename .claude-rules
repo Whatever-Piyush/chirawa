@@ -1,0 +1,2 @@
+Rule: After every successful bug fix, automatically create a commit using Conventional Commits format (e.g., "fix(api): resolved razorpay webhook idempotency"). 
+Rule: NEVER modify or stage .env files.

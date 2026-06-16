@@ -32,6 +32,12 @@
           "color": "#FF3E6C",
           "sounds": []
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Bringly ko product barcode scan karne ke liye camera chahiye."
+        }
       ]
     ],
     "extra": {

@@ -10,6 +10,7 @@ import {
   type NewOrderForSellerPayload,
   type OrderCancelledForSellerPayload,
   type OrderAssignedToRiderPayload,
+  type OrderItemUnavailablePayload,
 } from '../events/event-bus';
 
 // Extend Fastify to expose Socket.io instance to routes
@@ -229,6 +230,21 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
     });
 
     app.log.debug(`🚴 Order assigned to rider: ${payload.riderId}`);
+  });
+
+  eventBus.on(Events.ORDER_ITEM_UNAVAILABLE, (payload: OrderItemUnavailablePayload) => {
+    // Live "item just sold out" update for the customer — the line was refunded
+    // and we offer a substitute to tap (ask, don't auto-sub). Phase 5 safety net.
+    io.to(`user:${payload.customerId}`).emit('order:item-unavailable', {
+      orderId:       payload.orderId,
+      productName:   payload.productName,
+      refundedPaise: payload.refundedPaise,
+      cancelled:     payload.cancelled,
+      ...(payload.suggestion ? { suggestion: payload.suggestion } : {}),
+      timestamp:     new Date().toISOString(),
+    });
+
+    app.log.debug(`🧺 Item unavailable on order ${payload.orderId} → customer ${payload.customerId}`);
   });
 
   // ── Decorate app with io instance ─────────────────────────────────────────

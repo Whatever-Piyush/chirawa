@@ -21,6 +21,16 @@ const PRODUCT_BAR = 96;    // clear Product Detail's add-to-cart footer
 // Bottom-tab routes — on these the capsule floats above the tab bar.
 const TAB_ROUTES = new Set(['Home', 'OrderHistory', 'Categories', 'Special', 'Profile']);
 
+// The "View cart" capsule is a *continue-shopping → go-to-cart* affordance, so it
+// belongs only on browse/shop surfaces (where you add items). An ALLOWLIST (not a
+// denylist) keeps it OFF every transactional/utility flow by default — checkout,
+// address entry/selection, order tracking, profile editing, auth — so new screens
+// like AddAddress never accidentally show it.
+const CART_PILL_ROUTES = new Set([
+  ...TAB_ROUTES,                                          // Home/Categories/Special/OrderHistory/Profile
+  'ProductDetail', 'ShopDetail', 'CategoryProducts', 'Search', // pushed shopping surfaces
+]);
+
 // A few tiny stars for the cart pill's night look (matches header/banner).
 const CART_STARS: TextStyle[] = [
   { top: 6,  left: 70,   fontSize: 6, opacity: 0.5 },
@@ -45,8 +55,9 @@ export default function CartDockPill({ activeRoute }: { activeRoute?: string }) 
     return () => clearInterval(id);
   }, [activeRoute]);
 
-  // Show only when the cart has items — on every screen.
-  const shouldShow = count > 0;
+  // Show only when the cart has items AND we're on a browse/shop surface (a tab or
+  // a pushed shopping screen). Undefined route = first paint on Home → allow.
+  const shouldShow = count > 0 && CART_PILL_ROUTES.has(activeRoute ?? 'Home');
 
   const anim  = useRef(new Animated.Value(shouldShow ? 1 : 0)).current;
   const scale = useRef(new Animated.Value(1)).current;

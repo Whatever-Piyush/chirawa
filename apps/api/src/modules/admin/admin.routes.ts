@@ -2,6 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { authenticate, requireRole } from '../../shared/middleware/auth.middleware';
 import { ValidationError, NotFoundError } from '../../shared/errors/app-errors';
 import { uploadImage, ALLOWED_IMAGE_MIME } from '../../services/r2.service';
+import { processImage } from '../../services/image-pipeline';
+import { createRequestsService } from '../catalog/requests.service';
+import { createModerationService } from '../catalog/moderation.service';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -9,6 +12,8 @@ const ALIAS_CACHE_TTL = 3600;
 const aliasExpandKey = (q: string) => `search:aliases:expanded:${q.toLowerCase().trim()}`;
 
 export default async function routes(app: FastifyInstance): Promise<void> {
+  const moderation = createModerationService(app.prisma, app.redis);
+  const adminGuard = { preHandler: [authenticate, requireRole('admin')] };
 
   app.get('/', async (_req, reply) => {
     return reply.send({ status: 'admin api v1' });
@@ -175,6 +180,76 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // ── Demand dashboard (Catalog Engine Phase 6) ──────────────────────────────
+  /*
+   * GET /api/v1/admin/product-requests
+   * Ranked "request this item" demand — grouped by master / barcode / free text,
+   * most-requested first. Drives the sourcing roadmap.
+   */
+  app.get(
+    '/product-requests',
+    { preHandler: [authenticate, requireRole('admin')] },
+    async (_req, reply) => {
+      const requestsService = createRequestsService(app.prisma, app.redis);
+      const data = await requestsService.getDemand();
+      return reply.send({ count: data.length, data });
+    },
+  );
+
+  // ── Moderation, coverage & observability (Catalog Engine Phase 7) ──────────
+
+  // GET /api/v1/admin/moderation/masters — the needs_review review queue.
+  app.get('/moderation/masters', adminGuard, async (_req, reply) => {
+    return reply.send({ data: await moderation.listReviewQueue() });
+  });
+
+  // PATCH /api/v1/admin/masters/:id/status  { status: 'approved' | 'rejected' }
+  app.patch('/masters/:id/status', adminGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!UUID_RE.test(id)) throw new NotFoundError('Master');
+    const status = (request.body as { status?: unknown })?.status;
+    if (status !== 'approved' && status !== 'rejected') throw new ValidationError('status must be approved or rejected');
+    return reply.send(await moderation.setMasterStatus(id, status));
+  });
+
+  // GET /api/v1/admin/moderation/image-reports — open wrong-image reports.
+  app.get('/moderation/image-reports', adminGuard, async (_req, reply) => {
+    return reply.send({ data: await moderation.listImageReports() });
+  });
+
+  // POST /api/v1/admin/image-reports/:id/resolve  { reApprove?: boolean }
+  app.post('/image-reports/:id/resolve', adminGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!UUID_RE.test(id)) throw new NotFoundError('Image report');
+    const reApprove = (request.body as { reApprove?: unknown })?.reApprove === true;
+    return reply.send(await moderation.resolveImageReport(id, { reApprove }));
+  });
+
+  // POST /api/v1/admin/masters/:id/takedown  { replaceImageUrl?: string }
+  // One-click legal takedown — replace (swap+approve) or remove (clear+re-gate).
+  app.post('/masters/:id/takedown', adminGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!UUID_RE.test(id)) throw new NotFoundError('Master');
+    const raw = (request.body as { replaceImageUrl?: unknown })?.replaceImageUrl;
+    const replaceImageUrl = typeof raw === 'string' && raw.length > 0 ? raw : undefined;
+    return reply.send(await moderation.takedownImage(id, replaceImageUrl ? { replaceImageUrl } : {}));
+  });
+
+  // GET /api/v1/admin/moderation/price-outliers — price > own/master MRP.
+  app.get('/moderation/price-outliers', adminGuard, async (_req, reply) => {
+    return reply.send({ data: await moderation.listPriceOutliers() });
+  });
+
+  // GET /api/v1/admin/coverage — image/barcode coverage + enrichment breakdown.
+  app.get('/coverage', adminGuard, async (_req, reply) => {
+    return reply.send(await moderation.getCoverage());
+  });
+
+  // GET /api/v1/admin/metrics — DB-derived rates + threshold alert flags.
+  app.get('/metrics', adminGuard, async (_req, reply) => {
+    return reply.send(await moderation.getMetrics());
+  });
+
   // ── Image management (shop onboarding) ─────────────────────────────────────
 
   /*
@@ -196,7 +271,12 @@ export default async function routes(app: FastifyInstance): Promise<void> {
       const buffer = await data.toBuffer();
       if (data.file.truncated) throw new ValidationError('Image too large (max 5MB)');
 
-      const url = await uploadImage(folder, buffer, data.mimetype);
+      // Product images are normalized through the Phase 1 pipeline (square
+      // ~1200px WebP, EXIF/payloads stripped, content-hash re-host). Shop
+      // logos/covers keep their aspect ratio on the raw upload path.
+      const url = folder === 'products'
+        ? (await processImage({ buffer, source: 'manual', license: 'owned' })).url
+        : await uploadImage(folder, buffer, data.mimetype);
       return reply.status(201).send({ url });
     },
   );

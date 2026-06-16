@@ -15,20 +15,23 @@ import {
   TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { io, type Socket } from 'socket.io-client';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import type { OrderDetailResponse, OrderItemResponse } from '@chirawa/types';
+import type { OrderDetailResponse, OrderItemResponse, AddressResponse } from '@chirawa/types';
 import { OrderStatus } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
+import { FontSize, FontWeight, Gradients, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
 import { StorageService } from '../../services/storage.service';
 import { useT } from '@chirawa/i18n';
-import { useToast } from '../../components/ui';
+import { useToast, FauxGradient } from '../../components/ui';
+import { useAuth } from '../../context/AuthContext';
 import { DEV_HOST } from '../../config/devHost';
 import TrackingMap from '../../components/tracking/TrackingMap';
+import BrandedLoader from '../../components/BrandedLoader';
 
 const LOCATION_STALE_MS = 60_000; // rider location older than this → fallback message
 
@@ -410,6 +413,7 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const { state: authState } = useAuth();
 
   const [order,      setOrder]      = useState<OrderDetailResponse | null>(null);
   const [loading,    setLoading]    = useState(true);
@@ -420,12 +424,22 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
   const [cancelSheetVisible, setCancelSheetVisible] = useState(false);
   const [selectedReason,     setSelectedReason]     = useState<string | null>(null);
 
+  // Change-address picker + receiver-contact editor (pre-pickup only).
+  const [addrPickerVisible, setAddrPickerVisible] = useState(false);
+  const [savedAddresses,    setSavedAddresses]    = useState<AddressResponse[]>([]);
+  const [addrSaving,        setAddrSaving]        = useState(false);
+  const [receiverVisible,   setReceiverVisible]   = useState(false);
+  const [recvName,          setRecvName]          = useState('');
+  const [recvPhone,         setRecvPhone]         = useState('');
+  const [recvSaving,        setRecvSaving]        = useState(false);
+
   const socketRef = useRef<Socket | null>(null);
   const pollRef   = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useLayoutEffect(() => {
-    navigation.setOptions({ headerTitle: t('tracking.title') });
-  }, [navigation, t]);
+    // Custom gradient header replaces the default nav header.
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
 
   const fetchOrder = useCallback(async () => {
     try {
@@ -535,12 +549,51 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
     }
   }
 
+  async function openAddrPicker() {
+    setAddrPickerVisible(true);
+    try {
+      const data = await api.getAddresses();
+      data.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+      setSavedAddresses(data);
+    } catch { /* tolerate */ }
+  }
+
+  async function pickAddress(addressId: string) {
+    setAddrSaving(true);
+    try {
+      await api.updateOrderAddress(orderId, addressId);
+      setAddrPickerVisible(false);
+      toast.show(t('tracking.addressUpdated'), 'success');
+      await fetchOrder();
+    } catch (err: unknown) {
+      toast.show(err instanceof Error ? err.message : t('common.error'), 'error');
+    } finally {
+      setAddrSaving(false);
+    }
+  }
+
+  function openReceiverEditor(name: string, phone: string) {
+    setRecvName(name);
+    setRecvPhone(phone);
+    setReceiverVisible(true);
+  }
+
+  async function saveReceiver() {
+    setRecvSaving(true);
+    try {
+      await api.updateOrderReceiver(orderId, recvName.trim(), recvPhone.trim());
+      setReceiverVisible(false);
+      toast.show(t('tracking.receiverUpdated'), 'success');
+      await fetchOrder();
+    } catch (err: unknown) {
+      toast.show(err instanceof Error ? err.message : t('common.error'), 'error');
+    } finally {
+      setRecvSaving(false);
+    }
+  }
+
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
-    );
+    return <BrandedLoader />;
   }
 
   if (!order) return null;
@@ -558,6 +611,8 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
     paymentMethod?: string;
     rating?: number | null;
     ratingComment?: string | null;
+    receiverName?: string | null;
+    receiverPhone?: string | null;
   };
   const custLat = orderPrisma.deliveryLat != null ? Number(orderPrisma.deliveryLat) : null;
   const custLng = orderPrisma.deliveryLng != null ? Number(orderPrisma.deliveryLng) : null;
@@ -588,130 +643,214 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
     t('cancellation.reason6'),
   ];
 
+  // ── Redesigned-tracking derived values ──────────────────────────────────────
+  const isCod       = (orderPrisma.paymentMethod ?? 'cod') === 'cod';
+  const riderPhone  = (order.rider as { phone?: string } | null)?.phone ?? null;
+  const showMapNow  = custLat != null && custLng != null && !isCancelled && !isDelivered;
+  const headerBig   = isDelivered
+    ? t('tracking.statusDelivered')
+    : isCancelled
+      ? t('tracking.statusCancelled')
+      : order.status === OrderStatus.OUT_FOR_DELIVERY
+        ? t('tracking.arrivingSoon')
+        : `${t('tracking.arrivingIn')} ~20 min`;
+  const riderMsg = order.status === OrderStatus.OUT_FOR_DELIVERY
+    ? t('tracking.riderOnWay')
+    : t('tracking.reachedStore');
+  const fullAddress = [orderPrisma.deliveryStreet, orderPrisma.deliveryLocality, orderPrisma.deliveryCity]
+    .filter(Boolean).join(', ');
+  // Editable (address / receiver) only before the rider picks up.
+  const isEditable =
+    order.status === OrderStatus.PENDING_PAYMENT ||
+    order.status === OrderStatus.PAID ||
+    order.status === OrderStatus.CONFIRMED ||
+    order.status === OrderStatus.PREPARING;
+  const recvName_  = orderPrisma.receiverName ?? authState.name ?? '';
+  const recvPhone_ = orderPrisma.receiverPhone ?? authState.phone ?? '';
+
+  const handleBack = () =>
+    navigation.canGoBack() ? navigation.goBack() : navigation.navigate('MainTabs', { screen: 'Home' });
+  const handleCall = () => { if (riderPhone) void Linking.openURL(`tel:${riderPhone}`); else handleNeedHelp(); };
+  const handlePayOnline = () => toast.show(t('tracking.payOnlineSoon'), 'info');
+
   return (
     <>
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* ── A. Progress stepper ─────────────────────────────────────────── */}
-      {!isCancelled && (
-        <View style={[styles.card, styles.stepperCard]}>
-          <ProgressStepper currentStep={currentStep} t={t} />
+    <View style={styles.container}>
+      {/* ── Gradient status header ──────────────────────────────────────── */}
+      <FauxGradient
+        from={Gradients.warm[0]}
+        to={Gradients.warm[1]}
+        steps={12}
+        style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}
+      >
+        <View style={styles.headerTopRow}>
+          <TouchableOpacity onPress={handleBack} style={styles.headerBack} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="arrow-back" size={22} color={Colors.white} />
+          </TouchableOpacity>
+          <Text style={styles.headerSmall} numberOfLines={1}>{getStatusMessage()}</Text>
         </View>
-      )}
+        <Text style={styles.headerBig} numberOfLines={1}>{headerBig}</Text>
+      </FauxGradient>
 
-      {/* ── A2. Live tracking map (Chunk 6) ─────────────────────────────── */}
-      {showMap && custLat != null && custLng != null && (
-        <View style={[styles.card, styles.mapCard]}>
-          <Text style={styles.sectionTitle}>📍 {t('tracking.liveTracking')}</Text>
-          <TrackingMap
-            customer={{ lat: custLat, lng: custLng }}
-            rider={riderPos}
-            stale={riderStale}
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Live map */}
+        {showMapNow && custLat != null && custLng != null && (
+          <View style={[styles.card, styles.mapCard]}>
+            <TrackingMap customer={{ lat: custLat, lng: custLng }} rider={riderPos} stale={riderStale} t={t} />
+          </View>
+        )}
+
+        {/* Progress stepper */}
+        {!isCancelled && !isDelivered && (
+          <View style={[styles.card, styles.stepperCard]}>
+            <ProgressStepper currentStep={currentStep} t={t} />
+          </View>
+        )}
+
+        {/* Delivered celebration + rating */}
+        {isDelivered && <DeliveredBanner t={t} />}
+        {isDelivered && (
+          <RatingCard
             t={t}
+            orderId={orderId}
+            initialRating={orderPrisma.rating ?? null}
+            initialComment={orderPrisma.ratingComment ?? null}
+            showToast={(msg, type) => toast.show(msg, type)}
           />
-        </View>
-      )}
+        )}
 
-      {/* ── Delivered banner ────────────────────────────────────────────── */}
-      {isDelivered && <DeliveredBanner t={t} />}
-
-      {/* ── Post-delivery rating ────────────────────────────────────────── */}
-      {isDelivered && (
-        <RatingCard
-          t={t}
-          orderId={orderId}
-          initialRating={orderPrisma.rating ?? null}
-          initialComment={orderPrisma.ratingComment ?? null}
-          showToast={(msg, type) => toast.show(msg, type)}
-        />
-      )}
-
-      {/* ── B. Status message with emoji ────────────────────────────────── */}
-      {!isDelivered && (
-        <View style={[styles.card, isCancelled && styles.cancelledCard]}>
-          <StatusEmojiCard emoji={statusEmoji} />
-          <Text style={[styles.statusMessage, isCancelled && styles.statusCancelled]}>
-            {getStatusMessage()}
-          </Text>
-
-          {riderPos !== null && order.status === OrderStatus.OUT_FOR_DELIVERY && (
-            <View style={styles.locationBadge}>
-              <Text style={styles.locationBadgeText}>
-                📍  {t('tracking.riderTracking')}
-              </Text>
+        {/* Pay on delivery (COD) */}
+        {isCod && !isDelivered && !isCancelled && (
+          <View style={styles.card}>
+            <View style={styles.codRow}>
+              <View style={styles.codIcon}>
+                <Ionicons name="wallet-outline" size={22} color={Colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.codTitle}>{t('tracking.codPayTitle')} · ₹{totalRupees}</Text>
+                <Text style={styles.codSub}>{t('tracking.codPaySub')}</Text>
+              </View>
             </View>
-          )}
-        </View>
-      )}
+            <TouchableOpacity style={styles.payOnlineBtn} onPress={handlePayOnline} activeOpacity={0.85}>
+              <Ionicons name="flash" size={16} color={Colors.primary} />
+              <Text style={styles.payOnlineText}>{t('tracking.payOnline')}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-      {/* ── B1. Cancel button (only while still cancellable) ─────────────── */}
-      {isCancellable && !isCancelled && (
-        <TouchableOpacity
-          style={styles.cancelBtn}
-          onPress={() => setCancelSheetVisible(true)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.cancelBtnText}>{t('cancellation.button')}</Text>
-        </TouchableOpacity>
-      )}
+        {/* Delivery partner */}
+        {showRider && order.rider && (
+          <View style={styles.card}>
+            <View style={styles.partnerRow}>
+              <View style={styles.partnerAvatar}>
+                <Text style={styles.partnerAvatarText}>{riderInitial}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.partnerName} numberOfLines={1}>{order.rider.name ?? t('tracking.rider')}</Text>
+                <Text style={styles.partnerSub}>{t('tracking.deliveryPartner')}</Text>
+              </View>
+              <TouchableOpacity style={styles.callBtn} onPress={handleCall} activeOpacity={0.85}>
+                <Ionicons name="call" size={18} color={Colors.white} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.partnerMsg}>
+              <View style={styles.greenDot} />
+              <Text style={styles.partnerMsgText}>{riderMsg}</Text>
+            </View>
+          </View>
+        )}
 
-      {/* ── B2. Rider card ──────────────────────────────────────────────── */}
-      {showRider && (
+        {/* Your delivery details */}
         <View style={styles.card}>
-          <View style={styles.riderRow}>
-            <View style={styles.riderAvatar}>
-              <Text style={styles.riderAvatarText}>🛵</Text>
+          <View style={styles.detailHeader}>
+            <View style={styles.detailIcon}>
+              <Ionicons name="bicycle-outline" size={18} color={Colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.riderName}>
-                {order.rider?.name ?? `${t('tracking.rider')} ${riderInitial}`}
+              <Text style={styles.sectionTitle}>{t('tracking.deliveryDetails')}</Text>
+              <Text style={styles.helpSub}>{t('tracking.detailsSub')}</Text>
+            </View>
+          </View>
+
+          <View style={styles.detailDivider} />
+
+          {/* Delivery at {name} + address */}
+          <View style={styles.detailItemRow}>
+            <Ionicons name="location-outline" size={20} color={Colors.textSecondary} style={styles.detailItemIcon} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailItemTitle} numberOfLines={1}>
+                {t('tracking.deliveryAt')} {recvName_}
               </Text>
-              <View style={styles.riderStatusRow}>
-                <View style={styles.greenDot} />
-                <Text style={styles.riderStatusText}>{t('tracking.riderOnWay')}</Text>
-              </View>
+              <Text style={styles.detailItemSub}>{fullAddress || 'Chirawa — 333026'}</Text>
+              {isEditable && (
+                <TouchableOpacity onPress={() => void openAddrPicker()} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                  <Text style={styles.detailLink}>{t('tracking.changeAddress')} ›</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          <View style={styles.detailDivider} />
+
+          {/* Receiver contact */}
+          <View style={styles.detailItemRow}>
+            <Ionicons name="call-outline" size={20} color={Colors.textSecondary} style={styles.detailItemIcon} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailItemTitle} numberOfLines={1}>
+                {recvName_}{recvPhone_ ? `, ${recvPhone_}` : ''}
+              </Text>
+              {isEditable && (
+                <TouchableOpacity onPress={() => openReceiverEditor(recvName_, recvPhone_)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                  <Text style={styles.detailLink}>{t('tracking.updateContact')} ›</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
-      )}
 
-      {/* ── C. Order items ──────────────────────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>{t('tracking.orderItems')}</Text>
-        {order.items.map((item, i) => (
-          <ItemRow key={`${item.productId}-${i}`} item={item} />
-        ))}
-      </View>
-
-      {/* ── D. Delivery address ─────────────────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>{t('tracking.deliveryAddress')}</Text>
-        <Text style={styles.addressStreet}>{orderPrisma.deliveryStreet ?? 'Chirawa — 333026'}</Text>
-        <Text style={styles.addressArea}>
-          {orderPrisma.deliveryLocality ?? ''}{orderPrisma.deliveryCity ? `, ${orderPrisma.deliveryCity}` : ''}
-        </Text>
-      </View>
-
-      {/* ── E. Total ────────────────────────────────────────────────────── */}
-      <View style={styles.card}>
-        <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>{t('tracking.orderTotal')}</Text>
-          <Text style={styles.totalValue}>₹{totalRupees}</Text>
+        {/* Order summary */}
+        <View style={styles.card}>
+          <View style={styles.detailHeader}>
+            <View style={styles.detailIcon}>
+              <Ionicons name="bag-handle-outline" size={18} color={Colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sectionTitle}>{t('tracking.orderSummary')}</Text>
+              <Text style={styles.orderIdText}>#{orderId.slice(-10).toUpperCase()}</Text>
+            </View>
+          </View>
+          {order.items.map((item, i) => (
+            <ItemRow key={`${item.productId}-${i}`} item={item} />
+          ))}
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>{t('tracking.orderTotal')}</Text>
+            <Text style={styles.totalValue}>₹{totalRupees}</Text>
+          </View>
         </View>
-      </View>
 
-      {/* ── F. Need Help ────────────────────────────────────────────────── */}
-      <TouchableOpacity
-        style={styles.helpBtn}
-        onPress={handleNeedHelp}
-        activeOpacity={0.85}
-      >
-        <Text style={styles.helpBtnText}>💬  {t('tracking.needHelp')}</Text>
-      </TouchableOpacity>
-    </ScrollView>
+        {/* Need help */}
+        <TouchableOpacity style={styles.helpCard} onPress={handleNeedHelp} activeOpacity={0.85}>
+          <View style={styles.detailIcon}>
+            <Ionicons name="chatbubble-ellipses-outline" size={18} color={Colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sectionTitle}>{t('tracking.chatTitle')}</Text>
+            <Text style={styles.helpSub}>{t('tracking.chatSub')}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={Colors.textTertiary} />
+        </TouchableOpacity>
+
+        {/* Cancel order */}
+        {isCancellable && !isCancelled && (
+          <TouchableOpacity style={styles.cancelBtn} onPress={() => setCancelSheetVisible(true)} activeOpacity={0.7}>
+            <Text style={styles.cancelBtnText}>{t('cancellation.button')}</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Footer tagline */}
+        <Text style={styles.footerTag}>{t('history.lastMinuteApp')} ❤️</Text>
+      </ScrollView>
+    </View>
 
       {/* ── Cancellation reason bottom sheet ────────────────────────────── */}
       <Modal
@@ -773,6 +912,69 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
           </View>
         </View>
       </Modal>
+
+      {/* ── Change-address picker ───────────────────────────────────────── */}
+      <Modal visible={addrPickerVisible} transparent animationType="slide" onRequestClose={() => setAddrPickerVisible(false)}>
+        <View style={styles.sheetBackdrop}>
+          <View style={[styles.sheet, { paddingBottom: insets.bottom + 20 }]}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>{t('tracking.selectAddressTitle')}</Text>
+            <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+              {savedAddresses.map((a) => (
+                <TouchableOpacity
+                  key={a.id} style={styles.addrPickRow} activeOpacity={0.8}
+                  disabled={addrSaving} onPress={() => void pickAddress(a.id)}
+                >
+                  <View style={styles.addrPickTile}>
+                    <Text style={styles.addrPickEmoji}>{a.label === 'घर' ? '🏠' : a.label === 'दुकान' ? '🏪' : '📍'}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.addrPickLabel} numberOfLines={1}>
+                      {a.label ?? 'पता'}{a.isDefault ? '  ·  Default' : ''}
+                    </Text>
+                    <Text style={styles.addrPickSub} numberOfLines={2}>
+                      {a.street}, {a.locality}{a.city ? `, ${a.city}` : ''} — {a.pincode}
+                    </Text>
+                  </View>
+                  {addrSaving ? <ActivityIndicator color={Colors.primary} /> : <Ionicons name="chevron-forward" size={18} color={Colors.textTertiary} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.goBackBtn} onPress={() => setAddrPickerVisible(false)} activeOpacity={0.7}>
+              <Text style={styles.goBackText}>{t('cancellation.goBack')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Receiver-contact editor ─────────────────────────────────────── */}
+      <Modal visible={receiverVisible} transparent animationType="slide" onRequestClose={() => setReceiverVisible(false)}>
+        <View style={styles.sheetBackdrop}>
+          <View style={[styles.sheet, { paddingBottom: insets.bottom + 20 }]}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>{t('tracking.receiverTitle')}</Text>
+            <TextInput
+              style={styles.recvInput} value={recvName} onChangeText={setRecvName}
+              placeholder={t('tracking.receiverNamePh')} placeholderTextColor={Colors.textMuted} autoCapitalize="words"
+            />
+            <TextInput
+              style={styles.recvInput} value={recvPhone} onChangeText={setRecvPhone}
+              placeholder={t('tracking.receiverPhonePh')} placeholderTextColor={Colors.textMuted}
+              keyboardType="phone-pad" maxLength={10}
+            />
+            <TouchableOpacity
+              style={[styles.recvSaveBtn, (!recvName.trim() || recvPhone.trim().length < 10 || recvSaving) && styles.recvSaveDisabled]}
+              disabled={!recvName.trim() || recvPhone.trim().length < 10 || recvSaving}
+              onPress={() => void saveReceiver()} activeOpacity={0.85}
+            >
+              {recvSaving ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.recvSaveText}>{t('tracking.save')}</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.goBackBtn} onPress={() => setReceiverVisible(false)} activeOpacity={0.7}>
+              <Text style={styles.goBackText}>{t('cancellation.goBack')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -788,8 +990,90 @@ const makeStyles = (Colors: ColorPalette) =>
     padding: Spacing.lg, gap: Spacing.sm, ...Shadow.card,
   },
   stepperCard:   { paddingVertical: Spacing.xl },
-  mapCard:       { padding: Spacing.md, gap: Spacing.sm },
+  mapCard:       { padding: Spacing.sm, gap: Spacing.sm },
   cancelledCard: { backgroundColor: Colors.errorLight, borderWidth: 1, borderColor: Colors.error },
+
+  // Gradient status header
+  header: {
+    paddingHorizontal: Spacing.lg, paddingBottom: Spacing.lg, gap: 2,
+    borderBottomLeftRadius: Radius.xl, borderBottomRightRadius: Radius.xl,
+  },
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginBottom: Spacing.xs },
+  headerBack: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.22)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  headerSmall: { flex: 1, fontSize: FontSize.sm, color: 'rgba(255,255,255,0.92)', fontWeight: '700' },
+  headerBig: { fontSize: FontSize.xxl, color: Colors.white, fontWeight: '900', letterSpacing: -0.5 },
+
+  // COD pay-on-delivery
+  codRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  codIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  codTitle: { fontSize: FontSize.md, fontWeight: '800', color: Colors.text },
+  codSub: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 1, lineHeight: 18 },
+  payOnlineBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    marginTop: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.divider, paddingTop: Spacing.md,
+  },
+  payOnlineText: { fontSize: FontSize.md, fontWeight: '800', color: Colors.primary },
+
+  // Delivery partner
+  partnerRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  partnerAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
+  partnerAvatarText: { fontSize: FontSize.lg, fontWeight: '900', color: Colors.white },
+  partnerName: { fontSize: FontSize.md, fontWeight: '800', color: Colors.text },
+  partnerSub: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 1 },
+  callBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.success, alignItems: 'center', justifyContent: 'center', ...Shadow.sm },
+  partnerMsg: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: Spacing.md,
+    backgroundColor: Colors.successLight, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+  },
+  partnerMsgText: { flex: 1, fontSize: FontSize.sm, color: Colors.success, fontWeight: '700' },
+
+  // Detail / summary cards
+  detailHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginBottom: 2 },
+  detailIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: Colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  detailAddress: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20, marginLeft: 50 },
+  detailDivider: { height: 1, backgroundColor: Colors.divider, marginVertical: Spacing.md },
+  detailItemRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  detailItemIcon: { width: 24, textAlign: 'center' },
+  detailItemTitle: { fontSize: FontSize.md, fontWeight: '700', color: Colors.textPrimary },
+  detailItemSub: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 19, marginTop: 2 },
+  detailLink: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '800', marginTop: 6 },
+
+  // Change-address picker rows
+  addrPickRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
+    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.divider,
+  },
+  addrPickTile: {
+    width: 40, height: 40, borderRadius: Radius.md, backgroundColor: Colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  addrPickEmoji: { fontSize: 18 },
+  addrPickLabel: { fontSize: FontSize.md, fontWeight: '800', color: Colors.textPrimary },
+  addrPickSub: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 1, lineHeight: 18 },
+
+  // Receiver editor
+  recvInput: {
+    borderWidth: 1.5, borderColor: Colors.border, borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md, height: 50, fontSize: FontSize.md, color: Colors.textPrimary,
+    backgroundColor: Colors.surface, marginTop: Spacing.md,
+  },
+  recvSaveBtn: {
+    backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 52,
+    alignItems: 'center', justifyContent: 'center', marginTop: Spacing.lg, ...Shadow.primary,
+  },
+  recvSaveDisabled: { opacity: 0.5 },
+  recvSaveText: { color: Colors.white, fontSize: FontSize.md, fontWeight: '800' },
+  orderIdText: { fontSize: FontSize.xs, color: Colors.textTertiary, fontWeight: '700', marginTop: 1, letterSpacing: 0.3 },
+
+  // Need help
+  helpCard: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, backgroundColor: Colors.card, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadow.card },
+  helpSub: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 1 },
+
+  // Footer tagline
+  footerTag: { fontSize: FontSize.xxl, fontWeight: '900', color: Colors.primaryMid, marginTop: Spacing.lg, paddingHorizontal: Spacing.xs },
 
   // Progress stepper
   stepper: { flexDirection: 'row', alignItems: 'flex-start' },

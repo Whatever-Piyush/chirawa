@@ -20,6 +20,14 @@ interface CartItem {
   shopName:    string;
   variantId?:  string; // optional pack-size variant (undefined = base product)
   variantName?: string;
+  // Catalog Engine Phase 5 — master linkage for the checkout resolver. masterId
+  // is the GTIN dictionary row this product realizes; `aggregated` is true only
+  // when that master is APPROVED (the same gate the Phase 4 feed uses). An
+  // aggregated line is FUNGIBLE — the resolver may re-route it to any shop
+  // carrying the master at checkout. Pinned lines (Specials / passthrough /
+  // legacy carts without these fields) stay at their shop.
+  masterId?:   string;
+  aggregated?: boolean;
 }
 
 // A cart line is identified by product + variant. Variant-less items
@@ -130,6 +138,8 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
       include: {
         shop:   { select: { id: true, name: true, isActive: true } },
         images: { orderBy: { sortOrder: 'asc' }, take: 1 },
+        // Master status decides fungibility for the Phase 5 checkout resolver.
+        master: { select: { status: true } },
       },
     });
 
@@ -173,6 +183,9 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
     const items: CartItem[] = existingCart?.items ?? [];
     const existingIndex = items.findIndex((i) => sameLine(i, product.id, variantId));
 
+    // A line is fungible (resolver may re-route it) only when its master is
+    // approved — the same gate the Phase 4 aggregated feed applies to a tile.
+    const aggregated = product.master?.status === 'approved';
     const newItem: CartItem = {
       productId:   product.id,
       productName: lineName,
@@ -183,6 +196,7 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
       shopId:      product.shopId,
       shopName:    product.shop.name,
       ...(variantId ? { variantId, variantName } : {}),
+      ...(product.masterId ? { masterId: product.masterId, aggregated } : {}),
     };
 
     if (existingIndex >= 0) {

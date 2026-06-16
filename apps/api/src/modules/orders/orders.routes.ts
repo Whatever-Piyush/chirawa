@@ -13,6 +13,11 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
 
   app.addHook('preHandler', authenticate);
 
+  // Pre-declared guard const — a typed FastifyRequest<{Params}> handler with an
+  // INLINE { preHandler } object trips the repo's exactOptionalPropertyTypes
+  // baseline; a const sidesteps it (same pattern as catalog.routes writeGuard).
+  const customerGuard = { preHandler: [requireRole('customer')] };
+
   // POST /api/v1/orders — per-user cap on checkout (4.8) on top of the global per-IP limit.
   app.post('/', perUserRateLimit(20, '1 minute'), async (request: FastifyRequest<{ Body: PlaceOrderInput }>, reply) => {
     const parsed = placeOrderSchema.safeParse(request.body);
@@ -47,6 +52,16 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
     const orders = await ordersService.getMyOrders(request.auth!.userId, request.auth!.role);
     return reply.send(orders);
   });
+
+  // GET /api/v1/orders/group/:groupId — unified view of an aggregated order
+  // (Phase 5): combined totals + one status over its per-shop child orders.
+  // (Static "group" segment is matched ahead of the "/:id" param route.)
+  app.get('/group/:groupId', customerGuard,
+    async (request: FastifyRequest<{ Params: { groupId: string } }>, reply) => {
+      const result = await ordersService.getOrderGroup(request.params.groupId, request.auth!.userId);
+      return reply.send(result);
+    },
+  );
 
   // GET /api/v1/orders/:id
   app.get('/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {

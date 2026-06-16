@@ -3,19 +3,16 @@ import {
   View,
   Text,
   FlatList,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Keyboard,
   Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type {
   AddressResponse,
   CartItem,
@@ -23,9 +20,9 @@ import type {
   PricingPreviewResponse,
 } from '@chirawa/types';
 import { PaymentMethod } from '@chirawa/types';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import { FontSize, FontWeight, Gradients, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
-import { FauxGradient } from '../../components/ui';
+import { FontSize, FontWeight, MIN_TAP, Radius, Shadow, Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { isOpenNow } from '../../utils/operatingHours';
 import { api } from '../../services/api.service';
@@ -33,38 +30,17 @@ import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
 import { type RazorpaySuccess } from '../../components/payment/RazorpayCheckout';
 import ProductCard, { type ProductCardData } from '../../components/product/ProductCard';
+import BrandedLoader from '../../components/BrandedLoader';
+import LocationSheet from '../../components/location/LocationSheet';
 import { fetchProducts, toProductCard } from '../../services/catalog';
-
-// Tip presets for the delivery partner (UI selection; wired to the charge in the
-// backend phase). Amounts in rupees, each with a little delight emoji.
-const TIP_PRESETS = [
-  { amt: 20, emoji: '🙂' },
-  { amt: 30, emoji: '😄' },
-  { amt: 50, emoji: '🤩' },
-] as const;
-
-// Multi-select delivery instructions.
-const DELIVERY_INSTRUCTIONS = [
-  { key: 'avoid_calling',  icon: 'call-outline',          labelKey: 'checkout.instrAvoidCalling' },
-  { key: 'dont_ring',      icon: 'notifications-off-outline', labelKey: 'checkout.instrDontRing' },
-  { key: 'leave_at_door',  icon: 'home-outline',          labelKey: 'checkout.instrLeaveAtDoor' },
-] as const;
 
 // Lazy-loaded so `react-native-webview` (a native module) is only required when
 // the Razorpay sheet actually opens. Keeps the app bootable on a dev client that
 // predates the webview native module — only online payment needs the rebuild.
 const RazorpayCheckout = React.lazy(() => import('../../components/payment/RazorpayCheckout'));
 
-type LabelChoice = 'home' | 'work' | 'other';
-const LABEL_VALUE: Record<LabelChoice, string> = { home: 'घर', work: 'दुकान', other: 'अन्य' };
-function labelEmoji(label?: string | null): string {
-  if (label === 'घर')   return '🏠';
-  if (label === 'दुकान') return '🏪';
-  return '📍';
-}
-
 // Addresses store their label as a Hindi string ('घर'); show it in the active
-// language (and without the emoji, since the card already renders an icon tile).
+// language (the sticky "Delivering to" line falls back to it when there's no name).
 function labelDisplay(label: string | null | undefined, t: (k: string) => string): string {
   if (label === 'घर')   return t('address.typeHome');
   if (label === 'दुकान') return t('address.typeWork');
@@ -72,11 +48,7 @@ function labelDisplay(label: string | null | undefined, t: (k: string) => string
   return label ?? t('address.typeOther');
 }
 
-type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Checkout'> };
-
-const CHIRAWA_LAT     = 28.2330;
-const CHIRAWA_LNG     = 75.6307;
-const CHIRAWA_PINCODE = '333026';
+type Props = NativeStackScreenProps<RootStackParamList, 'Checkout'>;
 
 // Thumbnail placeholders until product images exist.
 const ITEM_COLORS = ['#FFF0E9', '#E8F5E9', '#FFF0F5', '#EDE7F6', '#FFF8E1', '#E6F7F4'];
@@ -94,12 +66,12 @@ function deliveryNudge(subtotalPaise: number, t: (k: string) => string): { text:
 
 // ─── Delivery shipment item row (thumbnail + qty stepper + price) ──────────────
 function DeliveryItemRow({
-  item, color, onQty, busy,
-}: { item: CartItem; color: string; onQty: (qty: number) => void; busy: boolean }) {
+  item, color, onQty, busy, showDivider,
+}: { item: CartItem; color: string; onQty: (qty: number) => void; busy: boolean; showDivider: boolean }) {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
-    <View style={styles.itemRow}>
+    <View style={[styles.itemRow, showDivider && styles.itemRowDivider]}>
       <View style={[styles.itemThumb, { backgroundColor: color }]} />
       <View style={styles.itemMid}>
         <Text style={styles.itemName} numberOfLines={2}>{item.productName}</Text>
@@ -149,7 +121,7 @@ function LoadingDots() {
 }
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
-export default function CheckoutScreen({ navigation }: Props) {
+export default function CheckoutScreen({ navigation, route }: Props) {
   const t = useT();
   const insets = useSafeAreaInsets();
   const { colors: Colors } = useTheme();
@@ -159,20 +131,14 @@ export default function CheckoutScreen({ navigation }: Props) {
   const [cart, setCart]               = useState<CartResponse | null>(null);
   const [cartLoading, setCartLoading] = useState(true);
 
-  const [street, setStreet]     = useState('');
-  const [area,   setArea]       = useState('');
-  const [landmark, setLandmark] = useState('');
-  const [label,    setLabel]    = useState<LabelChoice>('home');
-
-  const [streetFocused, setStreetFocused] = useState(false);
-  const [areaFocused,   setAreaFocused]   = useState(false);
-
   const [addressId,  setAddressId]  = useState<string | null>(null);
-  const [confirming, setConfirming] = useState(false);
 
   const [addresses,        setAddresses]        = useState<AddressResponse[]>([]);
   const [addressesLoading, setAddressesLoading] = useState(true);
-  const [showAddressForm,  setShowAddressForm]  = useState(false);
+  // Address picker sheet (ss/1.jpeg) + an optional "Someone else" receiver carried
+  // back from the add-address page, applied to the order after it's placed.
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [receiver,  setReceiver]  = useState<{ name: string; phone: string } | null>(null);
 
   const [pricing, setPricing] = useState<PricingPreviewResponse | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -186,18 +152,8 @@ export default function CheckoutScreen({ navigation }: Props) {
   } | null>(null);
   const [verifying, setVerifying] = useState(false);
 
-  // Promo code (Chunk 7.3). `promoCode` is the applied code; the ref lets every
-  // pricing-preview call site read the current code without re-threading deps.
-  const [promoInput, setPromoInput] = useState('');
-  const [promoCode,  setPromoCode]  = useState('');
-  const [promoBusy,  setPromoBusy]  = useState(false);
-  const promoCodeRef = useRef('');
-
-  // ── Phase B extras (UI; charge/persistence wired in the backend phase) ──────
-  const [alsoLike,    setAlsoLike]    = useState<ProductCardData[]>([]);
-  const [tip,         setTip]         = useState<number | null>(null);
-  const [customTipOpen, setCustomTipOpen] = useState(false);
-  const [instructions, setInstructions] = useState<Set<string>>(new Set());
+  // "You might also like" rail.
+  const [alsoLike, setAlsoLike] = useState<ProductCardData[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -205,14 +161,6 @@ export default function CheckoutScreen({ navigation }: Props) {
       .then((p) => { if (active) setAlsoLike(p.map(toProductCard)); })
       .catch(() => { /* tolerate — section hides */ });
     return () => { active = false; };
-  }, []);
-
-  const toggleInstruction = useCallback((key: string) => {
-    setInstructions((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
   }, []);
 
   const placeBtnScale = useRef(new Animated.Value(1)).current;
@@ -239,15 +187,18 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   useEffect(() => { void loadCart(); }, [loadCart]);
 
-  // Single pricing-preview entry point — always sends the currently applied promo
-  // code (if any). Server soft-fails a bad code into `promoError` and still bills.
+  // Single pricing-preview entry point.
   const fetchPricing = useCallback(
     (cartId: string, addrId: string) =>
-      api.getPricingPreview({ cartId, addressId: addrId, promoCode: promoCodeRef.current || undefined }),
+      api.getPricingPreview({ cartId, addressId: addrId }),
     [],
   );
 
-  useEffect(() => { setAddressId(null); setPricing(null); }, [street, area]);
+  const handleSelectSavedAddress = useCallback(async (addr: AddressResponse) => {
+    setAddressId(addr.id);
+    if (!cart) return;
+    try { setPricing(await fetchPricing(cart.cartId, addr.id)); } catch { /* tolerate */ }
+  }, [cart, fetchPricing]);
 
   useEffect(() => {
     let alive = true;
@@ -256,13 +207,10 @@ export default function CheckoutScreen({ navigation }: Props) {
         const list = await api.getAddresses();
         if (!alive) return;
         setAddresses(list);
-        if (list.length === 0) setShowAddressForm(true);
-        else {
-          const def = list.find((a) => a.isDefault) ?? list[0];
-          if (def) void handleSelectSavedAddress(def);
-        }
+        const def = list.find((a) => a.isDefault) ?? list[0];
+        if (def) void handleSelectSavedAddress(def);
       } catch {
-        if (alive) setShowAddressForm(true);
+        /* tolerate — the picker still lets them add one */
       } finally {
         if (alive) setAddressesLoading(false);
       }
@@ -278,31 +226,29 @@ export default function CheckoutScreen({ navigation }: Props) {
     })();
   }, [cart, addressId, pricing, fetchPricing]);
 
-  const handleSelectSavedAddress = useCallback(async (addr: AddressResponse) => {
-    setAddressId(addr.id);
-    setShowAddressForm(false);
-    if (!cart) return;
-    try { setPricing(await fetchPricing(cart.cartId, addr.id)); } catch { /* tolerate */ }
-  }, [cart, fetchPricing]);
-
-  const handleConfirmAddress = useCallback(async () => {
-    if (!street.trim() || !area.trim() || !cart) return;
-    setConfirming(true);
-    try {
-      const addr = await api.createAddress({
-        label: LABEL_VALUE[label], street: street.trim(),
-        landmark: landmark.trim() || area.trim(), locality: area.trim(),
-        city: 'Chirawa', pincode: CHIRAWA_PINCODE, lat: CHIRAWA_LAT, lng: CHIRAWA_LNG,
-      });
-      setAddressId(addr.id);
-      setAddresses((prev) => [addr, ...prev]);
-      setPricing(await fetchPricing(cart.cartId, addr.id));
-    } catch {
-      Alert.alert(t('common.error'), t('common.retry'));
-    } finally {
-      setConfirming(false);
+  // Returning from the add-address page (ss/2.jpeg): select the new address and
+  // remember a "Someone else" receiver, then clear the params so it fires once.
+  useEffect(() => {
+    const p = route.params;
+    if (!p?.newAddressId && !p?.receiverName) return;
+    if (p.receiverName && p.receiverPhone) setReceiver({ name: p.receiverName, phone: p.receiverPhone });
+    if (p.newAddressId) {
+      void (async () => {
+        try {
+          const list = await api.getAddresses();
+          setAddresses(list);
+          const found = list.find((a) => a.id === p.newAddressId);
+          if (found) void handleSelectSavedAddress(found);
+        } catch { /* tolerate */ }
+      })();
     }
-  }, [street, area, landmark, label, cart, t, fetchPricing]);
+    navigation.setParams({ newAddressId: undefined, receiverName: undefined, receiverPhone: undefined });
+  }, [route.params, navigation, handleSelectSavedAddress]);
+
+  const handleSheetSelect = useCallback((addr: AddressResponse) => {
+    setAddresses((prev) => (prev.some((a) => a.id === addr.id) ? prev : [addr, ...prev]));
+    void handleSelectSavedAddress(addr);
+  }, [handleSelectSavedAddress]);
 
   // Reload cart (+ pricing) after an in-checkout quantity change.
   const reloadCart = useCallback(async (addrId: string | null) => {
@@ -316,28 +262,6 @@ export default function CheckoutScreen({ navigation }: Props) {
       try { setPricing(await fetchPricing(data.cartId, addrId)); } catch { /* tolerate */ }
     }
   }, [navigation, t, fetchPricing]);
-
-  // Apply / clear the typed promo code, then refresh the bill.
-  const applyPromo = useCallback(async () => {
-    if (!cart || !addressId) return;
-    const code = promoInput.trim().toUpperCase();
-    if (!code) return;
-    promoCodeRef.current = code;
-    setPromoCode(code);
-    setPromoBusy(true);
-    try { setPricing(await fetchPricing(cart.cartId, addressId)); } catch { /* tolerate */ }
-    finally { setPromoBusy(false); }
-  }, [cart, addressId, promoInput, fetchPricing]);
-
-  const removePromo = useCallback(async () => {
-    promoCodeRef.current = '';
-    setPromoCode('');
-    setPromoInput('');
-    if (!cart || !addressId) return;
-    setPromoBusy(true);
-    try { setPricing(await fetchPricing(cart.cartId, addressId)); } catch { /* tolerate */ }
-    finally { setPromoBusy(false); }
-  }, [cart, addressId, fetchPricing]);
 
   const changeQty = useCallback(async (productId: string, qty: number) => {
     setUpdatingId(productId);
@@ -360,25 +284,19 @@ export default function CheckoutScreen({ navigation }: Props) {
   };
 
   const handlePlaceOrder = useCallback(async () => {
-    if (!cart) return;
-    if (!addressId && !street.trim()) return;
+    if (!cart || !addressId) return;
 
     setPlacing(true);
     try {
-      let addrId = addressId;
-      if (!addrId) {
-        const addr = await api.createAddress({
-          label: LABEL_VALUE[label], street: street.trim(),
-          landmark: landmark.trim() || area.trim() || street.trim(),
-          locality: area.trim() || 'Chirawa', city: 'Chirawa',
-          pincode: CHIRAWA_PINCODE, lat: CHIRAWA_LAT, lng: CHIRAWA_LNG,
-        });
-        addrId = addr.id;
-      }
       const result = await api.placeOrder({
-        cartId: cart.cartId, addressId: addrId, paymentMethod,
-        ...(promoCodeRef.current ? { promoCode: promoCodeRef.current } : {}),
+        cartId: cart.cartId, addressId, paymentMethod,
       });
+
+      // "Someone else" receiver (from the add-address page) → attach to the order.
+      // Best-effort: a failure here must never block a placed order.
+      if (receiver) {
+        try { await api.updateOrderReceiver(result.orderId, receiver.name, receiver.phone); } catch { /* tolerate */ }
+      }
 
       if (paymentMethod === PaymentMethod.COD) {
         navigation.replace('OrderPlaced', { orderId: result.orderId });
@@ -401,7 +319,7 @@ export default function CheckoutScreen({ navigation }: Props) {
     } finally {
       setPlacing(false);
     }
-  }, [cart, street, area, landmark, label, addressId, paymentMethod, navigation, t]);
+  }, [cart, addressId, paymentMethod, receiver, navigation, t]);
 
   // Razorpay returned a successful payment → re-verify server-side, then go to
   // tracking. The order already exists (pending_payment); verify flips it to paid.
@@ -436,30 +354,23 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   const subtotalRupees = cart ? Math.round(cart.subtotal / 100) : 0;
   const deliveryRupees = pricing ? Math.round(pricing.deliveryFee / 100) : null;
-  const discountRupees = pricing && pricing.discount > 0 ? Math.round(pricing.discount / 100) : 0;
   const totalRupees    = pricing ? Math.round(pricing.total / 100) : subtotalRupees;
-  // A typed code is "active" only once the server confirms it produced a discount.
-  const promoActive    = !!promoCode && !!pricing?.appliedPromoCode;
   const itemCount      = cart ? cart.items.reduce((s, i) => s + i.quantity, 0) : 0;
   const nudge          = cart ? deliveryNudge(cart.subtotal, t) : null;
   const selectedAddr   = addresses.find((a) => a.id === addressId) ?? null;
 
   const withinHours   = isOpenNow();
-  const canPlaceOrder = (!!addressId || (!!street.trim() && !!area.trim())) && !placing && !!cart && withinHours;
-  const canConfirm    = !!street.trim() && !!area.trim() && !confirming;
+  const canPlaceOrder = !!addressId && !placing && !!cart && withinHours;
 
   const ListHeader = (
     <>
-      {/* ── Order for {name}, {phone} ────────────────────────────────────── */}
+      {/* ── Order for {name}, {phone} — one consistent bold line ─────────── */}
       <View style={[styles.section, styles.orderForCard]}>
         <View style={styles.orderForIcon}>
           <Ionicons name="person" size={18} color={Colors.primary} />
         </View>
         <Text style={styles.orderForText} numberOfLines={1}>
-          {t('checkout.orderFor')}{' '}
-          <Text style={styles.orderForName}>
-            {authState.name ?? 'You'}{authState.phone ? `, ${authState.phone}` : ''}
-          </Text>
+          {t('checkout.orderFor')} {authState.name ?? 'You'}{authState.phone ? `, ${authState.phone}` : ''}
         </Text>
         <TouchableOpacity
           onPress={() => navigation.navigate('EditProfile')}
@@ -486,14 +397,14 @@ export default function CheckoutScreen({ navigation }: Props) {
         </View>
       )}
 
-      {/* ── Delivery in 30 minutes / shipment header ─────────────────────── */}
-      <View style={[styles.section, styles.sectionNoBottomPad]}>
+      {/* ── Delivery in 20 minutes — top of the unified items card ───────── */}
+      <View style={styles.deliveryHeaderCard}>
         <View style={styles.deliveryHeader}>
-          <View style={styles.clockCircle}>
-            <Ionicons name="time-outline" size={20} color={Colors.success} />
+          <View style={styles.clockBadge}>
+            <Ionicons name="time" size={22} color={Colors.white} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>{t('checkout.deliveryIn30Mins')}</Text>
+            <Text style={styles.cardTitle}>{t('checkout.deliveryIn20Mins')}</Text>
             <Text style={styles.deliverySub}>
               {t('checkout.shipmentOf')} {itemCount} {itemCount === 1 ? t('cart.itemOne') : t('cart.itemMany')}
             </Text>
@@ -505,6 +416,9 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   const ListFooter = (
     <>
+      {/* Rounded bottom cap that closes the unified delivery + items card */}
+      <View style={styles.itemsCap} />
+
       {/* ── You might also like ──────────────────────────────────────────── */}
       {alsoLike.length > 0 && (
         <View style={styles.alsoSection}>
@@ -539,18 +453,6 @@ export default function CheckoutScreen({ navigation }: Props) {
               : <Text style={styles.billValue}>₹{deliveryRupees}</Text>}
         </View>
         {nudge && !nudge.done && <Text style={styles.billNudge}>{nudge.text}</Text>}
-
-        {discountRupees > 0 && (
-          <View style={styles.billRow}>
-            <View style={styles.billLabelWrap}>
-              <Ionicons name="pricetag-outline" size={16} color={Colors.success} />
-              <Text style={[styles.billLabel, { color: Colors.success }]}>
-                {t('checkout.discount')}{pricing?.appliedPromoCode ? ` · ${pricing.appliedPromoCode}` : ''}
-              </Text>
-            </View>
-            <Text style={[styles.billValue, { color: Colors.success }]}>− ₹{discountRupees}</Text>
-          </View>
-        )}
 
         <View style={styles.billDivider} />
         <View style={styles.billTotalRow}>
@@ -587,234 +489,6 @@ export default function CheckoutScreen({ navigation }: Props) {
         })}
       </View>
 
-      {/* ── Delivery instructions ────────────────────────────────────────── */}
-      <View style={styles.section}>
-        <Text style={styles.cardTitle}>{t('checkout.deliveryInstructions')}</Text>
-        <View style={styles.instrRow}>
-          {DELIVERY_INSTRUCTIONS.map((d) => {
-            const on = instructions.has(d.key);
-            return (
-              <TouchableOpacity
-                key={d.key}
-                activeOpacity={0.85}
-                onPress={() => toggleInstruction(d.key)}
-                style={[styles.instrCard, on && styles.instrCardOn]}
-              >
-                {on && (
-                  <View style={styles.instrCheck}>
-                    <Ionicons name="checkmark" size={11} color={Colors.white} />
-                  </View>
-                )}
-                <View style={[styles.instrIconCircle, on && styles.instrIconCircleOn]}>
-                  <Ionicons name={d.icon as never} size={20} color={on ? Colors.primary : Colors.textSecondary} />
-                </View>
-                <Text style={[styles.instrLabel, on && styles.instrLabelOn]}>{t(d.labelKey)}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      </View>
-
-      {/* ── Tip your delivery partner ────────────────────────────────────── */}
-      <View style={styles.tipSection}>
-        <FauxGradient from={Gradients.warm[0]} to={Gradients.warm[1]} steps={10} style={styles.tipBanner}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.tipTitle}>{t('checkout.tipTitle')}</Text>
-            <Text style={styles.tipSub}>{t('checkout.tipSub')}</Text>
-          </View>
-          <View style={styles.tipScooter}>
-            <Ionicons name="bicycle" size={30} color={Colors.white} />
-          </View>
-        </FauxGradient>
-
-        <View style={styles.tipBody}>
-          <View style={styles.tipChips}>
-            {TIP_PRESETS.map(({ amt, emoji }) => {
-              const on = tip === amt && !customTipOpen;
-              return (
-                <TouchableOpacity
-                  key={amt}
-                  activeOpacity={0.85}
-                  onPress={() => { setCustomTipOpen(false); setTip(on ? null : amt); }}
-                  style={[styles.tipChip, on && styles.tipChipOn]}
-                >
-                  <Text style={styles.tipEmoji}>{emoji}</Text>
-                  <Text style={[styles.tipChipText, on && styles.tipChipTextOn]}>₹{amt}</Text>
-                </TouchableOpacity>
-              );
-            })}
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => { setCustomTipOpen((v) => !v); setTip(null); }}
-              style={[styles.tipChip, customTipOpen && styles.tipChipOn]}
-            >
-              <Text style={styles.tipEmoji}>✨</Text>
-              <Text style={[styles.tipChipText, customTipOpen && styles.tipChipTextOn]}>{t('checkout.tipCustom')}</Text>
-            </TouchableOpacity>
-          </View>
-
-          {customTipOpen && (
-            <View style={styles.tipCustomRow}>
-              <Text style={styles.tipCustomRupee}>₹</Text>
-              <TextInput
-                style={styles.tipCustomInput}
-                keyboardType="number-pad"
-                value={tip != null ? String(tip) : ''}
-                onChangeText={(v) => setTip(v ? Math.max(0, parseInt(v.replace(/[^0-9]/g, ''), 10) || 0) : null)}
-                placeholder="0"
-                placeholderTextColor={Colors.textMuted}
-                maxLength={4}
-              />
-            </View>
-          )}
-
-          {tip != null && tip > 0 && (
-            <View style={styles.tipThanksRow}>
-              <Ionicons name="heart" size={14} color={Colors.success} />
-              <Text style={styles.tipThanks}>{t('checkout.tipThanks')}</Text>
-            </View>
-          )}
-        </View>
-      </View>
-
-      {/* ── Delivery Address ─────────────────────────────────────────────── */}
-      <View style={styles.section}>
-        <View style={styles.addressHeader}>
-          <View style={styles.pinCircle}><Ionicons name="location" size={22} color={Colors.primary} /></View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>{t('checkout.deliveryAddress')}</Text>
-            <Text style={styles.sectionSub}>{t('checkout.chirawa')}</Text>
-          </View>
-        </View>
-
-        {!addressesLoading && addresses.length > 0 && (
-          <View style={styles.addressList}>
-            {addresses.map((a) => {
-              const selected = addressId === a.id;
-              return (
-                <TouchableOpacity key={a.id} onPress={() => void handleSelectSavedAddress(a)} activeOpacity={0.9}
-                  style={[styles.addressCard, selected && styles.addressCardSelected]}>
-                  {selected && <View style={styles.addrAccent} />}
-
-                  <View style={[styles.addrTypeTile, selected && styles.addrTypeTileOn]}>
-                    <Text style={styles.addrTypeEmoji}>{labelEmoji(a.label)}</Text>
-                  </View>
-
-                  <View style={styles.addressCardLeft}>
-                    <View style={styles.addrLabelRow}>
-                      <Text style={styles.addressLabel} numberOfLines={1}>{labelDisplay(a.label, t)}</Text>
-                      {a.isDefault && (
-                        <View style={styles.defaultPill}>
-                          <Text style={styles.defaultPillText}>{t('address.defaultBadge')}</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.addressStreet} numberOfLines={1}>{a.street}</Text>
-                    <Text style={styles.addressArea} numberOfLines={1}>{a.locality}{a.city ? `, ${a.city}` : ''} — {a.pincode}</Text>
-                  </View>
-
-                  <View style={[styles.addrRadio, selected && styles.addrRadioOn]}>
-                    {selected && <Ionicons name="checkmark" size={14} color={Colors.white} />}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-            {!showAddressForm && (
-              <TouchableOpacity style={styles.addAddressBtn} onPress={() => setShowAddressForm(true)} activeOpacity={0.8}>
-                <View style={styles.addPlusCircle}>
-                  <Ionicons name="add" size={20} color={Colors.primary} />
-                </View>
-                <Text style={styles.addAddressBtnText}>{t('address.addNew')}</Text>
-                <Ionicons name="chevron-forward" size={16} color={Colors.primary} />
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {showAddressForm && (
-          <>
-            <View style={styles.chipRow}>
-              {(['home', 'work', 'other'] as const).map((k) => {
-                const active = label === k;
-                const txt = k === 'home' ? t('address.labelHome') : k === 'work' ? t('address.labelWork') : t('address.labelOther');
-                return (
-                  <TouchableOpacity key={k} onPress={() => setLabel(k)} activeOpacity={0.85} style={[styles.chip, active && styles.chipActive]}>
-                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{txt}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>{t('checkout.streetLabel')}</Text>
-              <TextInput style={[styles.textInput, streetFocused && styles.textInputFocused]} value={street} onChangeText={setStreet}
-                onFocus={() => setStreetFocused(true)} onBlur={() => setStreetFocused(false)} placeholder={t('checkout.streetPlaceholder')}
-                placeholderTextColor={Colors.textMuted} returnKeyType="done" autoCapitalize="words" blurOnSubmit onSubmitEditing={() => Keyboard.dismiss()} />
-            </View>
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>{t('checkout.areaLabel')}</Text>
-              <TextInput style={[styles.textInput, areaFocused && styles.textInputFocused]} value={area} onChangeText={setArea}
-                onFocus={() => setAreaFocused(true)} onBlur={() => setAreaFocused(false)} placeholder={t('checkout.areaPlaceholder')}
-                placeholderTextColor={Colors.textMuted} returnKeyType="done" autoCapitalize="words" blurOnSubmit onSubmitEditing={() => Keyboard.dismiss()} />
-            </View>
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>{t('address.landmark')}</Text>
-              <TextInput style={styles.textInput} value={landmark} onChangeText={setLandmark} placeholder="मंदिर के पास"
-                placeholderTextColor={Colors.textMuted} returnKeyType="done" blurOnSubmit onSubmitEditing={() => Keyboard.dismiss()} />
-            </View>
-            <TouchableOpacity style={[styles.confirmAddressBtn, !canConfirm && styles.btnDisabled, addressId && styles.btnConfirmed]}
-              onPress={() => void handleConfirmAddress()} disabled={!canConfirm} activeOpacity={0.85}>
-              {confirming ? <ActivityIndicator color={Colors.white} size="small" />
-                : <Text style={styles.confirmAddressBtnText}>{addressId ? `✓  ${t('checkout.addressConfirmed')}` : t('checkout.confirmAddress')}</Text>}
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
-
-      {/* ── Promo code (Chunk 7.3) ───────────────────────────────────────── */}
-      <View style={styles.section}>
-        <Text style={styles.cardTitle}>{t('checkout.promoTitle')}</Text>
-        {promoActive ? (
-          <View style={styles.promoAppliedRow}>
-            <Ionicons name="pricetag" size={18} color={Colors.success} />
-            <Text style={styles.promoAppliedText} numberOfLines={1}>
-              {pricing?.appliedPromoCode} {t('checkout.promoApplied')}
-            </Text>
-            <TouchableOpacity onPress={() => void removePromo()} disabled={promoBusy} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.promoRemove}>{t('checkout.promoRemove')}</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.promoRow}>
-            <TextInput
-              style={styles.promoInput}
-              value={promoInput}
-              onChangeText={setPromoInput}
-              placeholder={t('checkout.promoPlaceholder')}
-              placeholderTextColor={Colors.textMuted}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              editable={!!addressId && !promoBusy}
-              returnKeyType="done"
-              onSubmitEditing={() => void applyPromo()}
-            />
-            <TouchableOpacity
-              style={[styles.promoApplyBtn, (!addressId || !promoInput.trim() || promoBusy) && styles.btnDisabled]}
-              onPress={() => void applyPromo()}
-              disabled={!addressId || !promoInput.trim() || promoBusy}
-              activeOpacity={0.85}
-            >
-              {promoBusy ? <ActivityIndicator color={Colors.white} size="small" />
-                : <Text style={styles.promoApplyText}>{t('checkout.apply')}</Text>}
-            </TouchableOpacity>
-          </View>
-        )}
-        {!addressId && <Text style={styles.promoHint}>{t('checkout.confirmToSee')}</Text>}
-        {pricing?.promoError ? <Text style={styles.promoError}>{pricing.promoError}</Text> : null}
-        {!promoCode && pricing?.appliedPromoCode ? (
-          <Text style={styles.promoAutoNote}>🎉 {t('checkout.freeDelivery')}</Text>
-        ) : null}
-      </View>
-
       {/* ── Cancellation policy ──────────────────────────────────────────── */}
       <View style={styles.section}>
         <View style={styles.cancelHeader}>
@@ -829,12 +503,7 @@ export default function CheckoutScreen({ navigation }: Props) {
   );
 
   if (cartLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-        <Text style={styles.loadingText}>{t('common.loading')}</Text>
-      </View>
-    );
+    return <BrandedLoader message={t('common.loading')} />;
   }
   if (!cart) return null;
 
@@ -851,6 +520,7 @@ export default function CheckoutScreen({ navigation }: Props) {
             color={ITEM_COLORS[index % ITEM_COLORS.length]}
             busy={updatingId === item.productId}
             onQty={(q) => void changeQty(item.productId, q)}
+            showDivider={index > 0}
           />
         )}
         ListHeaderComponent={ListHeader}
@@ -862,11 +532,11 @@ export default function CheckoutScreen({ navigation }: Props) {
 
       {/* ── Sticky bottom: Delivering-to + full-width Place Order ─────────── */}
       <View style={[styles.stickyBottom, { paddingBottom: Spacing.md + insets.bottom }]}>
-        {/* Delivering-to summary */}
+        {/* Delivering-to summary — tap to open the address picker (ss/1.jpeg) */}
         <TouchableOpacity
           style={styles.deliverRow}
           activeOpacity={0.8}
-          onPress={() => setShowAddressForm(true)}
+          onPress={() => setSheetOpen(true)}
         >
           <View style={styles.deliverHomeCircle}>
             <Ionicons name="location" size={18} color={Colors.primary} />
@@ -928,6 +598,18 @@ export default function CheckoutScreen({ navigation }: Props) {
           </TouchableOpacity>
         </Animated.View>
       </View>
+
+      {/* ── Address picker (ss/1.jpeg) — Add new + WhatsApp + saved ──────── */}
+      <LocationSheet
+        visible={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        addresses={addresses}
+        userName={authState.name}
+        userPhone={authState.phone}
+        onChanged={() => { /* selection handled via onSelectAddress */ }}
+        compact
+        onSelectAddress={handleSheetSelect}
+      />
 
       {/* ── Razorpay checkout (online payment) ───────────────────────────── */}
       {rzpData && (
@@ -991,8 +673,8 @@ const makeStyles = (Colors: ColorPalette) =>
     width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.primaryLight,
     alignItems: 'center', justifyContent: 'center',
   },
-  orderForText: { flex: 1, fontSize: FontSize.sm, color: Colors.textSecondary },
-  orderForName: { fontWeight: '800', color: Colors.textPrimary },
+  // One consistent bold line: "Order for {name}, {phone}".
+  orderForText: { flex: 1, fontSize: FontSize.md, fontWeight: '800', color: Colors.textPrimary },
   orderForChange: { fontSize: FontSize.sm, fontWeight: '800', color: Colors.primary },
 
   // Savings nudge
@@ -1003,15 +685,36 @@ const makeStyles = (Colors: ColorPalette) =>
   progressTrack: { height: 6, borderRadius: 3, backgroundColor: 'rgba(0,0,0,0.08)', overflow: 'hidden' },
   progressFill: { height: 6, borderRadius: 3, backgroundColor: Colors.primary },
 
-  // Delivery header
+  // Delivery header — top of the unified "delivery + items" card. Rounded top,
+  // open bottom (the item rows continue the card; itemsCap closes it).
+  deliveryHeaderCard: {
+    marginHorizontal: Spacing.lg, marginTop: Spacing.md,
+    backgroundColor: Colors.card,
+    borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl,
+    borderWidth: 1, borderBottomWidth: 0, borderColor: 'rgba(0,0,0,0.04)',
+    paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg, paddingBottom: Spacing.md,
+  },
   deliveryHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  clockCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.successLight, justifyContent: 'center', alignItems: 'center' },
+  // Filled clock badge — premium look (white clock on a primary disc).
+  clockBadge: {
+    width: 42, height: 42, borderRadius: 21, backgroundColor: Colors.primary,
+    justifyContent: 'center', alignItems: 'center', ...Shadow.primary,
+  },
   deliverySub: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 2 },
 
-  // Delivery item rows
+  // Delivery item rows — middle of the unified card (side borders, no gaps).
   itemRow: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    backgroundColor: Colors.card, marginHorizontal: Spacing.lg, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
+    backgroundColor: Colors.card, marginHorizontal: Spacing.lg,
+    borderLeftWidth: 1, borderRightWidth: 1, borderColor: 'rgba(0,0,0,0.04)',
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
+  },
+  itemRowDivider: { borderTopWidth: 1, borderTopColor: Colors.divider },
+  // Rounded bottom cap that closes the card under the last item row.
+  itemsCap: {
+    marginHorizontal: Spacing.lg, height: Spacing.md, backgroundColor: Colors.card,
+    borderBottomLeftRadius: Radius.xl, borderBottomRightRadius: Radius.xl,
+    borderWidth: 1, borderTopWidth: 0, borderColor: 'rgba(0,0,0,0.04)',
   },
   itemThumb: { width: 48, height: 48, borderRadius: 10 },
   itemMid: { flex: 1, gap: 2 },

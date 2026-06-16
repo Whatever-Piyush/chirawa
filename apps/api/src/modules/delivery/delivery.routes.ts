@@ -1,6 +1,7 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { createDispatchService } from './dispatch.service';
+import { createOrdersService } from '../orders/orders.service';
 import { authenticate, requireRole } from '../../shared/middleware/auth.middleware';
 import { ValidationError } from '../../shared/errors/app-errors';
 
@@ -12,6 +13,11 @@ const availabilitySchema = z.object({
 
 export default async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   const dispatch = createDispatchService(app.prisma, app.redis);
+  const orders   = createOrdersService(app.prisma, app.redis);
+
+  // Pre-declared guard const — a typed FastifyRequest<{Params}> handler with an
+  // inline { preHandler } trips the repo's exactOptionalPropertyTypes baseline.
+  const riderGuard = { preHandler: [authenticate, requireRole('rider')] };
 
   // GET /api/v1/delivery/availability — rider's current online/offline status
   app.get(
@@ -72,6 +78,17 @@ export default async function deliveryRoutes(app: FastifyInstance): Promise<void
     async (request, reply) => {
       const { orderId } = request.params as { orderId: string };
       return reply.send(await dispatch.getRiderLocationForOrder(orderId, request.auth!.userId));
+    },
+  );
+
+  // POST /api/v1/delivery/orders/:orderId/items/:itemId/unavailable — rider found
+  // an item out of stock at pickup (Catalog Engine Phase 5 safety net): refunds
+  // the line (or cancels the order if it was the only item) + suggests a sub.
+  app.post('/orders/:orderId/items/:itemId/unavailable', riderGuard,
+    async (request: FastifyRequest<{ Params: { orderId: string; itemId: string } }>, reply) => {
+      const { orderId, itemId } = request.params;
+      const result = await orders.riderReportItemUnavailable(request.auth!.userId, orderId, itemId);
+      return reply.send(result);
     },
   );
 

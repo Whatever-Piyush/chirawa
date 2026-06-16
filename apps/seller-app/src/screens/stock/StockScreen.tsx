@@ -5,7 +5,9 @@ import {
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
-import { SellerApi, type ProductInput } from '../../services/api.service';
+import { SellerApi, type ProductInput, type StockThisInput } from '../../services/api.service';
+import { saveStockThis, flushQueue } from '../../services/offline-queue';
+import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { useAuth } from '../../context/AuthContext';
 
 interface Product {
@@ -20,8 +22,11 @@ interface ShopData  { id: string; name: string; categories: Category[] }
 interface FormState {
   name: string; priceRupees: string; mrpRupees: string;
   unit: string; stockQty: string; categoryId: string | null;
+  // Set when the add originated from a barcode scan → save() routes to the
+  // idempotent stock-this upsert (offline-tolerant) instead of plain create.
+  barcode: string | null; masterId: string | null;
 }
-const EMPTY_FORM: FormState = { name: '', priceRupees: '', mrpRupees: '', unit: '', stockQty: '', categoryId: null };
+const EMPTY_FORM: FormState = { name: '', priceRupees: '', mrpRupees: '', unit: '', stockQty: '', categoryId: null, barcode: null, masterId: null };
 
 export default function StockScreen() {
   const { state }               = useAuth();
@@ -35,6 +40,8 @@ export default function StockScreen() {
   const [newCategory, setNewCategory] = useState('');
   const [saving, setSaving]       = useState(false);
   const [importing, setImporting] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [lookingUp, setLookingUp]     = useState(false);
 
   const loadShop = useCallback(async () => {
     if (!state.token || !state.userId) return;
@@ -52,6 +59,44 @@ export default function StockScreen() {
   }, [state.token, state.userId]);
 
   useEffect(() => { void loadShop(); }, [loadShop]);
+
+  // Replay any stock-this saves that were queued while offline (Phase 3).
+  useEffect(() => {
+    if (!state.token) return;
+    void flushQueue(state.token).then(({ synced }) => { if (synced > 0) void loadShop(); }).catch(() => {});
+  }, [state.token, loadShop]);
+
+  // Scan → look up the master → open the add sheet prefilled. Lookup failure
+  // (offline) still opens it with the barcode so the seller can fill manually.
+  async function handleScanned(barcode: string) {
+    setScannerOpen(false);
+    if (!state.token) return;
+    setLookingUp(true);
+    try {
+      const res = await SellerApi.getMasterByBarcode(barcode, state.token);
+      const m = res.master;
+      setEditingId(null);
+      setForm({
+        name:        m?.name ?? '',
+        priceRupees: '',
+        mrpRupees:   m?.mrpPaise != null ? String(Math.round(m.mrpPaise / 100)) : '',
+        unit:        m?.unit ?? '',
+        stockQty:    '',
+        categoryId:  null,
+        barcode,
+        masterId:    m?.id ?? null,
+      });
+      setNewCategory('');
+      setModalOpen(true);
+    } catch {
+      setEditingId(null);
+      setForm({ ...EMPTY_FORM, barcode });
+      setNewCategory('');
+      setModalOpen(true);
+    } finally {
+      setLookingUp(false);
+    }
+  }
 
   async function toggleStock(productId: string, currentStatus: string) {
     if (!state.token) return;
@@ -103,6 +148,8 @@ export default function StockScreen() {
       unit:        p.unit ?? '',
       stockQty:    '',
       categoryId:  p.categoryId ?? null,
+      barcode:     null,  // editing an existing row → normal update path
+      masterId:    null,
     });
     setNewCategory(''); setModalOpen(true);
   }
@@ -137,6 +184,20 @@ export default function StockScreen() {
       };
       if (editingId) {
         await SellerApi.updateProduct(editingId, base, state.token);
+      } else if (form.barcode) {
+        // Scanned add → idempotent stock-this upsert, queued if offline.
+        const stockInput: StockThisInput = {
+          shopId: shop.id, barcode: form.barcode, name, pricePaise: Math.round(price * 100),
+          ...(mrp !== undefined ? { mrpPaise: Math.round(mrp * 100) } : {}),
+          ...(form.unit.trim() ? { unit: form.unit.trim() } : {}),
+          ...(categoryId ? { categoryId } : {}),
+          ...(qty !== undefined ? { stockQty: qty } : {}),
+          ...(form.masterId ? { masterId: form.masterId } : {}),
+        };
+        const result = await saveStockThis(stockInput, state.token);
+        if (result === 'queued') {
+          Alert.alert('Offline — queue mein daala 📥', 'Internet aane par apne aap sync ho jayega.');
+        }
       } else {
         await SellerApi.createProduct({ shopId: shop.id, ...base } as ProductInput, state.token);
       }
@@ -149,11 +210,21 @@ export default function StockScreen() {
     }
   }
 
-  function confirmDelete(p: Product) {
-    Alert.alert('Product hatayein?', `"${p.name}" ko inventory se hata dein?`, [
-      { text: 'Nahi', style: 'cancel' },
-      { text: 'Haan, hatayein', style: 'destructive', onPress: () => void doDelete(p.id) },
+  function productActions(p: Product) {
+    Alert.alert(p.name, undefined, [
+      { text: 'Galat image report karein', onPress: () => void reportImage(p.id) },
+      { text: 'Product hatayein', style: 'destructive', onPress: () => void doDelete(p.id) },
+      { text: 'Cancel', style: 'cancel' },
     ]);
+  }
+  async function reportImage(productId: string) {
+    if (!state.token) return;
+    try {
+      await SellerApi.reportProductImage(productId, undefined, state.token);
+      Alert.alert('Report bhej diya ✅', 'Image review ke liye bhej di gayi hai.');
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Report nahi gaya');
+    }
   }
   async function doDelete(productId: string) {
     if (!state.token) return;
@@ -181,6 +252,9 @@ export default function StockScreen() {
             <Pressable style={styles.importBtn} onPress={() => void handleImport()} disabled={importing}>
               {importing ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.importBtnText}>⬆ CSV</Text>}
             </Pressable>
+            <Pressable style={styles.scanBtn} onPress={() => setScannerOpen(true)} disabled={lookingUp}>
+              {lookingUp ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.scanBtnText}>📷 Scan</Text>}
+            </Pressable>
             <Pressable style={styles.addBtn} onPress={openAdd}>
               <Text style={styles.addBtnText}>+ Add</Text>
             </Pressable>
@@ -196,7 +270,7 @@ export default function StockScreen() {
             contentContainerStyle={{ padding: Spacing.lg, gap: Spacing.sm }}
             ListEmptyComponent={<Text style={styles.empty}>Abhi koi product nahi. "+ Add" dabayein.</Text>}
             renderItem={({ item }) => (
-              <Pressable style={styles.productRow} onPress={() => openEdit(item)} onLongPress={() => confirmDelete(item)}>
+              <Pressable style={styles.productRow} onPress={() => openEdit(item)} onLongPress={() => productActions(item)}>
                 <View style={styles.productInfo}>
                   <Text style={styles.productName}>{item.name}</Text>
                   <Text style={styles.productPrice}>
@@ -260,6 +334,13 @@ export default function StockScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ── Barcode scanner (Catalog Engine Phase 3) ───────────────────────── */}
+      <BarcodeScannerModal
+        visible={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onBarcode={(barcode) => void handleScanned(barcode)}
+      />
     </View>
   );
 }
@@ -297,6 +378,8 @@ const styles = StyleSheet.create({
   addBtnText:  { color: Colors.primary, fontWeight: '800', fontSize: FontSize.md },
   importBtn:   { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.md, minWidth: 64, alignItems: 'center' },
   importBtnText: { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
+  scanBtn:     { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.md, minWidth: 72, alignItems: 'center' },
+  scanBtnText: { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
   noShop:      { fontSize: FontSize.lg, color: Colors.textMuted },
   empty:       { textAlign: 'center', color: Colors.textMuted, marginTop: Spacing.xl, fontSize: FontSize.md },
   productRow: {

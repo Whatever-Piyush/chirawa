@@ -25,6 +25,12 @@ interface Props {
   userName:   string | null;
   userPhone:  string | null;
   onChanged:  () => void;   // re-fetch addresses after a default change
+  // Checkout mode: trims to "Add new + WhatsApp request + saved" (ss/1.jpeg) —
+  // hides the search box & "use current location", and routes Add-new back to
+  // Checkout. When set, tapping a saved address calls onSelectAddress instead of
+  // only flipping the default.
+  compact?:         boolean;
+  onSelectAddress?: (a: AddressResponse) => void;
 }
 
 function labelEmoji(label?: string | null): string {
@@ -34,7 +40,7 @@ function labelEmoji(label?: string | null): string {
 }
 
 export default function LocationSheet({
-  visible, onClose, addresses, userName, userPhone, onChanged,
+  visible, onClose, addresses, userName, userPhone, onChanged, compact, onSelectAddress,
 }: Props) {
   const t      = useT();
   const insets = useSafeAreaInsets();
@@ -55,6 +61,7 @@ export default function LocationSheet({
   }, [addresses, query]);
 
   const goToMap = () => { onClose(); navigation.navigate('AddressMap'); };
+  const goToAdd = () => { onClose(); navigation.navigate('AddAddress', compact ? { returnTo: 'Checkout' } : undefined); };
 
   const requestFromOther = () => {
     // Deep link that opens the recipient's Bringly app to the "share your address"
@@ -69,6 +76,8 @@ export default function LocationSheet({
   };
 
   const selectAddress = async (item: AddressResponse) => {
+    // Checkout passes onSelectAddress: pick this one for the order, then close.
+    if (onSelectAddress) { onSelectAddress(item); onClose(); return; }
     if (item.isDefault) { onClose(); return; }
     setBusyId(item.id);
     try {
@@ -101,18 +110,20 @@ export default function LocationSheet({
             </TouchableOpacity>
           </View>
 
-          {/* Search */}
-          <View style={styles.searchBox}>
-            <Ionicons name="search" size={18} color={Colors.textSecondary} />
-            <TextInput
-              style={styles.searchInput}
-              value={query}
-              onChangeText={setQuery}
-              placeholder={t('locationSheet.searchPlaceholder')}
-              placeholderTextColor={Colors.textMuted}
-              returnKeyType="search"
-            />
-          </View>
+          {/* Search (hidden in checkout/compact mode) */}
+          {!compact && (
+            <View style={styles.searchBox}>
+              <Ionicons name="search" size={18} color={Colors.textSecondary} />
+              <TextInput
+                style={styles.searchInput}
+                value={query}
+                onChangeText={setQuery}
+                placeholder={t('locationSheet.searchPlaceholder')}
+                placeholderTextColor={Colors.textMuted}
+                returnKeyType="search"
+              />
+            </View>
+          )}
 
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -121,20 +132,24 @@ export default function LocationSheet({
           >
             {/* Quick actions */}
             <View style={styles.actionCard}>
-              <ActionRow
-                icon="locate"
-                iconColor={Colors.primary}
-                label={t('locationSheet.useCurrent')}
-                onPress={goToMap}
-                styles={styles}
-                Colors={Colors}
-              />
-              <View style={styles.actionDivider} />
+              {!compact && (
+                <>
+                  <ActionRow
+                    icon="locate"
+                    iconColor={Colors.primary}
+                    label={t('locationSheet.useCurrent')}
+                    onPress={goToMap}
+                    styles={styles}
+                    Colors={Colors}
+                  />
+                  <View style={styles.actionDivider} />
+                </>
+              )}
               <ActionRow
                 icon="add"
                 iconColor={Colors.primary}
                 label={t('locationSheet.addNew')}
-                onPress={goToMap}
+                onPress={goToAdd}
                 styles={styles}
                 Colors={Colors}
               />

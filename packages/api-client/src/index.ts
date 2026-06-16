@@ -16,6 +16,7 @@ import type {
   OrderDetailResponse,
   CreateAddressRequest,
   AddressResponse,
+  ReverseGeocodeResult,
   SearchResponse,
   SearchFilters,
   LoyaltyResponse,
@@ -199,8 +200,91 @@ export class ChirawaApiClient {
     return this.request('GET', `/catalog/products/${productId}`, undefined, false);
   }
 
+  // Aggregated "one store" feed — one tile per product at the lowest in-stock
+  // price, shop hidden (Catalog Engine Phase 4).
+  async getFeed(): Promise<unknown> {
+    return this.request('GET', '/catalog/feed', undefined, false);
+  }
+
+  // Daily Essentials — the curated everyday top-selling SKUs for Chirawa
+  // (TOP_SELLING_SKUS.md): a view over the aggregated feed, ordered by frequency.
+  async getDailyEssentials(): Promise<unknown> {
+    return this.request('GET', '/catalog/daily-essentials', undefined, false);
+  }
+
+  // Chirawa Specials — featured shops shown WITH branding (Catalog Engine Phase
+  // 6). Their menu is the existing getShop(shopId).
+  async getSpecials(): Promise<unknown> {
+    return this.request('GET', '/catalog/specials', undefined, false);
+  }
+
+  // Public CC-BY-SA image credits (Open Food Facts attribution, Phase 7).
+  async getCredits(): Promise<{ count: number; license: string; data: Array<{ name: string; imageAttribution: string | null }> }> {
+    return this.request('GET', '/catalog/credits', undefined, false);
+  }
+
+  // "Request this item" demand capture (Phase 6). Auth required; a valid barcode
+  // links the matching master so admin demand + restock-notify can group it.
+  async requestItem(data: {
+    rawText?: string; barcode?: string; masterId?: string;
+    pincode?: string; notifyOnRestock?: boolean;
+  }): Promise<{ id: string; masterId: string | null; message: string }> {
+    return this.request('POST', '/catalog/requests', data);
+  }
+
   async getCategories(): Promise<unknown> {
     return this.request('GET', '/catalog/categories', undefined, false);
+  }
+
+  // Bestsellers cluster cards — up to 4 sample product images per category
+  // (image-1 design), eggs excluded, no counts. Powers the Home Bestsellers grid.
+  async getBestsellers(): Promise<unknown> {
+    return this.request('GET', '/catalog/bestsellers', undefined, false);
+  }
+
+  // Per-category sample product images (up to 3 each) for the home category tiles
+  // (image-2 design). Returns a { [categoryName]: imageUrl[] } map.
+  async getCategoryImages(): Promise<unknown> {
+    return this.request('GET', '/catalog/category-images', undefined, false);
+  }
+
+  // ─── Seller scan → autocomplete → toggle (Catalog Engine Phase 3) ─────────
+
+  // Scan lookup → { found, source, master }. Unknown barcode triggers a one-shot
+  // live OFF lookup server-side that bootstraps a needs_review master.
+  async getMasterByBarcode(barcode: string): Promise<unknown> {
+    return this.request('GET', `/catalog/master/${encodeURIComponent(barcode)}`);
+  }
+
+  // "I stock this": idempotent upsert keyed by (shopId, barcode). Re-scanning the
+  // same item updates rather than duplicates — safe for the offline-sync queue.
+  async stockThis(data: {
+    shopId: string; barcode: string; name: string; pricePaise: number;
+    masterId?: string; mrpPaise?: number; unit?: string; categoryId?: string;
+    stockQty?: number; imageUrl?: string;
+  }): Promise<{ id: string; created: boolean }> {
+    return this.request('POST', '/catalog/products/stock-this', data);
+  }
+
+  // Report a wrong product image → re-gates the linked master to needs_review.
+  async reportProductImage(productId: string, reason?: string): Promise<unknown> {
+    return this.request('POST', `/catalog/products/${productId}/report-image`, reason ? { reason } : {});
+  }
+
+  // Seller-scoped image upload (multipart). Pass a React Native file descriptor
+  // ({ uri, name, type }). Server normalizes + re-hosts and returns { url }.
+  async uploadProductImage(file: { uri: string; name: string; type: string }): Promise<{ url: string }> {
+    const form = new FormData();
+    // RN FormData accepts a { uri, name, type } object for file parts.
+    form.append('file', file as unknown as Blob);
+
+    const headers: Record<string, string> = {};
+    const token = await this.tokenStorage.getAccessToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    // No Content-Type header — let fetch set the multipart boundary.
+    const response = await fetch(`${this.baseUrl}/catalog/upload-image`, { method: 'POST', headers, body: form });
+    return this.parseResponse<{ url: string }>(response);
   }
 
   // ─── Cart ────────────────────────────────────────────────────────────────
@@ -261,6 +345,12 @@ export class ChirawaApiClient {
     await this.request<{ message: string }>('PATCH', `/users/me/addresses/${id}/default`);
   }
 
+  // Coordinates → cleaned address (Plus-Code-free). The Geocoding key stays on the
+  // backend; this just relays lat/lng and receives the parsed result.
+  async reverseGeocode(lat: number, lng: number): Promise<ReverseGeocodeResult> {
+    return this.request<ReverseGeocodeResult>('POST', '/geo/reverse', { lat, lng });
+  }
+
   // ─── Pricing ─────────────────────────────────────────────────────────────
 
   async getPricingPreview(data: PricingPreviewRequest): Promise<PricingPreviewResponse> {
@@ -294,6 +384,26 @@ export class ChirawaApiClient {
     return this.request<OrderDetailResponse>('GET', `/orders/${orderId}`);
   }
 
+  // Unified view of an aggregated order (Catalog Engine Phase 5): combined totals
+  // + one status across the per-shop child orders the cart was split into. The
+  // groupId comes back on placeOrder's response when the cart spanned >1 shop.
+  async getOrderGroup(groupId: string): Promise<{
+    groupId: string;
+    status: string;
+    subtotal: number;
+    deliveryFee: number;
+    discount: number;
+    totalAmount: number;
+    orders: Array<{
+      id: string;
+      status: string;
+      totalAmount: number;
+      items: Array<{ productId: string; productName: string; quantity: number; unitPrice: number; subtotal: number }>;
+    }>;
+  }> {
+    return this.request('GET', `/orders/group/${groupId}`);
+  }
+
   async getMyOrders(params?: { page?: number; limit?: number }): Promise<OrderDetailResponse[]> {
     let path = '/orders';
     if (params) {
@@ -311,6 +421,20 @@ export class ChirawaApiClient {
       'POST',
       `/orders/${orderId}/rating`,
       comment && comment.length > 0 ? { rating, comment } : { rating },
+    );
+  }
+
+  // Change a placed order's delivery address (allowed only before pickup).
+  async updateOrderAddress(orderId: string, addressId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>('PATCH', `/orders/${orderId}/delivery-address`, { addressId });
+  }
+
+  // Set/update the receiver's name + phone for a placed order (before pickup).
+  async updateOrderReceiver(
+    orderId: string, name: string, phone: string,
+  ): Promise<{ message: string; receiverName: string; receiverPhone: string }> {
+    return this.request<{ message: string; receiverName: string; receiverPhone: string }>(
+      'PATCH', `/orders/${orderId}/receiver`, { name, phone },
     );
   }
 

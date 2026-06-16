@@ -152,8 +152,10 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
         id: true, status: true, paymentMethod: true, totalAmount: true, batchId: true,
         deliveryStreet: true, deliveryLandmark: true, deliveryLocality: true,
         deliveryLat: true, deliveryLng: true,
-        shop:  { select: { name: true, lat: true, lng: true, address: true } },
-        items: { select: { productName: true, quantity: true } },
+        receiverName: true, receiverPhone: true,
+        shop:     { select: { name: true, lat: true, lng: true, address: true } },
+        customer: { select: { phone: true, customerProfile: { select: { firstName: true, lastName: true } } } },
+        items:    { select: { productName: true, quantity: true } },
       },
     });
 
@@ -163,6 +165,10 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
       items: o.items,
       deliveryStreet: o.deliveryStreet, deliveryLandmark: o.deliveryLandmark, deliveryLocality: o.deliveryLocality,
       deliveryLat: Number(o.deliveryLat), deliveryLng: Number(o.deliveryLng),
+      // Who the rider should contact — the receiver if set, else the account owner.
+      receiverName:  o.receiverName ??
+        [o.customer.customerProfile?.firstName, o.customer.customerProfile?.lastName].filter(Boolean).join(' '),
+      receiverPhone: o.receiverPhone ?? o.customer.phone ?? '',
     }));
 
     const PICKED = ['picked_up', 'out_for_delivery', 'delivered'];

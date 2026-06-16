@@ -1,9 +1,11 @@
 import type { PrismaClient, Prisma } from '@prisma/client';
 import type Redis from 'ioredis';
 import { NotFoundError, ForbiddenError, ValidationError } from '../../shared/errors/app-errors';
+import { isValidEan } from '../../shared/utils/barcode';
+import { processImage as defaultProcessImage } from '../../services/image-pipeline';
 import { createCatalogService } from './catalog.service';
 import type {
-  CreateProductInput, UpdateProductInput,
+  CreateProductInput, UpdateProductInput, StockThisInput,
   CreateCategoryInput, UpdateCategoryInput,
   CreateVariantInput, UpdateVariantInput,
 } from './catalog.schema';
@@ -65,15 +67,21 @@ function parseIntOrNull(raw: string | undefined): number | null {
 const statusForQty = (qty: number): 'available' | 'out_of_stock' =>
   qty > 0 ? 'available' : 'out_of_stock';
 
+// Injectable so tests can stub the image pipeline (avoids real network/R2).
+export interface InventoryDeps {
+  processImage?: typeof defaultProcessImage;
+}
+
 /**
  * Inventory writes for the catalog module (Phase 1.1–1.3, 1.5).
  * Every mutation enforces seller-owns-shop (admin bypass), validates paise
  * integers (via the zod schemas at the route), and invalidates the shop's
  * catalog cache so changes are visible to customers within seconds.
  */
-export function createInventoryService(prisma: PrismaClient, redis: Redis) {
+export function createInventoryService(prisma: PrismaClient, redis: Redis, deps: InventoryDeps = {}) {
   const catalog = createCatalogService(prisma, redis);
   const invalidate = (shopId: string) => catalog.invalidateShopCache(shopId);
+  const processImage = deps.processImage ?? defaultProcessImage;
 
   async function assertShopOwner(shopId: string, auth: AuthCtx): Promise<void> {
     if (auth.role === 'admin') return;
@@ -122,12 +130,55 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis) {
       data.stockQty    = input.stockQty;
       data.stockStatus = statusForQty(input.stockQty);
     }
+    if (input.barcode) {
+      if (!isValidEan(input.barcode)) throw new ValidationError('Invalid barcode (failed GS1 check digit)');
+      data.barcode = input.barcode;
+    }
+    if (input.masterId) data.masterId = input.masterId;
     if (input.imageUrl) {
       data.images = { create: { url: input.imageUrl, sortOrder: 0 } };
     }
     const product = await prisma.product.create({ data });
     await invalidate(input.shopId);
     return product;
+  }
+
+  // "I stock this" (Phase 3): idempotent upsert keyed by (shopId, barcode). A
+  // re-scan of the same item updates price/stock/master rather than creating a
+  // duplicate — which is what the seller app's offline-sync queue depends on.
+  async function upsertProductByBarcode(input: StockThisInput, auth: AuthCtx) {
+    await assertShopOwner(input.shopId, auth);
+    if (!isValidEan(input.barcode)) throw new ValidationError('Invalid barcode (failed GS1 check digit)');
+    if (input.categoryId) await assertCategoryInShop(input.categoryId, input.shopId);
+
+    const existing = await prisma.product.findFirst({
+      where: { shopId: input.shopId, barcode: input.barcode }, select: { id: true },
+    });
+
+    let productId: string;
+    if (existing) {
+      const data: Prisma.ProductUpdateInput = {
+        name: input.name, price: input.pricePaise, mrpPaise: input.mrpPaise ?? null, unit: input.unit ?? null,
+      };
+      if (input.masterId)   data.master   = { connect: { id: input.masterId } };
+      if (input.categoryId) data.category = { connect: { id: input.categoryId } };
+      if (input.stockQty != null) { data.stockQty = input.stockQty; data.stockStatus = statusForQty(input.stockQty); }
+      await prisma.product.update({ where: { id: existing.id }, data });
+      if (input.imageUrl) await prisma.productImage.create({ data: { productId: existing.id, url: input.imageUrl, sortOrder: 0 } });
+      productId = existing.id;
+    } else {
+      const data: Prisma.ProductUncheckedCreateInput = {
+        shopId: input.shopId, barcode: input.barcode, masterId: input.masterId ?? null,
+        name: input.name, price: input.pricePaise, mrpPaise: input.mrpPaise ?? null,
+        unit: input.unit ?? null, categoryId: input.categoryId ?? null,
+      };
+      if (input.stockQty != null) { data.stockQty = input.stockQty; data.stockStatus = statusForQty(input.stockQty); }
+      if (input.imageUrl) data.images = { create: { url: input.imageUrl, sortOrder: 0 } };
+      const created = await prisma.product.create({ data });
+      productId = created.id;
+    }
+    await invalidate(input.shopId);
+    return { id: productId, created: !existing };
   }
 
   async function updateProduct(productId: string, input: UpdateProductInput, auth: AuthCtx) {
@@ -264,12 +315,19 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis) {
     return { id: variantId, isActive: false };
   }
 
-  // ── Bulk CSV import (Phase 1.4) ───────────────────────────────────────────
+  // ── Bulk CSV import (Phase 1.4 + Catalog Engine Phase 0) ──────────────────
   // Columns: name,category,unit,price_rupees,mrp_rupees,stock_qty,image_url,
-  //          variant_name,variant_price_rupees
-  // Rupees in → paise stored. Categories auto-created. Idempotent: upsert product
-  // by (shopId,name) and variant by (productId,variant_name), so re-uploading the
-  // same file updates rather than duplicates. Returns a per-row report.
+  //          variant_name,variant_price_rupees,barcode
+  // Rupees in → paise stored. Categories auto-created. The optional `barcode`
+  // column is GS1-validated: a valid GTIN is stored on Product.barcode (the
+  // catalog join key) and becomes the preferred idempotency key; an invalid one
+  // is flagged in the report and dropped (never stored), so the row still imports
+  // by name. Idempotent: a product is matched by (shopId,barcode) when a valid
+  // barcode is given, else by (shopId,name); a variant by (productId,variant_name).
+  // Re-uploading the same file updates rather than duplicates. The `image_url`
+  // column is fetched → normalized → re-hosted to R2 via the Phase 1 image
+  // pipeline (no hotlinking); a failed image is non-fatal (row still imports).
+  // Returns a per-row report.
   async function importProductsCsv(shopId: string, csvText: string, auth: AuthCtx): Promise<ImportReport> {
     await assertShopOwner(shopId, auth);
 
@@ -320,11 +378,29 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis) {
         const catNameRaw   = at('category')?.trim() || null;
         const categoryId   = catNameRaw ? await ensureCategory(catNameRaw) : null;
 
-        // Upsert product by (shopId, name).
-        const existing = await prisma.product.findFirst({ where: { shopId, name }, select: { id: true } });
+        // Validate the barcode through the GS1 check digit. A valid GTIN becomes
+        // the join key + preferred idempotency key; an invalid one (often an
+        // internal distributor SKU) is flagged and dropped so it never poisons
+        // matching — the row still imports, just by name.
+        const barcodeRaw = at('barcode')?.trim() || null;
+        let barcode: string | null = null;
+        if (barcodeRaw) {
+          if (isValidEan(barcodeRaw)) barcode = barcodeRaw;
+          else report.errors.push({ row: rowNum, reason: `Invalid barcode "${barcodeRaw}" (bad GS1 check digit/length) — imported without barcode` });
+        }
+
+        // Prefer matching by (shopId, barcode) when a valid barcode is present,
+        // else fall back to (shopId, name). A name-matched row gets its barcode
+        // backfilled below, so re-importing with barcodes upgrades existing rows.
+        let existing = barcode
+          ? await prisma.product.findFirst({ where: { shopId, barcode }, select: { id: true } })
+          : null;
+        if (!existing) existing = await prisma.product.findFirst({ where: { shopId, name }, select: { id: true } });
+
         let productId: string;
         if (existing) {
           const data: Prisma.ProductUpdateInput = { price: pricePaise, mrpPaise, unit };
+          if (barcode) data.barcode = barcode; // backfill/keep the join key
           if (categoryId) data.category = { connect: { id: categoryId } };
           // Product-level stock only applies when this row isn't a variant row.
           if (!variantName && stockQty != null) { data.stockQty = stockQty; data.stockStatus = statusForQty(stockQty); }
@@ -332,9 +408,19 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis) {
           productId = existing.id;
           report.updated++;
         } else {
-          const data: Prisma.ProductUncheckedCreateInput = { shopId, name, price: pricePaise, mrpPaise, unit, categoryId };
+          const data: Prisma.ProductUncheckedCreateInput = { shopId, name, price: pricePaise, mrpPaise, unit, categoryId, barcode };
           if (!variantName && stockQty != null) { data.stockQty = stockQty; data.stockStatus = statusForQty(stockQty); }
-          if (imageUrl) data.images = { create: { url: imageUrl, sortOrder: 0 } };
+          // image_url is fetched → normalized → re-hosted to R2 (no hotlinking),
+          // with provenance recorded. Failure is non-fatal: the product still
+          // imports, just without an image, and the row is flagged.
+          if (imageUrl) {
+            try {
+              const img = await processImage({ url: imageUrl, source: 'distributor' });
+              data.images = { create: { url: img.url, sortOrder: 0, source: img.source ?? null, license: img.license ?? null, attribution: img.attribution ?? null } };
+            } catch (e) {
+              report.errors.push({ row: rowNum, reason: `Image skipped: ${e instanceof Error ? e.message : 'fetch/normalize failed'}` });
+            }
+          }
           const prod = await prisma.product.create({ data });
           productId = prod.id;
           report.created++;
@@ -360,6 +446,7 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis) {
 
   return {
     createProduct, updateProduct, deleteProduct, setStockQty,
+    upsertProductByBarcode,
     createCategory, updateCategory, deleteCategory,
     createVariant, updateVariant, deleteVariant,
     importProductsCsv,

@@ -6,6 +6,13 @@ export const CustomerNotifications = {
     body:  `${shopName} aapka order taiyar kar rahi hai. Thodi der mein rider aayega.`,
   }),
 
+  // Restock "notify me" (Catalog Engine Phase 6) — the item the customer asked
+  // about is back in stock.
+  restockAvailable: (itemName: string) => ({
+    title: '🛒 Wapas Aa Gaya!',
+    body:  `${itemName} ab stock mein hai. Jaldi order karein, stock limited hai!`,
+  }),
+
   riderAssigned: (riderName: string) => ({
     title: '🚴 Rider Aa Raha Hai!',
     body:  `${riderName} aapka order pick karne nikal gaya.`,

@@ -6,6 +6,9 @@ const paise = z.number().int().min(0).max(100_000_000); // cap ₹10,00,000 sani
 const uuid  = z.string().uuid();
 
 // ── Product ───────────────────────────────────────────────────────────────────
+// GTIN/EAN: 8–14 digits (validated for the GS1 check digit in the service).
+const barcode = z.string().trim().regex(/^\d{8,14}$/, 'barcode must be 8–14 digits');
+
 export const createProductSchema = z
   .object({
     shopId:      uuid,
@@ -17,6 +20,30 @@ export const createProductSchema = z
     description: z.string().trim().max(2000).optional(),
     stockQty:    z.number().int().min(0).max(1_000_000).optional(),
     imageUrl:    z.string().url().max(500).optional(),
+    barcode:     barcode.optional(),
+    masterId:    uuid.optional(),
+  })
+  .refine((d) => d.mrpPaise == null || d.mrpPaise >= d.pricePaise, {
+    message: 'MRP must be greater than or equal to price',
+    path:    ['mrpPaise'],
+  });
+
+// "I stock this" (Catalog Engine Phase 3): a seller scans a barcode, gets prefill
+// from MasterCatalog, sets a price + In/Out → one idempotent upsert keyed by
+// (shopId, barcode). Re-scanning the same item updates rather than duplicates,
+// which is exactly what the offline-sync queue relies on.
+export const stockThisSchema = z
+  .object({
+    shopId:     uuid,
+    barcode,
+    masterId:   uuid.optional(),
+    name:       z.string().trim().min(1).max(200),
+    pricePaise: paise,
+    mrpPaise:   paise.optional(),
+    unit:       z.string().trim().max(50).optional(),
+    categoryId: uuid.optional(),
+    stockQty:   z.number().int().min(0).max(1_000_000).optional(),
+    imageUrl:   z.string().url().max(500).optional(),
   })
   .refine((d) => d.mrpPaise == null || d.mrpPaise >= d.pricePaise, {
     message: 'MRP must be greater than or equal to price',
@@ -79,7 +106,26 @@ export const updateVariantSchema = z
   })
   .refine((d) => Object.keys(d).length > 0, { message: 'No fields to update' });
 
+// ── Request-this-item (Phase 6) ─────────────────────────────────────────────
+// Customer demand capture from empty-search / out-of-stock. At least one of a
+// free-text wish or a scanned barcode must be present (GS1 check-digit validated
+// in the service). pincode is optional minimal PII for the demand dashboard.
+export const createRequestSchema = z
+  .object({
+    rawText:         z.string().trim().min(1).max(200).optional(),
+    barcode:         barcode.optional(),
+    masterId:        uuid.optional(),
+    pincode:         z.string().trim().regex(/^\d{6}$/, 'pincode must be 6 digits').optional(),
+    notifyOnRestock: z.boolean().optional(),
+  })
+  .refine((d) => !!d.rawText || !!d.barcode, {
+    message: 'Provide an item name or a barcode',
+    path:    ['rawText'],
+  });
+
+export type CreateRequestInput  = z.infer<typeof createRequestSchema>;
 export type CreateProductInput  = z.infer<typeof createProductSchema>;
+export type StockThisInput      = z.infer<typeof stockThisSchema>;
 export type UpdateProductInput  = z.infer<typeof updateProductSchema>;
 export type SetStockQtyInput    = z.infer<typeof setStockQtySchema>;
 export type CreateCategoryInput = z.infer<typeof createCategorySchema>;

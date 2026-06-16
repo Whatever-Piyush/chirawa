@@ -113,6 +113,7 @@ export const Events = {
   NEW_ORDER_FOR_SELLER:       'order:new:for_seller',
   ORDER_CANCELLED_FOR_SELLER: 'order:cancelled:for_seller',
   ORDER_ASSIGNED_TO_RIDER:    'order:assigned:to_rider',
+  ORDER_ITEM_UNAVAILABLE:     'order:item:unavailable',
   RIDER_LOCATION_UPDATE:      'rider:location:update',
 } as const;
 
@@ -155,6 +156,18 @@ export interface OrderAssignedToRiderPayload {
   paymentMethod: string;
 }
 
+// Catalog Engine Phase 5 — the rider found an item out of stock at pickup. The
+// line was refunded (prepaid) / deducted from cash due (COD); the customer gets a
+// live in-app update + an optional substitute suggestion (ask, don't auto-sub).
+export interface OrderItemUnavailablePayload {
+  customerId:    string;
+  orderId:       string;
+  productName:   string;
+  refundedPaise: number;
+  cancelled:     boolean; // true when it was the order's only line → whole order cancelled
+  suggestion?:   { productId: string; name: string; pricePaise: number };
+}
+
 // ── Type-safe emit helpers ────────────────────────────────────────────────────
 // Each goes through dispatch(): local delivery + Redis fan-out to other processes.
 export function emitOrderStatusChanged(payload: OrderStatusChangedPayload): void {
@@ -171,4 +184,8 @@ export function emitOrderCancelledForSeller(payload: OrderCancelledForSellerPayl
 
 export function emitOrderAssignedToRider(payload: OrderAssignedToRiderPayload): void {
   dispatch(Events.ORDER_ASSIGNED_TO_RIDER, payload);
+}
+
+export function emitOrderItemUnavailable(payload: OrderItemUnavailablePayload): void {
+  dispatch(Events.ORDER_ITEM_UNAVAILABLE, payload);
 }

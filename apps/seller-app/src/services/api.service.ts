@@ -133,6 +133,21 @@ export const SellerApi = {
   updateStock: (productId: string, stockStatus: string, token: string) =>
     request('PATCH', `/catalog/products/${productId}/stock`, { stockStatus }, token),
 
+  // ── Scan → autocomplete → toggle (Catalog Engine Phase 3) ───────────────────
+  // Barcode scan lookup → prefill. Unknown barcode triggers a server-side live
+  // OFF lookup that bootstraps a needs_review master.
+  getMasterByBarcode: (barcode: string, token: string) =>
+    request<MasterLookupResult>('GET', `/catalog/master/${encodeURIComponent(barcode)}`, undefined, token),
+
+  // "I stock this": idempotent upsert keyed by (shopId, barcode). A re-scan
+  // updates rather than duplicates — what the offline queue relies on.
+  stockThis: (input: StockThisInput, token: string) =>
+    request<{ id: string; created: boolean }>('POST', '/catalog/products/stock-this', input, token),
+
+  // Report a wrong product image → re-gates the linked master to needs_review.
+  reportProductImage: (productId: string, reason: string | undefined, token: string) =>
+    request<{ reported: boolean }>('POST', `/catalog/products/${productId}/report-image`, reason ? { reason } : {}, token),
+
   // ── Inventory CRUD (Phase 1.1–1.3 / 1.5) — money in paise ────────────────────
   createProduct: (input: ProductInput, token: string) =>
     request<{ id: string }>('POST', '/catalog/products', input, token),
@@ -183,6 +198,20 @@ export interface ProductInput {
   unit?:       string;
   categoryId?: string;
   stockQty?:   number;
+}
+
+// Scan flow (Phase 3).
+export interface MasterPrefill {
+  id: string; barcode: string; name: string; brand: string | null;
+  unit: string | null; mrpPaise: number | null; imageUrl: string | null; status: string;
+}
+export interface MasterLookupResult {
+  found: boolean; source: 'master' | 'off_live' | null; master: MasterPrefill | null;
+}
+export interface StockThisInput {
+  shopId: string; barcode: string; name: string; pricePaise: number;
+  masterId?: string; mrpPaise?: number; unit?: string; categoryId?: string;
+  stockQty?: number; imageUrl?: string;
 }
 
 export interface ImportReport {

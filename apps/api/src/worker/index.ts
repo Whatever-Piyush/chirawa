@@ -11,6 +11,8 @@ import { runPaymentReconciliation } from './jobs/reconciliation.job';
 import { runLocationCleanup, runOtpCleanup, runTokenCleanup, runCartCleanup } from './jobs/cleanup.job';
 import { processUnlockReferral } from './jobs/referral.job';
 import { processAssignBatch } from './jobs/assignment.job';
+import { runCatalogEnrichment } from './jobs/enrichment.job';
+import { createOffDumpSource } from '../services/off-source';
 import { closeEventBus } from '../shared/events/event-bus';
 import { initSentry, captureError, flushSentry } from '../shared/observability/sentry';
 
@@ -36,6 +38,11 @@ const assignmentQueue     = new Queue(QueueNames.ORDER_ASSIGNMENT, { connection:
 // Reconciliation (worker) enqueues seller auto-accept here; the API-tier worker
 // in seller-timeout.plugin consumes it (0.4).
 const sellerAcceptQueue   = new Queue(QueueNames.SELLER_ACCEPT,   { connection: redisConnection });
+const enrichmentQueue     = new Queue(QueueNames.ENRICHMENT,      { connection: redisConnection });
+
+// OFF bulk-dump source for catalog image enrichment (Phase 2). No dump configured
+// → the worker marks items needs_manual; never touches the live OFF API for bulk.
+const offSource = createOffDumpSource(env.OFF_DUMP_PATH);
 
 const settlementWorker = new Worker(
   QueueNames.SETTLEMENT,
@@ -85,7 +92,16 @@ const assignmentWorker = new Worker(
   { connection: redisConnection, concurrency: 3 },
 );
 
-const workers = [settlementWorker, reconciliationWorker, cleanupWorker, referralWorker, assignmentWorker];
+// Concurrency 1: enrichment is a paced, rate-limited batch sweep — one at a time.
+const enrichmentWorker = new Worker(
+  QueueNames.ENRICHMENT,
+  async (job) => {
+    if (job.name === JobNames.CATALOG_ENRICH) await runCatalogEnrichment(prisma, { source: offSource });
+  },
+  { connection: redisConnection, concurrency: 1 },
+);
+
+const workers = [settlementWorker, reconciliationWorker, cleanupWorker, referralWorker, assignmentWorker, enrichmentWorker];
 
 workers.forEach((worker) => {
   worker.on('completed', (job) => console.log(`✅ Job completed: ${job.name}`));
@@ -105,11 +121,13 @@ async function start(): Promise<void> {
   console.log('   Cleanup worker     : ready');
   console.log('   Referral worker    : ready');
   console.log('   Assignment worker  : ready');
+  console.log('   Enrichment worker  : ready');
 
   await setupSchedules({
     settlement:     settlementQueue,
     reconciliation: reconciliationQueue,
     cleanup:        cleanupQueue,
+    enrichment:     enrichmentQueue,
   });
 }
 
@@ -122,7 +140,7 @@ async function shutdown(): Promise<void> {
   try {
     await Promise.all(workers.map((w) => w.close()));
     await Promise.all([
-      settlementQueue, reconciliationQueue, cleanupQueue, referralQueue, assignmentQueue, sellerAcceptQueue,
+      settlementQueue, reconciliationQueue, cleanupQueue, referralQueue, assignmentQueue, sellerAcceptQueue, enrichmentQueue,
     ].map((q) => q.close()));
     await closeEventBus();
     await flushSentry();

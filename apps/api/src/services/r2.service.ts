@@ -45,11 +45,16 @@ function getClient(): S3Client {
  * Upload an image buffer to R2 under `shops/` or `products/` and return its
  * public URL. Validates mime type; callers must enforce the size limit
  * (the multipart plugin rejects oversized files before we reach here).
+ *
+ * `keyName` (optional) sets the object basename (no extension). The image
+ * pipeline passes a content hash here so re-processing the same image overwrites
+ * the same key instead of creating a duplicate; omit it for a random UUID.
  */
 export async function uploadImage(
   folder: 'shops' | 'products',
   buffer: Buffer,
   mimeType: string,
+  keyName?: string,
 ): Promise<string> {
   if (!isR2Configured()) {
     throw new ExternalServiceError('R2', 'Image storage is not configured (set R2_* env vars)');
@@ -59,7 +64,7 @@ export async function uploadImage(
     throw new ValidationError(`Unsupported image type: ${mimeType}. Use jpg, png or webp.`);
   }
 
-  const key = `${folder}/${randomUUID()}.${ext}`;
+  const key = `${folder}/${keyName ?? randomUUID()}.${ext}`;
   await getClient().send(
     new PutObjectCommand({
       Bucket: env.R2_BUCKET_NAME,
@@ -72,4 +77,15 @@ export async function uploadImage(
 
   const base = env.R2_PUBLIC_URL.replace(/\/$/, '');
   return `${base}/${key}`;
+}
+
+// Canonical "no image" tile (Catalog Engine Phase 1). Configurable via
+// PLACEHOLDER_IMAGE_URL. The customer apps already render a native placeholder
+// for null images, so prefer returning null to them; use this only where a
+// concrete URL is required (e.g. the aggregated feed, push notifications).
+export const PLACEHOLDER_IMAGE_URL = env.PLACEHOLDER_IMAGE_URL;
+
+/** Returns `url` if present/non-blank, else the placeholder tile. */
+export function imageUrlOrPlaceholder(url: string | null | undefined): string {
+  return url && url.trim() !== '' ? url : PLACEHOLDER_IMAGE_URL;
 }

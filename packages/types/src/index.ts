@@ -13,6 +13,7 @@ export * from './dto/cart.dto';
 export * from './dto/product.dto';
 export * from './dto/pricing.dto';
 export * from './dto/address.dto';
+export * from './dto/geo.dto';
 export * from './dto/search.dto';
 export * from './dto/loyalty.dto';
 
