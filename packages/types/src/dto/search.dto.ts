@@ -34,3 +34,16 @@ export interface SearchResponse {
   query:    string;
   total:    number;   // full count of matching products (results capped at 20)
 }
+
+// Lightweight autocomplete row for the search dropdown (GET /search/suggest).
+export interface SearchSuggestion {
+  id:         string;
+  name:       string;
+  pricePaise: Paise;
+  imageUrl:   string | null;
+}
+
+export interface SearchSuggestResponse {
+  query:       string;
+  suggestions: SearchSuggestion[];
+}

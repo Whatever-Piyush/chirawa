@@ -3,6 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import { NotFoundError } from '../../shared/errors/app-errors';
 import { AGG_CACHE_KEY } from './aggregation.service';
+import { expandHinglish } from './hinglish-aliases';
 
 const CACHE_TTL = { shopList: 600, shopDetail: 300, bestsellers: 300 };
 const ALIAS_CACHE_TTL = 3600;
@@ -45,7 +46,10 @@ const keys = {
   bestsellers:    ()           => `catalog:bestsellers`,
   categoryImages: ()           => `catalog:catimages`,
   aliasExpand:    (q: string)  => `search:aliases:expanded:${q.toLowerCase().trim()}`,
+  suggest:        (q: string)  => `search:suggest:${q.toLowerCase().trim()}`,
 };
+
+const SUGGEST_CACHE_TTL = 60; // hot autocomplete terms — short so new stock shows up
 
 // Collapse search rows so a product carried by N shops shows once (Catalog Engine
 // Phase 4 — the aggregated illusion in search too). Keeps the FIRST occurrence per
@@ -288,6 +292,10 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       match.aliases.forEach((a: string) => terms.add(a.toLowerCase()));
     }
 
+    // Curated Hinglish/phonetic staples (doodh→milk, atta→flour…) — cheap recall
+    // lift on top of the DB alias table.
+    for (const term of expandHinglish(norm)) terms.add(term);
+
     const result = Array.from(terms);
     await redis.setex(cacheKey, ALIAS_CACHE_TTL, JSON.stringify(result)).catch(() => {});
     return result;
@@ -467,6 +475,76 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
         isOpen:  computeIsOpen(s),
       })),
     };
+  }
+
+  // Lightweight autocomplete — top product names + thumbnail + price for the
+  // search dropdown. Same exact-first + trigram + alias scoring as searchCatalog
+  // but NO shops/count/rating and only 8 rows, so it answers in a few ms. Redis-
+  // cached (60s) and filter-agnostic, so it's instant on the hot path.
+  async function suggestCatalog(rawQuery: string) {
+    const q = rawQuery.trim();
+    if (q.length < 2) return { query: q, suggestions: [] as Array<{ id: string; name: string; pricePaise: number; imageUrl: string | null }> };
+
+    const cacheKey = keys.suggest(q);
+    const cached = await redis.get(cacheKey).catch(() => null);
+    if (cached) return JSON.parse(cached) as { query: string; suggestions: Array<{ id: string; name: string; pricePaise: number; imageUrl: string | null }> };
+
+    const expandedTerms = await expandSearchTerms(q);
+    const scoreFragments = [
+      Prisma.sql`word_similarity(${q}, p.name)`,
+      Prisma.sql`similarity(p.name, ${q})`,
+      ...expandedTerms.map((t) => Prisma.sql`word_similarity(${t}, p.name)`),
+    ];
+    const exactBoost = Prisma.sql`
+      CASE
+        WHEN lower(p.name) = lower(${q})   THEN 10
+        WHEN p.name ILIKE ${q + '%'}       THEN 5
+        WHEN p.name ILIKE ${'%' + q + '%'} THEN 2
+        ELSE 0
+      END`;
+    const scoreExpr = Prisma.sql`(GREATEST(${Prisma.join(scoreFragments, ', ')}) + ${exactBoost})`;
+    const likeParts = expandedTerms.map((t) => Prisma.sql`p.name ILIKE ${'%' + t + '%'}`);
+    const aliasFilter = Prisma.join(likeParts, ' OR ');
+
+    type SuggestRow = { id: string; name: string; pricePaise: number | bigint; imageUrl: string | null; masterId: string | null };
+    const rows = await prisma.$queryRaw<SuggestRow[]>`
+      SELECT id, name, "pricePaise", "imageUrl", "masterId" FROM (
+        SELECT
+          p.id::text,
+          p.name,
+          p.price           AS "pricePaise",
+          p.master_id::text AS "masterId",
+          pi.url            AS "imageUrl",
+          ${scoreExpr}      AS score
+        FROM products p
+        JOIN shops s ON s.id = p.shop_id
+        LEFT JOIN LATERAL (
+          SELECT url FROM product_images
+          WHERE product_id = p.id ORDER BY sort_order ASC LIMIT 1
+        ) pi ON true
+        WHERE p.is_active = true
+          AND p.stock_status = 'available'
+          AND s.is_active = true
+          AND (
+            ${aliasFilter}
+            OR word_similarity(${q}, p.name) > 0.2
+            OR similarity(p.name, ${q})      > 0.15
+          )
+      ) sub
+      ORDER BY score DESC
+      LIMIT 24
+    `;
+
+    const suggestions = dedupeByMaster(rows, 8).map((r) => ({
+      id:         r.id,
+      name:       r.name,
+      pricePaise: Number(r.pricePaise),
+      imageUrl:   r.imageUrl,
+    }));
+
+    const out = { query: q, suggestions };
+    await redis.setex(cacheKey, SUGGEST_CACHE_TTL, JSON.stringify(out)).catch(() => {});
+    return out;
   }
 
   // Flat product list across all active shops, optionally filtered by category
@@ -674,5 +752,5 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
     ]);
   }
 
-  return { getShops, getSpecials, getShop, getProducts, getCategories, getBestsellers, getCategoryImages, getProductDetail, searchProducts, searchCatalog, invalidateShopCache };
+  return { getShops, getSpecials, getShop, getProducts, getCategories, getBestsellers, getCategoryImages, getProductDetail, searchProducts, searchCatalog, suggestCatalog, invalidateShopCache };
 }

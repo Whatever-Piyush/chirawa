@@ -2,13 +2,13 @@ import React, {
   useCallback, useEffect, useMemo, useRef, useState,
 } from 'react';
 import {
-  View, TextInput, TouchableOpacity, FlatList,
+  View, Image, TextInput, TouchableOpacity, FlatList,
   StyleSheet, Alert, Animated, ScrollView, Switch, Modal, Pressable,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { SearchProductResult, SearchShopResult, SearchFilters, SearchSort } from '@chirawa/types';
+import type { SearchProductResult, SearchShopResult, SearchFilters, SearchSort, SearchSuggestion } from '@chirawa/types';
 import { fetchCategories, fetchProducts, toProductCard, type ApiCategory, type ApiProduct } from '../../services/catalog';
 import ProductCard, { type ProductCardData } from '../../components/product/ProductCard';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
@@ -23,10 +23,32 @@ import { Ionicons } from '@expo/vector-icons';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const RECENT_KEY    = 'bringly_recent_searches';
-const MAX_RECENT    = 5;
-const DEBOUNCE_MS   = 300;
-const MIN_QUERY_LEN = 2;
+const RECENT_KEY          = 'bringly_recent_searches';
+const MAX_RECENT          = 5;
+const DEBOUNCE_MS         = 160;   // full-results fetch — UX sweet spot, snappier than 300
+const SUGGEST_DEBOUNCE_MS = 110;   // dropdown autocomplete — even snappier
+const MIN_QUERY_LEN       = 2;
+const SEARCH_CACHE_MAX    = 40;    // in-session LRU of {q|filters → results}
+
+// In-session LRU cache of full-search results. Re-typing / backspacing a prior
+// query repaints INSTANTLY with zero network — the big perceived-speed win.
+type CachedSearch = { products: SearchProductResult[]; shops: SearchShopResult[]; total: number };
+const searchCache = new Map<string, CachedSearch>();
+function cacheKeyFor(q: string, filters: SearchFilters): string {
+  return `${q.trim().toLowerCase()}|${JSON.stringify(filters)}`;
+}
+function cacheGet(key: string): CachedSearch | undefined {
+  const v = searchCache.get(key);
+  if (v) { searchCache.delete(key); searchCache.set(key, v); }   // LRU bump
+  return v;
+}
+function cacheSet(key: string, val: CachedSearch): void {
+  searchCache.set(key, val);
+  if (searchCache.size > SEARCH_CACHE_MAX) {
+    const oldest = searchCache.keys().next().value;
+    if (oldest !== undefined) searchCache.delete(oldest);
+  }
+}
 
 const POPULAR_CHIPS = ['आलू', 'प्याज', 'दूध', 'साबुन', 'चीनी', 'तेल'];
 
@@ -67,6 +89,24 @@ function SkeletonRow() {
       </View>
       <Shimmer width={56} height={32} borderRadius={Radius.full} />
     </View>
+  );
+}
+
+// ─── Suggestion name with the matched substring bolded ───────────────────────
+
+function HighlightedName({ name, query }: { name: string; query: string }) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const q = query.trim().toLowerCase();
+  const idx = q.length >= MIN_QUERY_LEN ? name.toLowerCase().indexOf(q) : -1;
+  if (idx < 0) return <Text style={styles.suggestText} numberOfLines={1}>{name}</Text>;
+  const end = idx + q.length;
+  return (
+    <Text style={styles.suggestText} numberOfLines={1}>
+      {name.slice(0, idx)}
+      <Text style={styles.suggestMatch}>{name.slice(idx, end)}</Text>
+      {name.slice(end)}
+    </Text>
   );
 }
 
@@ -228,9 +268,14 @@ export default function SearchScreen({ navigation }: Props) {
   const [sort, setSort]                   = useState<SearchSort>('relevance');
   const [sheetOpen, setSheetOpen]         = useState(false);
 
-  const inputRef     = useRef<TextInput>(null);
-  const debounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const requestIdRef = useRef(0);
+  // Autocomplete dropdown (server /search/suggest) — tiny, fast, race-guarded.
+  const [suggestItems, setSuggestItems] = useState<SearchSuggestion[]>([]);
+
+  const inputRef           = useRef<TextInput>(null);
+  const debounceRef        = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestIdRef       = useRef(0);
+  const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suggestIdRef       = useRef(0);
 
   // Current filter set, derived from state. Kept in a ref so the (stable)
   // runSearch closure always reads the latest values without being re-created.
@@ -302,29 +347,52 @@ export default function SearchScreen({ navigation }: Props) {
 
   // ── Core search ────────────────────────────────────────────────────────────
 
+  const applyResult = useCallback((q: string, r: CachedSearch) => {
+    setProducts(r.products); setShops(r.shops); setTotal(r.total); setSearched(q);
+  }, []);
+
   const runSearch = useCallback(async (term: string) => {
     const q = term.trim();
     if (q.length < MIN_QUERY_LEN) {
       setProducts([]); setShops([]); setSearched(''); setTotal(0);
       return;
     }
+    const key = cacheKeyFor(q, filtersRef.current);
+    const cached = cacheGet(key);
+    if (cached) {
+      // Instant repaint from cache — no spinner. Still revalidate quietly below.
+      applyResult(q, cached);
+      void saveRecent(q);
+    }
     const thisId = ++requestIdRef.current;
-    setLoading(true);
+    if (!cached) setLoading(true);   // shimmer only when we have nothing to show
     try {
       const result = await api.search(q, filtersRef.current);
       if (thisId !== requestIdRef.current) return;
-      setProducts(result.products);
-      setShops(result.shops);
-      setTotal(result.total);
-      setSearched(q);
+      cacheSet(key, { products: result.products, shops: result.shops, total: result.total });
+      applyResult(q, result);
       void saveRecent(q);
     } catch {
       if (thisId !== requestIdRef.current) return;
-      setProducts([]); setShops([]); setTotal(0);
+      if (!cached) { setProducts([]); setShops([]); setTotal(0); }   // keep stale on error
     } finally {
       if (thisId === requestIdRef.current) setLoading(false);
     }
-  }, [saveRecent]);
+  }, [saveRecent, applyResult]);
+
+  // Lightweight autocomplete fetch for the dropdown (race-guarded, separate id).
+  const fetchSuggest = useCallback(async (term: string) => {
+    const q = term.trim();
+    if (q.length < MIN_QUERY_LEN) { setSuggestItems([]); return; }
+    const thisId = ++suggestIdRef.current;
+    try {
+      const res = await api.suggest(q);
+      if (thisId !== suggestIdRef.current) return;
+      setSuggestItems(res.suggestions);
+    } catch {
+      if (thisId === suggestIdRef.current) setSuggestItems([]);
+    }
+  }, []);
 
   // Re-run the current query whenever filters change (only if a query is active).
   useEffect(() => {
@@ -335,17 +403,22 @@ export default function SearchScreen({ navigation }: Props) {
   const handleQueryChange = useCallback((text: string) => {
     setQuery(text);
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (suggestDebounceRef.current) clearTimeout(suggestDebounceRef.current);
     if (text.trim().length < MIN_QUERY_LEN) {
       requestIdRef.current++;
+      suggestIdRef.current++;
       setLoading(false);
-      setProducts([]); setShops([]); setSearched('');
+      setProducts([]); setShops([]); setSearched(''); setSuggestItems([]);
       return;
     }
-    debounceRef.current = setTimeout(() => void runSearch(text), DEBOUNCE_MS);
-  }, [runSearch]);
+    // Old results stay visible (not cleared) so there's no flicker while typing.
+    debounceRef.current        = setTimeout(() => void runSearch(text),    DEBOUNCE_MS);
+    suggestDebounceRef.current = setTimeout(() => void fetchSuggest(text), SUGGEST_DEBOUNCE_MS);
+  }, [runSearch, fetchSuggest]);
 
   useEffect(() => () => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (suggestDebounceRef.current) clearTimeout(suggestDebounceRef.current);
   }, []);
 
   // Rotate the placeholder item name every 1.8s ("Search for" stays fixed).
@@ -357,6 +430,9 @@ export default function SearchScreen({ navigation }: Props) {
   const fireQuery = useCallback((term: string) => {
     setQuery(term);
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (suggestDebounceRef.current) clearTimeout(suggestDebounceRef.current);
+    suggestIdRef.current++;
+    setSuggestItems([]);   // committing a query closes the dropdown
     void runSearch(term);
   }, [runSearch]);
 
@@ -416,18 +492,9 @@ export default function SearchScreen({ navigation }: Props) {
   );
   const feedCards = useMemo(() => feedProducts.map(toProductCard), [feedProducts]);
 
-  // Autocomplete suggestions derived from result names: exact → prefix → contains.
-  const suggestions = useMemo(() => {
-    const ql = query.trim().toLowerCase();
-    if (ql.length < MIN_QUERY_LEN) return [];
-    const rank = (n: string) => {
-      const l = n.toLowerCase();
-      return l === ql ? 0 : l.startsWith(ql) ? 1 : l.includes(ql) ? 2 : 3;
-    };
-    return Array.from(new Set(products.map((p) => p.name)))
-      .sort((a, b) => rank(a) - rank(b))
-      .slice(0, 6);
-  }, [products, query]);
+  // Show the autocomplete dropdown while there's an active query with results
+  // from the server /search/suggest endpoint (rich rows: thumbnail + match + price).
+  const showSuggest = queryActive && suggestItems.length > 0;
 
   // Idle (empty query): recent searches + a 3-up grid of products to add.
   function renderIdlePanel() {
@@ -561,8 +628,9 @@ export default function SearchScreen({ navigation }: Props) {
           {query.length > 0 && (
             <TouchableOpacity
               onPress={() => {
-                setQuery(''); setProducts([]); setShops([]); setSearched('');
+                setQuery(''); setProducts([]); setShops([]); setSearched(''); setSuggestItems([]);
                 requestIdRef.current++;
+                suggestIdRef.current++;
                 inputRef.current?.focus();
               }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -573,18 +641,25 @@ export default function SearchScreen({ navigation }: Props) {
         </View>
       </View>
 
-      {/* Autocomplete suggestions — exact → prefix → contains (from results). */}
-      {queryActive && suggestions.length > 0 && (
+      {/* Autocomplete dropdown — server /search/suggest: thumbnail + bolded match + price */}
+      {showSuggest && (
         <View style={styles.suggestBox}>
-          {suggestions.map((name) => (
+          {suggestItems.map((s) => (
             <TouchableOpacity
-              key={name}
+              key={s.id}
               style={styles.suggestRow}
-              onPress={() => fireQuery(name)}
+              onPress={() => fireQuery(s.name)}
               activeOpacity={0.7}
             >
-              <Text style={styles.suggestIcon}>🔍</Text>
-              <Text style={styles.suggestText} numberOfLines={1}>{name}</Text>
+              {s.imageUrl ? (
+                <Image source={{ uri: s.imageUrl }} style={styles.suggestThumb} resizeMode="contain" />
+              ) : (
+                <View style={styles.suggestThumbEmpty}>
+                  <Ionicons name="search" size={15} color={Colors.textTertiary} />
+                </View>
+              )}
+              <HighlightedName name={s.name} query={query} />
+              <Text style={styles.suggestPrice}>₹{Math.round(s.pricePaise / 100)}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -636,15 +711,16 @@ export default function SearchScreen({ navigation }: Props) {
         </View>
       )}
 
-      {/* Loading shimmer */}
-      {loading && (
+      {/* Loading shimmer — only when there's nothing to show yet (no stale results),
+          so typing over existing results never flickers to a skeleton. */}
+      {loading && !hasResults && (
         <View style={styles.body}>
           <SkeletonRow /><SkeletonRow /><SkeletonRow />
         </View>
       )}
 
       {/* Idle: popular + recent */}
-      {!loading && showIdle && renderIdlePanel()}
+      {showIdle && renderIdlePanel()}
 
       {/* No results */}
       {!loading && showEmpty && (
@@ -659,8 +735,9 @@ export default function SearchScreen({ navigation }: Props) {
         </View>
       )}
 
-      {/* Results — 3-up product grid (shops listed above) */}
-      {!loading && hasResults && (
+      {/* Results — 3-up product grid (shops listed above). Stays visible while a
+          fresh query loads (results swap in when ready) → no flicker. */}
+      {hasResults && (
         <FlatList
           key="results-grid"
           data={resultCards}
@@ -968,11 +1045,21 @@ const makeStyles = (Colors: ColorPalette) =>
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
   suggestRow: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
     paddingVertical: Spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.divider,
+  },
+  suggestThumb: {
+    width: 36, height: 36, borderRadius: Radius.sm, backgroundColor: Colors.surfaceAlt,
+  },
+  suggestThumbEmpty: {
+    width: 36, height: 36, borderRadius: Radius.sm, backgroundColor: Colors.surfaceAlt,
+    alignItems: 'center', justifyContent: 'center',
   },
   suggestIcon: { fontSize: 13, opacity: 0.6 },
-  suggestText: { flex: 1, fontSize: FontSize.md, color: Colors.textPrimary },
+  suggestText:  { flex: 1, fontSize: FontSize.md, color: Colors.textSecondary },
+  suggestMatch: { color: Colors.textPrimary, fontWeight: '800' },
+  suggestPrice: { fontSize: FontSize.sm, fontWeight: '800', color: Colors.textPrimary },
 
   // Filter bar (category chips + Filter button)
   filterBar: {

@@ -18,6 +18,7 @@ import type {
   AddressResponse,
   ReverseGeocodeResult,
   SearchResponse,
+  SearchSuggestResponse,
   SearchFilters,
   LoyaltyResponse,
 } from '@chirawa/types';
@@ -451,6 +452,17 @@ export class ChirawaApiClient {
     return this.request<SearchResponse>(
       'GET',
       `/search?${params.toString()}`,
+      undefined,
+      false, // public endpoint — no auth required
+    );
+  }
+
+  // Lightweight autocomplete for the search dropdown — tiny payload, Redis-cached.
+  async suggest(query: string): Promise<SearchSuggestResponse> {
+    const params = new URLSearchParams({ q: query });
+    return this.request<SearchSuggestResponse>(
+      'GET',
+      `/search/suggest?${params.toString()}`,
       undefined,
       false, // public endpoint — no auth required
     );

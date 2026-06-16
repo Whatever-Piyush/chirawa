@@ -49,4 +49,24 @@ export default async function searchRoutes(app: FastifyInstance): Promise<void> 
       return reply.send(results);
     },
   );
+
+  // GET /api/v1/search/suggest?q= — lightweight autocomplete for the dropdown.
+  // Tiny payload (≤8 names + thumb + price), Redis-cached → answers in a few ms.
+  app.get(
+    '/search/suggest',
+    {
+      config: {
+        rateLimit: {
+          max:        env.NODE_ENV === 'development' ? 2000 : 90,
+          timeWindow: '1 minute',
+        },
+      },
+    },
+    async (request: FastifyRequest<{ Querystring: { q?: string } }>, reply) => {
+      const q = (request.query.q ?? '').trim();
+      if (q.length < 2) return reply.send({ query: q, suggestions: [] });
+      const results = await catalogService.suggestCatalog(q);
+      return reply.send(results);
+    },
+  );
 }
