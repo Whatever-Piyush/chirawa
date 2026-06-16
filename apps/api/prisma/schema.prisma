@@ -341,6 +341,13 @@ model Address {
   pincode   String   @db.VarChar(10)
   lat       Decimal  @db.Decimal(10, 8)
   lng       Decimal  @db.Decimal(11, 8)
+  // Receiver / contact details (Address redesign v2). contactType is
+  // "myself" | "other"; receiver fields hold who the order is delivered to when
+  // it differs from the account holder. mapsLink is an optional Google Maps URL.
+  contactType   String? @default("myself") @map("contact_type") @db.VarChar(20)
+  receiverName  String? @map("receiver_name")  @db.VarChar(100)
+  receiverPhone String? @map("receiver_phone") @db.VarChar(20)
+  mapsLink      String? @map("maps_link")      @db.Text
   isDefault Boolean  @default(false) @map("is_default")
   isDeleted Boolean  @default(false) @map("is_deleted")
   createdAt DateTime @default(now()) @map("created_at")

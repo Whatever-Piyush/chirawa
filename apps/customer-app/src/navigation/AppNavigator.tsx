@@ -36,6 +36,7 @@ import ChirawaSpecialScreen from '../screens/categories/ChirawaSpecialScreen';
 import ProfileScreen from '../screens/profile/ProfileScreen';
 import AddressListScreen from '../screens/profile/AddressListScreen';
 import AddressMapScreen from '../screens/profile/AddressMapScreen';
+import AddressDetailsScreen from '../screens/profile/AddressDetailsScreen';
 import AccountPrivacyScreen from '../screens/profile/AccountPrivacyScreen';
 import ProductDetailScreen from '../screens/product/ProductDetailScreen';
 import SearchScreen from '../screens/search/SearchScreen';
@@ -55,12 +56,21 @@ export type RootStackParamList = {
   AccountPrivacy: undefined;
   ShopDetail: { shopId: string; shopName: string };
   ProductDetail: { productId: string };
-  CategoryProducts: { category: string };
+  CategoryProducts: { category: string; subCategory?: string };
   Checkout: undefined;
   OrderTracking: { orderId: string };
   OrderPlaced: { orderId: string };
   AddressList: undefined;
-  AddressMap: undefined;
+  AddressMap: { autoLocate?: boolean } | undefined;
+  AddressDetails: {
+    lat: number;
+    lng: number;
+    title: string;
+    subtitle: string;
+    locality: string;
+    city: string;
+    pincode: string;
+  };
   // Address-sharing deep links (bringly://share-address, bringly://receive-address)
   ShareAddress: { from?: string; phone?: string } | undefined;
   ReceiveAddress: { payload?: string } | undefined;
@@ -233,7 +243,16 @@ export default function AppNavigator() {
                   component={AddressMapScreen}
                   options={{
                     headerShown: true,
-                    headerTitle: 'Pin your address',
+                    headerTitle: 'Confirm location',
+                    headerTintColor: Colors.primary,
+                  }}
+                />
+                <Stack.Screen
+                  name="AddressDetails"
+                  component={AddressDetailsScreen}
+                  options={{
+                    headerShown: true,
+                    headerTitle: 'Add address details',
                     headerTintColor: Colors.primary,
                   }}
                 />

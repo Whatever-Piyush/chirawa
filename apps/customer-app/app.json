@@ -31,7 +31,8 @@
       },
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.READ_CONTACTS"
       ]
     },
     "plugins": [
@@ -48,6 +49,12 @@
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "Bringly aapki delivery location dikhane ke liye location use karti hai."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Bringly receiver ka naam aur number bharne ke liye aapke contacts use karti hai."
         }
       ]
     ],

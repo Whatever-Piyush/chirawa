@@ -44,8 +44,8 @@ const DIMS: Record<ProductCardSize, {
 };
 
 export default function ProductCard({
-  product, size = 'regular',
-}: { product: ProductCardData; size?: ProductCardSize }) {
+  product, size = 'regular', cardWidth,
+}: { product: ProductCardData; size?: ProductCardSize; cardWidth?: number }) {
   const { quantities, addItem, setQuantity } = useCart();
   const fly = useFlyToCart();
   const imageRef = useRef<View>(null);
@@ -53,7 +53,10 @@ export default function ProductCard({
   const inCart = qty > 0;
   const { colors: Colors } = useTheme();
   const dims = DIMS[size];
-  const styles = useMemo(() => makeStyles(Colors, dims), [Colors, dims]);
+  // Optional explicit width (e.g. the two-pane category grid renders cards in a
+  // pane narrower than the full screen). Defaults to the per-size width.
+  const resolvedWidth = cardWidth ?? dims.width;
+  const styles = useMemo(() => makeStyles(Colors, dims, resolvedWidth), [Colors, dims, resolvedWidth]);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [activeImg, setActiveImg] = useState(0);
 
@@ -63,7 +66,7 @@ export default function ProductCard({
     return product.imageUrl ? [product.imageUrl] : [];
   }, [product.images, product.imageUrl]);
 
-  const pageWidth = dims.width - dims.pad * 2;
+  const pageWidth = resolvedWidth - dims.pad * 2;
 
   // Morph the ADD button into a stepper: animate width + crossfade contents.
   const morph = useRef(new Animated.Value(inCart ? 1 : 0)).current;
@@ -192,10 +195,10 @@ export default function ProductCard({
   );
 }
 
-const makeStyles = (Colors: ColorPalette, dims: typeof DIMS[ProductCardSize]) =>
+const makeStyles = (Colors: ColorPalette, dims: typeof DIMS[ProductCardSize], cardWidth: number) =>
   StyleSheet.create({
   card: {
-    width:           dims.width,
+    width:           cardWidth,
     backgroundColor: Colors.surface,
     borderRadius:    14,
     borderWidth:     1,

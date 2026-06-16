@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, ScrollView, Animated } from 'react-native';
+import { View, StyleSheet, ScrollView, Animated, Linking } from 'react-native';
+import * as Location from 'expo-location';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { AddressResponse } from '@chirawa/types';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
@@ -10,6 +11,7 @@ import { api } from '../../services/api.service';
 import { fetchCategories, type ApiCategory } from '../../services/catalog';
 import { useAuth } from '../../context/AuthContext';
 import LocationSheet from '../../components/location/LocationSheet';
+import LocationPermissionModal from '../../components/location/LocationPermissionModal';
 import Header from './Header';
 import SearchBar from './SearchBar';
 import ProductCarouselSection from './ProductCarouselSection';
@@ -30,6 +32,7 @@ export default function HomeScreen({ navigation }: Props) {
   const [addresses, setAddresses] = useState<AddressResponse[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [categories, setCategories] = useState<ApiCategory[]>([]);
+  const [permModal, setPermModal] = useState(false);
 
   const loadAddresses = useCallback(async () => {
     try {
@@ -50,6 +53,31 @@ export default function HomeScreen({ navigation }: Props) {
     () => navigation.addListener('focus', () => { void loadAddresses(); }),
     [navigation, loadAddresses],
   );
+
+  // On app open, prompt to enable location if permission is off (once per mount).
+  useEffect(() => {
+    let active = true;
+    Location.getForegroundPermissionsAsync()
+      .then(({ granted }) => { if (active && !granted) setPermModal(true); })
+      .catch(() => { /* tolerate */ });
+    return () => { active = false; };
+  }, []);
+
+  const handleEnableLocation = useCallback(async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') void Linking.openSettings();
+    } catch {
+      /* tolerate */
+    } finally {
+      setPermModal(false);
+    }
+  }, []);
+
+  const handleSelectManually = useCallback(() => {
+    setPermModal(false);
+    setSheetOpen(true);
+  }, []);
 
   // Load categories once. Keep only the known/curated categories (those grouped
   // into a section), so a stray legacy category never shows up.
@@ -140,6 +168,13 @@ export default function HomeScreen({ navigation }: Props) {
         userName={state.name}
         userPhone={state.phone}
         onChanged={loadAddresses}
+      />
+
+      {/* App-open "location off" prompt (#7) */}
+      <LocationPermissionModal
+        visible={permModal}
+        onEnable={() => void handleEnableLocation()}
+        onSelectManually={handleSelectManually}
       />
     </View>
   );

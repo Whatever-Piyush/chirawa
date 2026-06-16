@@ -54,7 +54,9 @@ export default function LocationSheet({
     );
   }, [addresses, query]);
 
-  const goToMap = () => { onClose(); navigation.navigate('AddressMap'); };
+  const addNewAddress = () => { onClose(); navigation.navigate('AddressMap'); };
+  // "Use current location" drops the user on the map already homing in on GPS.
+  const useCurrentLocation = () => { onClose(); navigation.navigate('AddressMap', { autoLocate: true }); };
 
   const requestFromOther = () => {
     // Deep link that opens the recipient's Bringly app to the "share your address"
@@ -125,7 +127,7 @@ export default function LocationSheet({
                 icon="locate"
                 iconColor={Colors.primary}
                 label={t('locationSheet.useCurrent')}
-                onPress={goToMap}
+                onPress={useCurrentLocation}
                 styles={styles}
                 Colors={Colors}
               />
@@ -134,7 +136,7 @@ export default function LocationSheet({
                 icon="add"
                 iconColor={Colors.primary}
                 label={t('locationSheet.addNew')}
-                onPress={goToMap}
+                onPress={addNewAddress}
                 styles={styles}
                 Colors={Colors}
               />
@@ -265,7 +267,8 @@ const makeStyles = (Colors: ColorPalette) =>
     searchBox: {
       flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
       backgroundColor: Colors.surface,
-      borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border,
+      // Rectangular (small radius) — intentionally NOT a pill/oval.
+      borderRadius: Radius.sm, borderWidth: 1, borderColor: Colors.border,
       paddingHorizontal: Spacing.md, height: 50,
       ...Shadow.xs,
     },

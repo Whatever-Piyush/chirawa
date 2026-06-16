@@ -45,6 +45,50 @@ export interface SectionGroup {
   tiles: SectionTile[];
 }
 
+// ─── Two-pane category view (left sub-rail + right grid) ───────────────────────
+// Path A: the left rail's "sub-categories" are a SECTION_GROUP's tiles, deduped
+// to their distinct backing categories (so two tiles pointing at the same real
+// category don't render identical grids). Until the data is split into finer
+// categories, this is the best taxonomy we have.
+
+export interface SubCategory {
+  label:    string;
+  emoji:    string;
+  category: string;   // backing live category → fetchProducts({ category })
+}
+
+export interface CategoryView {
+  mainTitle: string;
+  subs:      SubCategory[];
+}
+
+/**
+ * Resolve an incoming category (either a SECTION_GROUP title or a leaf category
+ * name) into the main title + its sub-category rail. Falls back to a single-item
+ * rail when the category isn't part of any group.
+ */
+export function resolveCategoryView(category: string): CategoryView {
+  const group =
+    SECTION_GROUPS.find((g) => g.title === category) ??
+    SECTION_GROUPS.find((g) => g.tiles.some((t) => t.category === category));
+
+  if (group) {
+    const seen = new Set<string>();
+    const subs: SubCategory[] = [];
+    for (const tile of group.tiles) {
+      if (seen.has(tile.category)) continue;   // first label wins per backing category
+      seen.add(tile.category);
+      subs.push({ label: tile.label, emoji: tile.emoji, category: tile.category });
+    }
+    return { mainTitle: group.title, subs };
+  }
+
+  return {
+    mainTitle: category,
+    subs: [{ label: category, emoji: CATEGORY_EMOJI[category] ?? '🛍️', category }],
+  };
+}
+
 export const SECTION_GROUPS: ReadonlyArray<SectionGroup> = [
   {
     title: 'Grocery & Kitchen',
