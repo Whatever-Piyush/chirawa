@@ -9,6 +9,94 @@ Reworked the customer-app address/location flow to match the reference screens
 
 ---
 
+# v5 — Bug fixes: search, edit, global address switch (✅ IMPLEMENTED on `feat/address-v5`)
+
+> Built; customer-app + packages typecheck **0 errors**. As built:
+> - **Edit fixed:** `AddressActionsSheet` is no longer a nested `<Modal>` — it's an
+>   absolute-fill overlay, so the ⋯ menu (Edit/Share/Set default/Delete) works
+>   inside the sheet too.
+> - **Global switch:** new **`AddressContext`** (current address + `select(id)`,
+>   persisted to AsyncStorage, server default synced). Home / Categories / Order
+>   History headers + **Checkout** all read `current` from it; selecting/pinning in
+>   the sheet or My Addresses switches the delivery address **everywhere instantly**,
+>   and **Checkout re-prices on switch**. `AddressCard` shows the pin/default from
+>   the optimistic current.
+> - **Search key staged:** `GOOGLE_MAPS_API_KEY` set in `apps/api/.env` to the
+>   existing key. ⚠️ **It still won't return results until you, in Google Cloud:**
+>   **(1) enable Billing** on that project (the direct call returns
+>   `REQUEST_DENIED: "must enable Billing"`), and **(2) enable Places API (New)**
+>   (`403 PERMISSION_DENIED`). Code is correct; this is purely a GCP toggle. (Map
+>   address text still works via the on-device geocoder meanwhile.)
+
+---
+
+
+Three reported breakages (IMG_3831/3833/3834). Root causes diagnosed below.
+
+## 1. Search returns nothing (IMG_3831)
+**Root cause:** `GOOGLE_MAPS_API_KEY=placeholder` in `apps/api/.env`, so the backend
+autocomplete (correctly) returns `[]` → the sheet shows "no places". **Config, not
+a code bug.**
+**Fix:**
+- Set `GOOGLE_MAPS_API_KEY` in `apps/api/.env` to a real key. The Android Maps key
+  already in `app.json` (`AIzaSyBN1U…`) is a candidate **if** its Google Cloud
+  project has **Geocoding API** + **Places API (New)** enabled (and the key isn't
+  Android-app-restricted — a server key/no-referrer-restriction is safest).
+- Restart the API (it reads the key at boot).
+- Small UX honesty: backend returns a `keyConfigured:false` hint (or the client
+  treats empty + non-error as "search unavailable here") so a missing key doesn't
+  look like "no results". (optional)
+
+## 2. Can't edit saved addresses (IMG_3833)
+**Root cause:** `AddressActionsSheet` is a `<Modal>` rendered **inside** the
+`LocationSheet` `<Modal>` (nested modals). **Android does not render a nested
+Modal**, so the ⋯ menu (Edit/Share/Set default/Delete) never appears from the
+sheet. (On the top-level My Addresses page it isn't nested, so it works there.)
+**Fix:**
+- De-nest the actions menu. Cleanest: convert `AddressActionsSheet` from a `Modal`
+  to an in-tree absolute overlay (so it works whether or not it sits inside another
+  modal), **or** have the card's ⋯ close the sheet first and open the menu at the
+  screen level. Recommended: make it a non-Modal overlay → works everywhere,
+  including inside the sheet.
+- Then verify Edit → `AddressDetails` (editId prefill) → `updateAddress` PATCH
+  end-to-end (the path itself is correct; it was just unreachable).
+
+## 3. Pin + switch the active address everywhere (IMG_3834)
+**Root cause:** there is **no global current-address state**. `HomeScreen`,
+`CategoriesScreen`, `OrderHistoryScreen`, and `CheckoutScreen` each fetch addresses
+and locally pick `find(isDefault)`. So pinning/selecting in the sheet updates the
+backend but **doesn't propagate** to the home header or the cart/checkout, and the
+pin/select feels broken.
+**Fix — a real global address store (the proper big-app pattern):**
+- New **`context/AddressContext.tsx`** provider (mounted high, after auth):
+  - holds `addresses`, `currentAddress`, `loading`;
+  - `refresh()`; `select(id)` = optimistic set `currentAddress` + `api.setDefaultAddress(id)` + persist to AsyncStorage; `remove`/`update` helpers re-sync.
+  - hydrates on launch (persisted id → that address, else the `isDefault`).
+- **All surfaces read `currentAddress` from the context** instead of their own
+  `find(isDefault)`: Home header, Categories header, Order-history header, and
+  **Checkout** (so the delivery address + pricing follow the switch into the cart).
+- **LocationSheet select** and **AddressCard pin** call `context.select(id)` →
+  every screen updates instantly (optimistic), backend confirms in the background.
+- **Fix pin tappability:** the 📌 sits inside the card's `TouchableOpacity`; give it
+  its own hit area / stop propagation so tapping the pin doesn't trigger card-select
+  (and vice-versa).
+
+## Files v5 will touch
+- `apps/api/.env` (key — config) · *(optional)* `geo.service.ts`/DTO (key hint)
+- **New** `apps/customer-app/src/context/AddressContext.tsx` + provider wiring
+- `HomeScreen`, `CategoriesScreen`, `OrderHistoryScreen`, `CheckoutScreen` (read context)
+- `LocationSheet`, `AddressListScreen`, `AddressCard` (select/pin via context),
+  `AddressActionsSheet` (de-nest: Modal → overlay)
+
+## Decisions before building
+1. **Search key** — reuse the existing `AIzaSyBN1U…` for the backend (you enable
+   Geocoding + Places (New) on its project), or issue a dedicated server key?
+2. **Persist the chosen address** across app restarts via AsyncStorage (recommended)?
+3. **Checkout** — should switching the address mid-cart also re-price immediately
+   (recommended), matching the home/header switch?
+
+---
+
 # v4 — High-class polish + functional search (✅ IMPLEMENTED on `feat/address-v4`)
 
 > Built. types + api-client + i18n + customer-app typecheck **0 errors**; backend

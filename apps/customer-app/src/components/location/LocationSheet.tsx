@@ -12,6 +12,7 @@ import { useT } from '@chirawa/i18n';
 import { FontSize, FontWeight, Radius, Shadow, Spacing } from '../../theme';
 import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
+import { useAddresses } from '../../context/AddressContext';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import AddressCard from './AddressCard';
 import AddressActionsSheet from './AddressActionsSheet';
@@ -23,12 +24,10 @@ const WHATSAPP_GREEN = '#25D366';
 interface Props {
   visible:    boolean;
   onClose:    () => void;
-  addresses:  AddressResponse[];
   userName:   string | null;
   userPhone:  string | null;
-  onChanged:  () => void;
-  compact?:         boolean;
-  onSelectAddress?: (a: AddressResponse) => void;
+  // Checkout mode: hides search + "use current", routes Add-new back to Checkout.
+  compact?:   boolean;
 }
 
 function labelChoiceOf(label: string | null | undefined): 'home' | 'work' | 'hotel' | 'other' {
@@ -36,7 +35,7 @@ function labelChoiceOf(label: string | null | undefined): 'home' | 'work' | 'hot
 }
 
 export default function LocationSheet({
-  visible, onClose, addresses, userName, userPhone, onChanged, compact, onSelectAddress,
+  visible, onClose, userName, userPhone, compact,
 }: Props) {
   const t      = useT();
   const insets = useSafeAreaInsets();
@@ -44,6 +43,7 @@ export default function LocationSheet({
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
+  const { addresses, current, select, refresh } = useAddresses();
   const search = usePlaceSearch();
   const [menuFor, setMenuFor] = useState<AddressResponse | null>(null);
 
@@ -72,15 +72,16 @@ export default function LocationSheet({
     void Linking.openURL(`https://wa.me/?text=${msg}`).catch(() => {});
   };
 
+  // Tapping a saved address (or its pin) makes it the active delivery address
+  // EVERYWHERE — home header, categories, cart/checkout — via the global context.
   const selectAddress = async (item: AddressResponse) => {
-    if (onSelectAddress) { onSelectAddress(item); close(); return; }
-    if (item.isDefault) { close(); return; }
-    try { await api.setDefaultAddress(item.id); onChanged(); close(); } catch { /* retry */ }
+    await select(item.id);
+    close();
   };
 
   const setDefault = async (item: AddressResponse) => {
-    if (item.isDefault) return;
-    try { await api.setDefaultAddress(item.id); onChanged(); } catch { /* retry */ }
+    if (item.id === current?.id) return;
+    await select(item.id);
   };
 
   const editAddress = (a: AddressResponse) => {
@@ -99,7 +100,7 @@ export default function LocationSheet({
   };
 
   const deleteAddress = async (a: AddressResponse) => {
-    try { await api.deleteAddress(a.id); onChanged(); } catch { /* retry */ }
+    try { await api.deleteAddress(a.id); void refresh(); } catch { /* retry */ }
   };
 
   return (
@@ -180,7 +181,7 @@ export default function LocationSheet({
                         address={item}
                         userName={userName}
                         userPhone={userPhone}
-                        selected={item.isDefault}
+                        selected={item.id === current?.id}
                         onSelect={() => void selectAddress(item)}
                         onSetDefault={compact ? undefined : () => void setDefault(item)}
                         onShare={() => void shareAddress(item)}

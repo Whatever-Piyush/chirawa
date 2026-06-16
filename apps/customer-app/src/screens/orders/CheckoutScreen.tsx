@@ -32,6 +32,7 @@ import { type RazorpaySuccess } from '../../components/payment/RazorpayCheckout'
 import ProductCard, { type ProductCardData } from '../../components/product/ProductCard';
 import BrandedLoader from '../../components/BrandedLoader';
 import LocationSheet from '../../components/location/LocationSheet';
+import { useAddresses } from '../../context/AddressContext';
 import { fetchProducts, toProductCard } from '../../services/catalog';
 
 // Lazy-loaded so `react-native-webview` (a native module) is only required when
@@ -133,8 +134,9 @@ export default function CheckoutScreen({ navigation, route }: Props) {
 
   const [addressId,  setAddressId]  = useState<string | null>(null);
 
-  const [addresses,        setAddresses]        = useState<AddressResponse[]>([]);
-  const [addressesLoading, setAddressesLoading] = useState(true);
+  // Active delivery address from the global context — switching it (here or
+  // anywhere) re-prices this order.
+  const { current, addresses: ctxAddresses, loading: addressesLoading, select } = useAddresses();
   // Address picker sheet (ss/1.jpeg) + an optional "Someone else" receiver carried
   // back from the add-address page, applied to the order after it's placed.
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -200,24 +202,12 @@ export default function CheckoutScreen({ navigation, route }: Props) {
     try { setPricing(await fetchPricing(cart.cartId, addr.id)); } catch { /* tolerate */ }
   }, [cart, fetchPricing]);
 
+  // Sync the active address from the global context, and re-price on every switch
+  // (or when the cart finishes loading).
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const list = await api.getAddresses();
-        if (!alive) return;
-        setAddresses(list);
-        const def = list.find((a) => a.isDefault) ?? list[0];
-        if (def) void handleSelectSavedAddress(def);
-      } catch {
-        /* tolerate — the picker still lets them add one */
-      } finally {
-        if (alive) setAddressesLoading(false);
-      }
-    })();
-    return () => { alive = false; };
+    if (current) void handleSelectSavedAddress(current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [current?.id, cart?.cartId]);
 
   useEffect(() => {
     if (!cart || !addressId || pricing) return;
@@ -232,23 +222,10 @@ export default function CheckoutScreen({ navigation, route }: Props) {
     const p = route.params;
     if (!p?.newAddressId && !p?.receiverName) return;
     if (p.receiverName && p.receiverPhone) setReceiver({ name: p.receiverName, phone: p.receiverPhone });
-    if (p.newAddressId) {
-      void (async () => {
-        try {
-          const list = await api.getAddresses();
-          setAddresses(list);
-          const found = list.find((a) => a.id === p.newAddressId);
-          if (found) void handleSelectSavedAddress(found);
-        } catch { /* tolerate */ }
-      })();
-    }
+    // A freshly-added address → make it the active one (context syncs + re-prices).
+    if (p.newAddressId) void select(p.newAddressId);
     navigation.setParams({ newAddressId: undefined, receiverName: undefined, receiverPhone: undefined });
-  }, [route.params, navigation, handleSelectSavedAddress]);
-
-  const handleSheetSelect = useCallback((addr: AddressResponse) => {
-    setAddresses((prev) => (prev.some((a) => a.id === addr.id) ? prev : [addr, ...prev]));
-    void handleSelectSavedAddress(addr);
-  }, [handleSelectSavedAddress]);
+  }, [route.params, navigation, select]);
 
   // Reload cart (+ pricing) after an in-checkout quantity change.
   const reloadCart = useCallback(async (addrId: string | null) => {
@@ -357,7 +334,7 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   const totalRupees    = pricing ? Math.round(pricing.total / 100) : subtotalRupees;
   const itemCount      = cart ? cart.items.reduce((s, i) => s + i.quantity, 0) : 0;
   const nudge          = cart ? deliveryNudge(cart.subtotal, t) : null;
-  const selectedAddr   = addresses.find((a) => a.id === addressId) ?? null;
+  const selectedAddr   = ctxAddresses.find((a) => a.id === addressId) ?? null;
 
   const withinHours   = isOpenNow();
   const canPlaceOrder = !!addressId && !placing && !!cart && withinHours;
@@ -603,12 +580,9 @@ export default function CheckoutScreen({ navigation, route }: Props) {
       <LocationSheet
         visible={sheetOpen}
         onClose={() => setSheetOpen(false)}
-        addresses={addresses}
         userName={authState.name}
         userPhone={authState.phone}
-        onChanged={() => { /* selection handled via onSelectAddress */ }}
         compact
-        onSelectAddress={handleSheetSelect}
       />
 
       {/* ── Razorpay checkout (online payment) ───────────────────────────── */}

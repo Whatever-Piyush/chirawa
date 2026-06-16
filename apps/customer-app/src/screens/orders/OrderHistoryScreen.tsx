@@ -19,6 +19,7 @@ import { api } from '../../services/api.service';
 import { fetchProducts, toProductCard } from '../../services/catalog';
 import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
+import { useAddresses } from '../../context/AddressContext';
 import ProductCard, { type ProductCardData } from '../../components/product/ProductCard';
 import BringlyBag from '../../components/illustrations/BringlyBag';
 import Header from '../home/Header';
@@ -166,7 +167,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
   const [reorderingId, setReorderingId] = useState<string | null>(null);
 
   // Delivery address shown in the header + edited via the location sheet.
-  const [addresses, setAddresses] = useState<AddressResponse[]>([]);
+  const { current: activeAddress } = useAddresses();
   const [sheetOpen, setSheetOpen] = useState(false);
   const headerOpacity = useRef(new Animated.Value(0)).current;
 
@@ -180,23 +181,6 @@ export default function OrderHistoryScreen({ navigation }: Props) {
     Animated.timing(headerOpacity, { toValue: 1, duration: 300, useNativeDriver: true }).start();
   }, [headerOpacity]);
 
-  const loadAddresses = useCallback(async () => {
-    try {
-      const data = await api.getAddresses();
-      data.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
-      setAddresses(data);
-    } catch {
-      /* tolerate — header falls back to "Set your delivery location" */
-    }
-  }, []);
-
-  useEffect(() => { void loadAddresses(); }, [loadAddresses]);
-  useEffect(
-    () => navigation.addListener('focus', () => { void loadAddresses(); }),
-    [navigation, loadAddresses],
-  );
-
-  const activeAddress = addresses.find((a) => a.isDefault) ?? addresses[0] ?? null;
   const addressLine = activeAddress
     ? `${activeAddress.street}, ${activeAddress.locality}`
     : null;
@@ -490,10 +474,8 @@ export default function OrderHistoryScreen({ navigation }: Props) {
       <LocationSheet
         visible={sheetOpen}
         onClose={() => setSheetOpen(false)}
-        addresses={addresses}
         userName={state.name}
         userPhone={state.phone}
-        onChanged={loadAddresses}
       />
     </View>
   );

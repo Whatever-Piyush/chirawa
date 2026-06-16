@@ -11,6 +11,7 @@ import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
+import { useAddresses } from '../../context/AddressContext';
 import AddressCard from '../../components/location/AddressCard';
 import AddressActionsSheet from '../../components/location/AddressActionsSheet';
 import { shareAddress } from '../../utils/shareAddress';
@@ -31,36 +32,18 @@ export default function AddressListScreen({ navigation }: Props) {
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const { state } = useAuth();
 
-  const [addresses, setAddresses] = useState<AddressResponse[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState(false);
-  const [menuFor, setMenuFor]     = useState<AddressResponse | null>(null);
+  // All address state lives in the global context, so pin/switch propagates
+  // app-wide (home header, cart) — not just on this screen.
+  const { addresses, current, loading, refresh, select } = useAddresses();
+  const [menuFor, setMenuFor] = useState<AddressResponse | null>(null);
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerTitle: t('address.title') });
   }, [navigation, t]);
 
-  const load = useCallback(async () => {
-    setError(false);
-    try {
-      const data = await api.getAddresses();
-      data.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
-      setAddresses(data);
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  useEffect(() => navigation.addListener('focus', () => { void refresh(); }), [navigation, refresh]);
 
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => navigation.addListener('focus', () => { void load(); }), [navigation, load]);
-
-  const handleSetDefault = useCallback(async (a: AddressResponse) => {
-    if (a.isDefault) return;
-    try { await api.setDefaultAddress(a.id); await load(); }
-    catch (e) { Alert.alert(t('common.error'), e instanceof Error ? e.message : t('common.retry')); }
-  }, [load, t]);
+  const handleSetDefault = useCallback((a: AddressResponse) => { void select(a.id); }, [select]);
 
   const handleDelete = useCallback((a: AddressResponse) => {
     Alert.alert(t('address.deleteConfirm'), undefined, [
@@ -68,12 +51,12 @@ export default function AddressListScreen({ navigation }: Props) {
       {
         text: t('address.delete'), style: 'destructive',
         onPress: async () => {
-          try { await api.deleteAddress(a.id); await load(); }
+          try { await api.deleteAddress(a.id); void refresh(); }
           catch (e) { Alert.alert(t('common.error'), e instanceof Error ? e.message : t('common.retry')); }
         },
       },
     ]);
-  }, [load, t]);
+  }, [refresh, t]);
 
   // Open the add-address form prefilled for editing this address.
   const handleEdit = useCallback((a: AddressResponse) => {
@@ -157,7 +140,7 @@ export default function AddressListScreen({ navigation }: Props) {
             address={item}
             userName={state.name}
             userPhone={state.phone}
-            selected={item.isDefault}
+            selected={item.id === current?.id}
             onSetDefault={() => void handleSetDefault(item)}
             onShare={() => void shareAddress(item)}
             onMore={() => setMenuFor(item)}
@@ -166,18 +149,11 @@ export default function AddressListScreen({ navigation }: Props) {
         ItemSeparatorComponent={() => <View style={{ height: Spacing.md }} />}
         contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + Spacing.xxl }]}
         ListEmptyComponent={
-          error ? (
-            <View style={styles.center}>
-              <Text style={styles.emoji}>😕</Text>
-              <Text color={Colors.textSecondary}>{t('common.noInternet')}</Text>
-            </View>
-          ) : (
-            <View style={styles.center}>
-              <Text style={styles.emoji}>📍</Text>
-              <Text weight="bold" color={Colors.textPrimary}>{t('address.noAddresses')}</Text>
-              <Text color={Colors.textSecondary}>{t('address.noAddressesHint')}</Text>
-            </View>
-          )
+          <View style={styles.center}>
+            <Text style={styles.emoji}>📍</Text>
+            <Text weight="bold" color={Colors.textPrimary}>{t('address.noAddresses')}</Text>
+            <Text color={Colors.textSecondary}>{t('address.noAddressesHint')}</Text>
+          </View>
         }
         showsVerticalScrollIndicator={false}
       />

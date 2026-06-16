@@ -11,6 +11,7 @@ import { api } from '../../services/api.service';
 import { fetchCategories, fetchDailyEssentials, fetchBestsellers, fetchCategoryImages, type ApiCategory, type BestsellerCluster } from '../../services/catalog';
 import type { ProductCardData } from '../../components/product/ProductCard';
 import { useAuth } from '../../context/AuthContext';
+import { useAddresses } from '../../context/AddressContext';
 import LocationSheet from '../../components/location/LocationSheet';
 import LocationPermissionModal from '../../components/location/LocationPermissionModal';
 import Header from './Header';
@@ -31,8 +32,9 @@ export default function HomeScreen({ navigation }: Props) {
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const { state } = useAuth();
 
-  // Delivery address shown in the header + edited via the location sheet.
-  const [addresses, setAddresses] = useState<AddressResponse[]>([]);
+  // Active delivery address comes from the global context — switching it anywhere
+  // (sheet, My Addresses) updates this header instantly.
+  const { current: activeAddress, refresh: loadAddresses } = useAddresses();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [categories, setCategories] = useState<ApiCategory[]>([]);
   // Real product images per category for the tiles (image-2 / 2.md).
@@ -54,16 +56,6 @@ export default function HomeScreen({ navigation }: Props) {
 
   // piyush: app-open "location off" prompt.
   const [permModal, setPermModal] = useState(false);
-
-  const loadAddresses = useCallback(async () => {
-    try {
-      const data = await api.getAddresses();
-      data.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
-      setAddresses(data);
-    } catch {
-      /* tolerate — header falls back to "Set your delivery location" */
-    }
-  }, []);
 
   const loadEssentials = useCallback(async () => {
     try {
@@ -135,7 +127,6 @@ export default function HomeScreen({ navigation }: Props) {
     setRefreshing(false);
   }, [loadEssentials, loadAddresses, loadBestsellers, loadCategoryImages]);
 
-  const activeAddress = addresses.find((a) => a.isDefault) ?? addresses[0] ?? null;
   const addressLine = activeAddress
     ? `${activeAddress.street}, ${activeAddress.locality}`
     : null;
@@ -203,10 +194,8 @@ export default function HomeScreen({ navigation }: Props) {
       <LocationSheet
         visible={sheetOpen}
         onClose={() => setSheetOpen(false)}
-        addresses={addresses}
         userName={state.name}
         userPhone={state.phone}
-        onChanged={loadAddresses}
       />
 
       {/* App-open "location off" prompt (#7) */}

@@ -17,6 +17,7 @@ import { Text, DotsLoader } from '../components/ui';
 import LanguagePickerScreen from '../screens/LanguagePickerScreen';
 import CustomTabBar from './CustomTabBar';
 import { CartProvider } from '../context/CartContext';
+import { AddressProvider } from '../context/AddressContext';
 import CartDockPill from '../components/CartDockPill';
 
 // Auth Screens
@@ -184,7 +185,8 @@ export default function AppNavigator() {
 
   return (
     <NavigationContainer ref={navigationRef} theme={navTheme} linking={linking} onReady={syncRoute} onStateChange={syncRoute}>
-      <CartProvider>
+      <AddressProvider>
+       <CartProvider>
         <Stack.Navigator
           screenOptions={{
             headerShown: false,
@@ -287,7 +289,8 @@ export default function AppNavigator() {
 
         {/* Global cart capsule — floats over every screen (visibility/offset by route). */}
         {state.isAuthenticated && !!state.name && <CartDockPill activeRoute={activeRoute} />}
-      </CartProvider>
+       </CartProvider>
+      </AddressProvider>
     </NavigationContainer>
   );
 }

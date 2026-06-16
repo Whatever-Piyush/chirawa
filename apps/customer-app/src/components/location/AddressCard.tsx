@@ -43,6 +43,9 @@ export default function AddressCard({
 
   const meta = labelMeta(address.label, t);
   const title = address.receiverName?.trim() || meta.name;
+  // Prefer the caller's optimistic `selected` so a switch reflects instantly,
+  // before the server-side default flag round-trips.
+  const isCurrent = selected ?? address.isDefault;
   const phone = address.receiverPhone?.trim() || userPhone;
   const fullAddress =
     `${address.street}, ${address.locality}` +
@@ -62,12 +65,12 @@ export default function AddressCard({
           style={styles.pinBtn}
           onPress={onSetDefault}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          accessibilityLabel={address.isDefault ? 'Default address' : 'Set as default'}
+          accessibilityLabel={isCurrent ? 'Current address' : 'Set as delivery address'}
         >
           <Ionicons
-            name={address.isDefault ? 'bookmark' : 'bookmark-outline'}
+            name={isCurrent ? 'bookmark' : 'bookmark-outline'}
             size={18}
-            color={address.isDefault ? Colors.primary : Colors.textTertiary}
+            color={isCurrent ? Colors.primary : Colors.textTertiary}
           />
         </TouchableOpacity>
       )}
@@ -84,7 +87,7 @@ export default function AddressCard({
             <Text weight="bold" color={Colors.textPrimary} style={styles.title} numberOfLines={1}>
               {title}
             </Text>
-            {address.isDefault && (
+            {isCurrent && (
               <View style={styles.defaultPill}>
                 <Text weight="semibold" color={Colors.primary} style={styles.defaultPillText}>
                   {t('address.defaultBadge')}

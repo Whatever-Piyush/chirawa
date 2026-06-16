@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Modal, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { AddressResponse } from '@chirawa/types';
@@ -42,34 +42,42 @@ export default function AddressActionsSheet({
     { icon: 'trash-outline',    label: t('address.delete'),     onPress: run(onDelete), danger: true },
   ];
 
+  // NOT a React Native <Modal>: this is often rendered *inside* another modal
+  // (the LocationSheet), and Android refuses to render nested modals. An
+  // absolute-fill overlay works in every context.
+  if (!visible || !address) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <TouchableOpacity style={styles.backdropTap} activeOpacity={1} onPress={onClose} />
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.md }]}>
-          <View style={styles.handle} />
-          {rows.filter((r) => !r.hide).map((r) => (
-            <TouchableOpacity key={r.label} style={styles.row} onPress={r.onPress} activeOpacity={0.7}>
-              <Ionicons name={r.icon} size={22} color={r.danger ? Colors.error : Colors.textPrimary} />
-              <Text
-                weight="semibold"
-                color={r.danger ? Colors.error : Colors.textPrimary}
-                style={styles.rowLabel}
-              >
-                {r.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+    <View style={styles.overlay}>
+      <TouchableOpacity style={styles.backdropTap} activeOpacity={1} onPress={onClose} />
+      <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.md }]}>
+        <View style={styles.handle} />
+        {rows.filter((r) => !r.hide).map((r) => (
+          <TouchableOpacity key={r.label} style={styles.row} onPress={r.onPress} activeOpacity={0.7}>
+            <Ionicons name={r.icon} size={22} color={r.danger ? Colors.error : Colors.textPrimary} />
+            <Text
+              weight="semibold"
+              color={r.danger ? Colors.error : Colors.textPrimary}
+              style={styles.rowLabel}
+            >
+              {r.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
-    </Modal>
+    </View>
   );
 }
 
 const makeStyles = (Colors: ColorPalette) =>
   StyleSheet.create({
-    backdrop:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-    backdropTap: { flex: 1 },
+    overlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      justifyContent: 'flex-end',
+      zIndex: 1000, elevation: 1000,
+    },
+    backdropTap: { ...StyleSheet.absoluteFillObject },
     sheet: {
       backgroundColor: Colors.surface,
       borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl,

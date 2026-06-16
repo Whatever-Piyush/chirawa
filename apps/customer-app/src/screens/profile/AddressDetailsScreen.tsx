@@ -18,6 +18,7 @@ import { FontSize, FontWeight, Radius, Shadow, Spacing } from '../../theme';
 import { useT } from '@chirawa/i18n';
 import { api } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
+import { useAddresses } from '../../context/AddressContext';
 import { resolveCurrentAddress } from '../../utils/location';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddressDetails'>;
@@ -42,6 +43,7 @@ export default function AddressDetailsScreen({ route, navigation }: Props) {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const { state } = useAuth();
+  const { select: selectAddress } = useAddresses();
 
   // Resolved location (City / Area + coords) — starts from the map pin's params,
   // but the "enable to auto-fill" banner can replace it with the live location.
@@ -199,6 +201,8 @@ export default function AddressDetailsScreen({ route, navigation }: Props) {
             : {}),
         });
       } else {
+        // Make the new/edited address the active one everywhere, then go back.
+        await selectAddress(addr.id);
         navigation.navigate('AddressList');
       }
     } catch (err: unknown) {

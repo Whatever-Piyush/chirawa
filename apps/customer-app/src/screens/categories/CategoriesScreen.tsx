@@ -8,6 +8,7 @@ import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { fetchCategories, fetchCategoryImages, type ApiCategory } from '../../services/catalog';
 import { api } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
+import { useAddresses } from '../../context/AddressContext';
 import Header from '../home/Header';
 import SearchBar from '../home/SearchBar';
 import ClosedBanner from '../home/ClosedBanner';
@@ -34,7 +35,7 @@ export default function CategoriesScreen() {
   const [categories, setCategories]       = useState<ApiCategory[]>([]);
   const [categoryImages, setCategoryImages] = useState<Record<string, string[]>>({});
   const [loading, setLoading]             = useState(true);
-  const [addresses, setAddresses]         = useState<AddressResponse[]>([]);
+  const { current: activeAddress } = useAddresses();
   const [sheetOpen, setSheetOpen]         = useState(false);
 
   // Header + search fade in together.
@@ -51,23 +52,6 @@ export default function CategoriesScreen() {
     return () => { active = false; };
   }, [headerOpacity]);
 
-  const loadAddresses = useCallback(async () => {
-    try {
-      const data = await api.getAddresses();
-      data.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
-      setAddresses(data);
-    } catch {
-      /* tolerate */
-    }
-  }, []);
-
-  useEffect(() => { void loadAddresses(); }, [loadAddresses]);
-  useEffect(
-    () => navigation.addListener('focus', () => { void loadAddresses(); }),
-    [navigation, loadAddresses],
-  );
-
-  const activeAddress = addresses.find((a) => a.isDefault) ?? addresses[0] ?? null;
   const addressLine = activeAddress
     ? `${activeAddress.street}, ${activeAddress.locality}`
     : null;
@@ -117,10 +101,8 @@ export default function CategoriesScreen() {
       <LocationSheet
         visible={sheetOpen}
         onClose={() => setSheetOpen(false)}
-        addresses={addresses}
         userName={state.name}
         userPhone={state.phone}
-        onChanged={loadAddresses}
       />
     </View>
   );
