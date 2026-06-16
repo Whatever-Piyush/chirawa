@@ -106,6 +106,7 @@ export function createUsersService(prisma: PrismaClient) {
         id: true, label: true, street: true, landmark: true,
         locality: true, city: true, pincode: true,
         lat: true, lng: true, isDefault: true, createdAt: true,
+        contactType: true, receiverName: true, receiverPhone: true, mapsLink: true,
       },
     });
   }
@@ -126,7 +127,7 @@ export function createUsersService(prisma: PrismaClient) {
     return prisma.address.create({
       data: {
         userId,
-        label:     data.label,
+        label:     data.label ?? null,
         street:    data.street,
         landmark:  data.landmark,
         locality:  data.locality,
@@ -134,6 +135,10 @@ export function createUsersService(prisma: PrismaClient) {
         pincode:   data.pincode,
         lat:       data.lat,
         lng:       data.lng,
+        contactType:   data.contactType,
+        receiverName:  data.receiverName  ?? null,
+        receiverPhone: data.receiverPhone ?? null,
+        mapsLink:      data.mapsLink      ?? null,
         isDefault: data.isDefault || count === 0,
       },
     });

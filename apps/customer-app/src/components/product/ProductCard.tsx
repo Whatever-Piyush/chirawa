@@ -49,8 +49,8 @@ const DIMS: Record<ProductCardSize, {
 };
 
 function ProductCard({
-  product, size = 'regular', showEta = false,
-}: { product: ProductCardData; size?: ProductCardSize; showEta?: boolean }) {
+  product, size = 'regular', showEta = false, cardWidth,
+}: { product: ProductCardData; size?: ProductCardSize; showEta?: boolean; cardWidth?: number }) {
   const { quantities, addItem, setQuantity } = useCart();
   const fly = useFlyToCart();
   const imageRef = useRef<View>(null);
@@ -58,7 +58,10 @@ function ProductCard({
   const inCart = qty > 0;
   const { colors: Colors } = useTheme();
   const dims = DIMS[size];
-  const styles = useMemo(() => makeStyles(Colors, dims), [Colors, dims]);
+  // Optional explicit width (e.g. the two-pane category grid renders cards in a
+  // pane narrower than the full screen). Defaults to the per-size width.
+  const resolvedWidth = cardWidth ?? dims.width;
+  const styles = useMemo(() => makeStyles(Colors, dims, resolvedWidth), [Colors, dims, resolvedWidth]);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [activeImg, setActiveImg] = useState(0);
 
@@ -68,7 +71,7 @@ function ProductCard({
     return product.imageUrl ? [product.imageUrl] : [];
   }, [product.images, product.imageUrl]);
 
-  const pageWidth = dims.width - dims.pad * 2;
+  const pageWidth = resolvedWidth - dims.pad * 2;
 
   const vegColor = product.isNonVeg ? '#B71C1C' : '#1A7A2A';
   const rupees   = Math.round(product.pricePaise / 100);
@@ -282,10 +285,10 @@ function ProductCard({
 // Memoised so a cart tick re-renders only the touched card in the dense grid.
 export default React.memo(ProductCard);
 
-const makeStyles = (Colors: ColorPalette, dims: typeof DIMS[ProductCardSize]) =>
+const makeStyles = (Colors: ColorPalette, dims: typeof DIMS[ProductCardSize], cardWidth: number) =>
   StyleSheet.create({
   card: {
-    width:           dims.width,
+    width:           cardWidth,
     backgroundColor: Colors.surface,
     borderRadius:    14,
     borderWidth:     1,

@@ -36,7 +36,7 @@ import ChirawaSpecialScreen from '../screens/categories/ChirawaSpecialScreen';
 import ProfileScreen from '../screens/profile/ProfileScreen';
 import AddressListScreen from '../screens/profile/AddressListScreen';
 import AddressMapScreen from '../screens/profile/AddressMapScreen';
-import AddAddressScreen from '../screens/profile/AddAddressScreen';
+import AddressDetailsScreen from '../screens/profile/AddressDetailsScreen';
 import AccountPrivacyScreen from '../screens/profile/AccountPrivacyScreen';
 import ProductDetailScreen from '../screens/product/ProductDetailScreen';
 import SearchScreen from '../screens/search/SearchScreen';
@@ -56,17 +56,28 @@ export type RootStackParamList = {
   AccountPrivacy: undefined;
   ShopDetail: { shopId: string; shopName: string };
   ProductDetail: { productId: string };
-  CategoryProducts: { category: string };
+  CategoryProducts: { category: string; subCategory?: string };
   // Optional params let the add-address flow return its new address (and an
   // optional "someone else" receiver) so Checkout auto-selects + applies them.
   Checkout: { newAddressId?: string; receiverName?: string; receiverPhone?: string } | undefined;
   OrderTracking: { orderId: string };
   OrderPlaced: { orderId: string };
   AddressList: undefined;
-  AddressMap: undefined;
-  // returnTo='Checkout' makes Save bounce back to Checkout with the new address
-  // (and optional receiver) so it auto-selects; otherwise it just goes back.
-  AddAddress: { returnTo?: 'Checkout' } | undefined;
+  AddressMap: { autoLocate?: boolean; returnTo?: 'Checkout' } | undefined;
+  AddressDetails: {
+    lat: number;
+    lng: number;
+    title: string;
+    subtitle: string;
+    locality: string;
+    city: string;
+    pincode: string;
+    // returnTo='Checkout' bounces Save back to Checkout with the new address
+    // (+ optional "someone else" receiver) so it auto-selects there.
+    returnTo?: 'Checkout';
+    receiverName?: string;
+    receiverPhone?: string;
+  };
   // Address-sharing deep links (bringly://share-address, bringly://receive-address)
   ShareAddress: { from?: string; phone?: string } | undefined;
   ReceiveAddress: { payload?: string } | undefined;
@@ -239,13 +250,13 @@ export default function AppNavigator() {
                   component={AddressMapScreen}
                   options={{
                     headerShown: true,
-                    headerTitle: 'Pin your address',
+                    headerTitle: 'Confirm location',
                     headerTintColor: Colors.primary,
                   }}
                 />
                 <Stack.Screen
-                  name="AddAddress"
-                  component={AddAddressScreen}
+                  name="AddressDetails"
+                  component={AddressDetailsScreen}
                   options={{
                     headerShown: true,
                     headerTitle: 'Add address details',

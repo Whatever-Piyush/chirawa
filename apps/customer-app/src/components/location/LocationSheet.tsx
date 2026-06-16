@@ -60,8 +60,10 @@ export default function LocationSheet({
     );
   }, [addresses, query]);
 
-  const goToMap = () => { onClose(); navigation.navigate('AddressMap'); };
-  const goToAdd = () => { onClose(); navigation.navigate('AddAddress', compact ? { returnTo: 'Checkout' } : undefined); };
+  // "Use current location" drops the user on our map already homing in on GPS.
+  const goToMap = () => { onClose(); navigation.navigate('AddressMap', { autoLocate: true }); };
+  // "Add new address" opens our map flow; carry the Checkout-return when compact.
+  const goToAdd = () => { onClose(); navigation.navigate('AddressMap', compact ? { returnTo: 'Checkout' } : undefined); };
 
   const requestFromOther = () => {
     // Deep link that opens the recipient's Bringly app to the "share your address"
@@ -280,7 +282,8 @@ const makeStyles = (Colors: ColorPalette) =>
     searchBox: {
       flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
       backgroundColor: Colors.surface,
-      borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border,
+      // Rectangular (small radius) — intentionally NOT a pill/oval.
+      borderRadius: Radius.sm, borderWidth: 1, borderColor: Colors.border,
       paddingHorizontal: Spacing.md, height: 50,
       ...Shadow.xs,
     },

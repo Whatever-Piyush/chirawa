@@ -202,6 +202,9 @@ export default function SearchScreen({ navigation }: Props) {
   const [shops,    setShops]    = useState<SearchShopResult[]>([]);
   const [searched, setSearched] = useState('');
   const [total,    setTotal]    = useState(0);
+  // True right after a suggestion is tapped / search submitted — keeps the
+  // dropdown closed until the next keystroke.
+  const [justPicked, setJustPicked] = useState(false);
   const [recent,   setRecent]   = useState<string[]>([]);
   // productId → quantity map, mirrors the live cart
   const [cartMap,  setCartMap]  = useState<Record<string, number>>({});
