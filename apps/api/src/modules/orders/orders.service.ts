@@ -350,7 +350,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     };
   }
 
-  async function getOrder(orderId: string, userId: string, role: string) {
+  async function getOrder(orderId: string, userId: string, role: string, riderProfileId: string) {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: {
@@ -367,20 +367,22 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     const allowed =
       role === 'admin' ||
       (role === 'customer' && order.customerId === userId) ||
-      (role === 'rider'    && order.riderId === userId) ||
+      (role === 'rider'    && order.riderId === riderProfileId) ||
       (role === 'seller'   && sellerProfile?.shop?.id === order.shopId);
 
     if (!allowed) throw new ForbiddenError('Not your order');
     return order;
   }
 
-  async function getMyOrders(userId: string, role: string) {
+  async function getMyOrders(userId: string, role: string, riderProfileId: string) {
     let where: Record<string, unknown> = {};
 
     if (role === 'customer') {
       where = { customerId: userId };
     } else if (role === 'rider') {
-      where = { riderId: userId };
+      // Orders store the rider's RiderProfile.id (not User.id), so filter by the
+      // caller's profile id — BUG-1 fix (was `riderId: userId`, matched nothing).
+      where = { riderId: riderProfileId };
     } else if (role === 'seller') {
       const sellerProfile = await prisma.sellerProfile.findUnique({
         where: { userId }, include: { shop: { select: { id: true } } },
@@ -596,10 +598,14 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     return { message: 'Order cancel ho gaya' };
   }
 
-  async function codCollected(orderId: string, riderId: string, amountPaise: number) {
+  // riderProfileId = the caller's RiderProfile.id (what Order.riderId stores);
+  // riderUserId = the caller's User.id (for the status-history actor). BUG-1 fix:
+  // previously both were the User.id, so the ownership guard always 403'd and the
+  // COD ledger update (keyed by RiderProfile) silently no-op'd.
+  async function codCollected(orderId: string, riderProfileId: string, amountPaise: number, riderUserId: string) {
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundError('Order');
-    if (order.riderId !== riderId) throw new ForbiddenError('Not your delivery');
+    if (order.riderId !== riderProfileId) throw new ForbiddenError('Not your delivery');
     if (order.paymentMethod !== 'cod') throw new BusinessRuleError('Yeh COD order nahi hai');
 
     await prisma.$transaction([
@@ -608,17 +614,17 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
         data:  { status: 'delivered', deliveredAt: new Date(), codCollectedPaise: amountPaise },
       }),
       prisma.orderStatusHistory.create({
-        data: { orderId, status: 'delivered', changedByRole: 'rider', changedById: riderId },
+        data: { orderId, status: 'delivered', changedByRole: 'rider', changedById: riderUserId },
       }),
       prisma.riderProfile.update({
-        where: { userId: riderId },
+        where: { id: riderProfileId },
         data:  { codBalancePaise: { increment: amountPaise } },
       }),
     ]);
 
     emitOrderStatusChanged({
       orderId, status: 'delivered',
-      shopId: order.shopId, sellerId: '', riderId, customerId: order.customerId,
+      shopId: order.shopId, sellerId: '', riderId: riderProfileId, customerId: order.customerId,
     });
     return { message: 'Cash collection confirm ho gaya' };
   }
@@ -628,10 +634,12 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   // to record, so it never touches codCollectedPaise / the rider's COD balance.
   // COD orders MUST go through codCollected (which records the cash), so they are
   // rejected here; this is the symmetric counterpart of codCollected's non-COD guard.
-  async function markDelivered(orderId: string, riderId: string) {
+  // riderProfileId = caller's RiderProfile.id (matches Order.riderId); riderUserId =
+  // caller's User.id (status-history actor). BUG-1 fix — see codCollected.
+  async function markDelivered(orderId: string, riderProfileId: string, riderUserId: string) {
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundError('Order');
-    if (order.riderId !== riderId) throw new ForbiddenError('Not your delivery');
+    if (order.riderId !== riderProfileId) throw new ForbiddenError('Not your delivery');
     if (order.paymentMethod === 'cod') throw new BusinessRuleError('COD order: cash collection confirm karein');
 
     await prisma.$transaction([
@@ -640,13 +648,13 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
         data:  { status: 'delivered', deliveredAt: new Date() },
       }),
       prisma.orderStatusHistory.create({
-        data: { orderId, status: 'delivered', changedByRole: 'rider', changedById: riderId },
+        data: { orderId, status: 'delivered', changedByRole: 'rider', changedById: riderUserId },
       }),
     ]);
 
     emitOrderStatusChanged({
       orderId, status: 'delivered',
-      shopId: order.shopId, sellerId: '', riderId, customerId: order.customerId,
+      shopId: order.shopId, sellerId: '', riderId: riderProfileId, customerId: order.customerId,
     });
     return { message: 'Order delivered confirm ho gaya' };
   }

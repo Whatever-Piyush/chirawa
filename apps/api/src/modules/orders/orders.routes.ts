@@ -49,7 +49,7 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
 
   // GET /api/v1/orders
   app.get('/', async (request, reply) => {
-    const orders = await ordersService.getMyOrders(request.auth!.userId, request.auth!.role);
+    const orders = await ordersService.getMyOrders(request.auth!.userId, request.auth!.role, request.auth!.profileId);
     return reply.send(orders);
   });
 
@@ -65,7 +65,7 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
 
   // GET /api/v1/orders/:id
   app.get('/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-    const order = await ordersService.getOrder(request.params.id, request.auth!.userId, request.auth!.role);
+    const order = await ordersService.getOrder(request.params.id, request.auth!.userId, request.auth!.role, request.auth!.profileId);
     return reply.send(order);
   });
 
@@ -119,7 +119,7 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
     { preHandler: [requireRole('rider')] },
     async (request: FastifyRequest<{ Params: { id: string }; Body: { amountPaise: number } }>, reply) => {
       const { amountPaise } = request.body as { amountPaise: number };
-      const result = await ordersService.codCollected(request.params.id, request.auth!.userId, amountPaise);
+      const result = await ordersService.codCollected(request.params.id, request.auth!.profileId, amountPaise, request.auth!.userId);
       return reply.send(result);
     },
   );
@@ -129,7 +129,7 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
   app.post('/:id/delivered',
     { preHandler: [requireRole('rider')] },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const result = await ordersService.markDelivered(request.params.id, request.auth!.userId);
+      const result = await ordersService.markDelivered(request.params.id, request.auth!.profileId, request.auth!.userId);
       return reply.send(result);
     },
   );
