@@ -371,7 +371,36 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       (role === 'seller'   && sellerProfile?.shop?.id === order.shopId);
 
     if (!allowed) throw new ForbiddenError('Not your order');
-    return order;
+
+    // BUG-2 + privacy hardening: surface the assigned rider's name + phone
+    // (OrderDetailResponse.rider) ONLY during active delivery — picked_up /
+    // out_for_delivery — and ONLY to the customer / rider / admin. Never to the
+    // seller, never pre-pickup, never on a terminal order (delivered / cancelled).
+    // This bounds the rider's personal-PII exposure to the operational window.
+    // Order.riderId is the RiderProfile.id; the phone lives on the linked User
+    // (Option A — no schema change). The lookup is best-effort: a failure must NOT
+    // break order retrieval.
+    const riderInActiveDelivery =
+      order.status === 'picked_up' || order.status === 'out_for_delivery';
+    const viewerMaySeeRider =
+      role === 'customer' || role === 'rider' || role === 'admin';
+
+    let rider: { name: string; phone: string } | undefined;
+    if (order.riderId && riderInActiveDelivery && viewerMaySeeRider) {
+      try {
+        const profile = await prisma.riderProfile.findUnique({
+          where:  { id: order.riderId },
+          select: { fullName: true, user: { select: { phone: true } } },
+        });
+        if (profile?.user?.phone) {
+          rider = { name: profile.fullName, phone: profile.user.phone };
+        }
+      } catch {
+        /* best-effort: a rider-lookup failure must not fail order retrieval */
+      }
+    }
+
+    return { ...order, rider };
   }
 
   async function getMyOrders(userId: string, role: string, riderProfileId: string) {
