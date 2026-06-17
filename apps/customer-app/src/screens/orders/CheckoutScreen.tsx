@@ -28,6 +28,7 @@ import { isOpenNow } from '../../utils/operatingHours';
 import { api } from '../../services/api.service';
 import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
+import { useCart } from '../../context/CartContext';
 import { type RazorpaySuccess } from '../../components/payment/RazorpayCheckout';
 import ProductCard, { type ProductCardData } from '../../components/product/ProductCard';
 import BrandedLoader from '../../components/BrandedLoader';
@@ -128,6 +129,9 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const { state: authState } = useAuth();
+  // Shared cart subtotal — the "You might also like" rail adds through this same
+  // context, so it's our signal that an item was added outside the items list.
+  const { subtotalPaise: cartCtxSubtotal } = useCart();
 
   const [cart, setCart]               = useState<CartResponse | null>(null);
   const [cartLoading, setCartLoading] = useState(true);
@@ -239,6 +243,25 @@ export default function CheckoutScreen({ navigation, route }: Props) {
       try { setPricing(await fetchPricing(data.cartId, addrId)); } catch { /* tolerate */ }
     }
   }, [navigation, t, fetchPricing]);
+
+  // Keep the bill in sync with "You might also like" adds. That rail writes to the
+  // shared CartContext (server cart), but not to this screen's locally-loaded
+  // `cart`/`pricing` — so without this the subtotal, bill details and the Place
+  // Order total stay stale while the server would still bill the added item.
+  // Re-pull whenever the context subtotal moves (the same refresh the in-list
+  // steppers do). The in-list steppers hit the API directly and don't touch the
+  // context, and reloadCart bypasses the context too, so neither can loop this.
+  const lastCtxSubtotalRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!cart) return;                                  // wait until the cart loads
+    if (lastCtxSubtotalRef.current === null) {
+      lastCtxSubtotalRef.current = cartCtxSubtotal;     // adopt baseline, don't reload
+      return;
+    }
+    if (cartCtxSubtotal === lastCtxSubtotalRef.current) return;
+    lastCtxSubtotalRef.current = cartCtxSubtotal;
+    void reloadCart(addressId);
+  }, [cartCtxSubtotal, cart, addressId, reloadCart]);
 
   const changeQty = useCallback(async (productId: string, qty: number) => {
     setUpdatingId(productId);

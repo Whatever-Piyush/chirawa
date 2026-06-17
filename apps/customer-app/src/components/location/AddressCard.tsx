@@ -75,10 +75,17 @@ export default function AddressCard({
         </TouchableOpacity>
       )}
 
+      {/* Selected tick — shown in the picker (where there's no pin button) */}
+      {selected && !onSetDefault && (
+        <View style={styles.checkBadge}>
+          <Ionicons name="checkmark" size={15} color={Colors.white} />
+        </View>
+      )}
+
       <View style={styles.row}>
         {/* Category avatar */}
         <View style={[styles.avatar, selected && styles.avatarSelected]}>
-          <Ionicons name={meta.icon} size={24} color={Colors.primary} />
+          <Ionicons name={meta.icon} size={24} color={selected ? Colors.white : Colors.primary} />
         </View>
 
         {/* Body */}
@@ -135,9 +142,14 @@ const makeStyles = (Colors: ColorPalette) =>
       padding: Spacing.lg,
       ...Shadow.xs,
     },
-    cardSelected: { borderColor: Colors.primary, borderWidth: 1.5 },
+    cardSelected: { borderColor: Colors.primary, borderWidth: 1.5, ...Shadow.sm },
 
     pinBtn: { position: 'absolute', top: Spacing.md, right: Spacing.md, zIndex: 2, padding: 2 },
+    checkBadge: {
+      position: 'absolute', top: Spacing.md, right: Spacing.md, zIndex: 2,
+      width: 24, height: 24, borderRadius: 12, backgroundColor: Colors.primary,
+      alignItems: 'center', justifyContent: 'center',
+    },
 
     row: { flexDirection: 'row', gap: Spacing.md },
     avatar: {
@@ -145,7 +157,7 @@ const makeStyles = (Colors: ColorPalette) =>
       backgroundColor: Colors.primaryLight,
       alignItems: 'center', justifyContent: 'center',
     },
-    avatarSelected: { backgroundColor: Colors.primaryLight },
+    avatarSelected: { backgroundColor: Colors.primary },
 
     body: { flex: 1, paddingRight: 24 },
     titleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },

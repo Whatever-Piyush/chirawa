@@ -196,7 +196,7 @@ export default function LocationSheet({
                         selected={item.id === current?.id}
                         onSelect={() => void selectAddress(item)}
                         onSetDefault={compact ? undefined : () => void setDefault(item)}
-                        onShare={() => void shareAddress(item)}
+                        onShare={compact ? undefined : () => void shareAddress(item)}
                         onMore={compact ? undefined : () => setMenuFor(item)}
                       />
                     ))}
