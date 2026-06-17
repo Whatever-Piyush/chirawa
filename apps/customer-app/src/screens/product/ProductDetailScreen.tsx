@@ -24,6 +24,7 @@ import {
   type ApiProductDetail,
 } from '../../services/catalog';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
+import { FEATURES } from '../../config/features';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProductDetail'>;
 
@@ -243,19 +244,22 @@ export default function ProductDetailScreen({ navigation, route }: Props) {
             )}
           </View>
 
-          {/* Sold by → shop */}
-          <TouchableOpacity
-            style={styles.shopRow}
-            activeOpacity={0.7}
-            onPress={() => navigation.navigate('ShopDetail', { shopId: detail.shopId, shopName: detail.shopName })}
-          >
-            <Ionicons name="storefront-outline" size={20} color={Colors.primary} />
-            <View style={{ flex: 1 }}>
-              <Text weight="bold" color={Colors.textPrimary} style={styles.shopName}>{detail.shopName}</Text>
-              <Text weight="regular" color={Colors.textSecondary} style={styles.shopSub}>{t('product.exploreShop')}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={Colors.textTertiary} />
-          </TouchableOpacity>
+          {/* Sold by → shop. Hidden for v1: we present one unified Chirawa
+              storefront, so we don't route users into a per-shop "store page". */}
+          {FEATURES.shopBrowsing && (
+            <TouchableOpacity
+              style={styles.shopRow}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('ShopDetail', { shopId: detail.shopId, shopName: detail.shopName })}
+            >
+              <Ionicons name="storefront-outline" size={20} color={Colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text weight="bold" color={Colors.textPrimary} style={styles.shopName}>{detail.shopName}</Text>
+                <Text weight="regular" color={Colors.textSecondary} style={styles.shopSub}>{t('product.exploreShop')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={Colors.textTertiary} />
+            </TouchableOpacity>
+          )}
 
           {/* Replacement info */}
           <View style={styles.infoRow}>
