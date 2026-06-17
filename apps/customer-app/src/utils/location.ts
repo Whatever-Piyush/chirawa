@@ -15,7 +15,7 @@ export interface ResolvedAddress {
   street:  string | null;
   city:    string | null;
   pincode: string | null;
-  source:  'google' | 'device' | 'none';
+  source:  'google' | 'mappls' | 'device' | 'none';
 }
 
 export type LocationOutcome =
@@ -41,10 +41,12 @@ export async function resolveCurrentAddress(): Promise<LocationOutcome> {
     return { ok: false, reason: 'unavailable' };
   }
 
-  // 3 — backend Google proxy (best quality, Plus-Code-free).
+  // 3 — backend geo proxy (Mappls; best quality, Plus-Code-free). Accept any
+  // provider source the backend reports (currently 'mappls') as long as it
+  // resolved something usable.
   try {
     const g = await api.reverseGeocode(coords.lat, coords.lng);
-    if (g && g.source === 'google' && (g.area || g.street || g.city)) {
+    if (g && g.source !== 'none' && (g.area || g.street || g.city)) {
       return {
         ok: true,
         address: {
@@ -53,7 +55,7 @@ export async function resolveCurrentAddress(): Promise<LocationOutcome> {
           street:  g.street,
           city:    g.city,
           pincode: g.pincode,
-          source:  'google',
+          source:  g.source,
         },
       };
     }

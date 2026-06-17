@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseGoogleResults, isPlusCode } from '../geo.service';
+import { isPlusCode, parseAutosuggest, parseRevGeocode } from '../geo.service';
 
 describe('isPlusCode', () => {
   it('flags Open Location Codes and ignores normal text', () => {
@@ -11,68 +11,73 @@ describe('isPlusCode', () => {
   });
 });
 
-describe('parseGoogleResults', () => {
-  it('drops Plus-Code-only results and extracts a real locality + pincode', () => {
-    // Mirrors the bug in ss/1.jpeg: the first result is a Plus Code, the second
-    // carries the real components.
-    const out = parseGoogleResults([
+describe('parseAutosuggest', () => {
+  it('maps Mappls suggestions, using eLoc as placeId and distance for the km chip', () => {
+    // Shapes mirror the live API: eLoc + placeName + placeAddress + distance(m),
+    // and crucially NO latitude/longitude.
+    const out = parseAutosuggest([
+      { eLoc: '6SD6D2', placeName: 'Chirawa Railway Station', placeAddress: 'Sarvodaya Colony, Chirawa, Rajasthan, 333026', distance: 1909 },
+    ]);
+    expect(out).toHaveLength(1);
+    const [p] = out;
+    expect(p!.placeId).toBe('6SD6D2');
+    expect(p!.primaryText).toBe('Chirawa Railway Station');
+    expect(p!.secondaryText).toBe('Sarvodaya Colony, Chirawa, Rajasthan, 333026');
+    expect(p!.distanceKm).toBe(1.9);
+  });
+
+  it('hard-filters results beyond the 15 km Chirawa radius (e.g. Chirala AP)', () => {
+    const out = parseAutosuggest([
+      { eLoc: 'NEAR01', placeName: 'Chirawa',  distance: 533 },
+      { eLoc: '2ULOGN', placeName: 'Chirala',  distance: 1462197 }, // ~1462 km
+    ]);
+    expect(out.map((p) => p.primaryText)).toEqual(['Chirawa']);
+  });
+
+  it('skips suggestions without an eLoc and keeps a null distance', () => {
+    const out = parseAutosuggest([
+      { placeName: 'No eLoc' },
+      { eLoc: 'NODIST', placeName: 'No distance' },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.placeId).toBe('NODIST');
+    expect(out[0]!.distanceKm).toBeNull();
+  });
+});
+
+describe('parseRevGeocode', () => {
+  it('maps the first Mappls result, building area from sub-locality (NOT the country `area` field)', () => {
+    const out = parseRevGeocode([
       {
-        formatted_address: '6JVX+3C Shyampura, Rajasthan, India',
-        types: ['plus_code'],
-        address_components: [
-          { long_name: '6JVX+3C', short_name: '6JVX+3C', types: ['plus_code'] },
-        ],
-      },
-      {
-        formatted_address: 'Shyampura, Chirawa, Rajasthan 333026, India',
-        types: ['sublocality', 'political'],
-        address_components: [
-          { long_name: 'Shyampura',  short_name: 'Shyampura',  types: ['sublocality_level_1', 'sublocality', 'political'] },
-          { long_name: 'Chirawa',    short_name: 'Chirawa',    types: ['locality', 'political'] },
-          { long_name: 'Jhunjhunu',  short_name: 'Jhunjhunu',  types: ['administrative_area_level_2', 'political'] },
-          { long_name: 'Rajasthan',  short_name: 'RJ',         types: ['administrative_area_level_1', 'political'] },
-          { long_name: '333026',     short_name: '333026',     types: ['postal_code'] },
-        ],
+        formatted_address: 'Main Market Road, Gandhi Chowk, Shyampura, Chirawa, Rajasthan. Pin-333026 (India)',
+        street: 'Main Market Road',
+        subLocality: 'Gandhi Chowk',
+        locality: 'Shyampura',
+        city: 'Chirawa',
+        state: 'Rajasthan',
+        pincode: '333026',
       },
     ]);
-
-    expect(out.area).toBe('Shyampura');
+    expect(out.area).toBe('Gandhi Chowk');
+    expect(out.street).toBe('Main Market Road');
     expect(out.city).toBe('Chirawa');
     expect(out.state).toBe('Rajasthan');
     expect(out.pincode).toBe('333026');
-    expect(out.source).toBe('google');
-    // formatted must not start with the Plus Code token.
-    expect(isPlusCode(out.formatted ?? '')).toBe(false);
+    expect(out.source).toBe('mappls');
   });
 
-  it('returns source "none" when only a Plus Code is available', () => {
-    const out = parseGoogleResults([
-      {
-        formatted_address: '6JVX+3C',
-        types: ['plus_code'],
-        address_components: [{ long_name: '6JVX+3C', short_name: '6JVX+3C', types: ['plus_code'] }],
-      },
-    ]);
-    // Only the Plus Code result exists → pool falls back to it, but the area is a
-    // Plus Code so it's nulled out; nothing usable remains.
+  it('falls back to locality for the area when sub-locality is absent', () => {
+    const out = parseRevGeocode([{ locality: 'Shyampura', city: 'Chirawa' }]);
+    expect(out.area).toBe('Shyampura');
+  });
+
+  it('returns source "none" for empty results', () => {
+    expect(parseRevGeocode([]).source).toBe('none');
+  });
+
+  it('never surfaces a Plus Code as the area', () => {
+    const out = parseRevGeocode([{ subLocality: '6JVX+3C', city: 'Chirawa' }]);
     expect(out.area).toBeNull();
-    expect(out.source).toBe('none');
-  });
-
-  it('uses route for street and prefers sublocality for area', () => {
-    const out = parseGoogleResults([
-      {
-        formatted_address: 'Nehru Marg, Purani Basti, Chirawa 333026',
-        types: ['route'],
-        address_components: [
-          { long_name: 'Nehru Marg',   short_name: 'Nehru Marg',   types: ['route'] },
-          { long_name: 'Purani Basti', short_name: 'Purani Basti', types: ['sublocality_level_1', 'sublocality'] },
-          { long_name: 'Chirawa',      short_name: 'Chirawa',      types: ['locality'] },
-          { long_name: '333026',       short_name: '333026',       types: ['postal_code'] },
-        ],
-      },
-    ]);
-    expect(out.street).toBe('Nehru Marg');
-    expect(out.area).toBe('Purani Basti');
+    expect(out.city).toBe('Chirawa');
   });
 });

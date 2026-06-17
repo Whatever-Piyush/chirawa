@@ -16,7 +16,7 @@ export interface ReverseGeocodeResult {
   state:     string | null;
   pincode:   string | null;
   formatted: string | null;   // full one-line address (Plus Codes stripped)
-  source:    'google' | 'device' | 'none';
+  source:    'google' | 'mappls' | 'device' | 'none';
 }
 
 // ─── Place search (Places Autocomplete (New), proxied server-side) ────────────
