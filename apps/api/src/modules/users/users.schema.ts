@@ -22,8 +22,11 @@ export const createAddressSchema = z.object({
   locality: z.string().trim().min(1).max(100),
   city:     z.string().trim().max(100).default('Chirawa'),
   pincode:  z.string().trim().regex(/^\d{6}$/, '6-digit pincode required'),
-  lat:      z.number().min(-90).max(90),
-  lng:      z.number().min(-180).max(180),
+  // Coerce: addresses round-tripped from the API arrive with lat/lng as strings
+  // (Prisma serializes Decimal columns to strings), so the edit flow re-sends
+  // them as strings. Coercion accepts number or numeric-string, then range-checks.
+  lat:      z.coerce.number().min(-90).max(90),
+  lng:      z.coerce.number().min(-180).max(180),
   // Receiver / contact details (Address redesign v2)
   contactType:   z.enum(['myself', 'other']).default('myself'),
   receiverName:  z.string().trim().max(100).optional(),

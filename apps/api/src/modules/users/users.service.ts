@@ -2,6 +2,21 @@ import type { PrismaClient, Prisma } from '@prisma/client';
 import type { UpdateProfileInput, CreateAddressInput, UpdateAddressInput } from './users.schema';
 import { NotFoundError, ForbiddenError } from '../../shared/errors/app-errors';
 
+// One select shared by list/create/update so every address response has the same
+// (AddressResponse) shape.
+const ADDRESS_SELECT = {
+  id: true, label: true, street: true, landmark: true,
+  locality: true, city: true, pincode: true,
+  lat: true, lng: true, isDefault: true, createdAt: true,
+  contactType: true, receiverName: true, receiverPhone: true, mapsLink: true,
+} satisfies Prisma.AddressSelect;
+
+// Prisma serializes Decimal lat/lng as strings, but the API contract
+// (AddressResponse) expects numbers — normalize once for every address we return.
+function toAddressResponse<T extends { lat: Prisma.Decimal; lng: Prisma.Decimal }>(a: T) {
+  return { ...a, lat: Number(a.lat), lng: Number(a.lng) };
+}
+
 export function createUsersService(prisma: PrismaClient) {
 
   // ── Get current user profile ───────────────────────────────────────────────
@@ -99,16 +114,12 @@ export function createUsersService(prisma: PrismaClient) {
 
   // ── List addresses ─────────────────────────────────────────────────────────
   async function getAddresses(userId: string) {
-    return prisma.address.findMany({
+    const rows = await prisma.address.findMany({
       where:   { userId, isDeleted: false },
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
-      select: {
-        id: true, label: true, street: true, landmark: true,
-        locality: true, city: true, pincode: true,
-        lat: true, lng: true, isDefault: true, createdAt: true,
-        contactType: true, receiverName: true, receiverPhone: true, mapsLink: true,
-      },
+      select:  ADDRESS_SELECT,
     });
+    return rows.map(toAddressResponse);
   }
 
   // ── Create address ─────────────────────────────────────────────────────────
@@ -124,7 +135,7 @@ export function createUsersService(prisma: PrismaClient) {
     // First address is always default
     const count = await prisma.address.count({ where: { userId, isDeleted: false } });
 
-    return prisma.address.create({
+    const created = await prisma.address.create({
       data: {
         userId,
         label:     data.label ?? null,
@@ -141,7 +152,9 @@ export function createUsersService(prisma: PrismaClient) {
         mapsLink:      data.mapsLink      ?? null,
         isDefault: data.isDefault || count === 0,
       },
+      select: ADDRESS_SELECT,
     });
+    return toAddressResponse(created);
   }
 
   // ── Update address ─────────────────────────────────────────────────────────
@@ -161,10 +174,12 @@ export function createUsersService(prisma: PrismaClient) {
       });
     }
 
-    return prisma.address.update({
+    const updated = await prisma.address.update({
       where: { id: addressId },
-      data,
+      data: data as Prisma.AddressUpdateInput,
+      select: ADDRESS_SELECT,
     });
+    return toAddressResponse(updated);
   }
 
   // ── Delete address (soft) ──────────────────────────────────────────────────
