@@ -38,7 +38,7 @@ export default function AddressActionsSheet({
   }> = [
     { icon: 'create-outline',   label: t('address.edit'),       onPress: run(onEdit) },
     { icon: 'share-outline',    label: t('address.share'),      onPress: run(onShare) },
-    { icon: 'bookmark-outline', label: t('address.setDefault'), onPress: run(onSetDefault), hide: address?.isDefault },
+    { icon: 'pin-outline', label: t('address.setDefault'), onPress: run(onSetDefault) },
     { icon: 'trash-outline',    label: t('address.delete'),     onPress: run(onDelete), danger: true },
   ];
 

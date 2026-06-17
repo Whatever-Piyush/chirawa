@@ -141,6 +141,7 @@ export default function AddressListScreen({ navigation }: Props) {
             userName={state.name}
             userPhone={state.phone}
             selected={item.id === current?.id}
+            onSelect={() => void handleSetDefault(item)}
             onSetDefault={() => void handleSetDefault(item)}
             onShare={() => void shareAddress(item)}
             onMore={() => setMenuFor(item)}

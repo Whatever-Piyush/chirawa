@@ -68,7 +68,7 @@ export default function AddressCard({
           accessibilityLabel={isCurrent ? 'Current address' : 'Set as delivery address'}
         >
           <Ionicons
-            name={isCurrent ? 'bookmark' : 'bookmark-outline'}
+            name={isCurrent ? 'pin' : 'pin-outline'}
             size={18}
             color={isCurrent ? Colors.primary : Colors.textTertiary}
           />
