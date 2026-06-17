@@ -1,7 +1,7 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, Modal, StyleSheet, TouchableOpacity, TextInput,
-  ScrollView, Linking, ActivityIndicator,
+  ScrollView, Linking, ActivityIndicator, Keyboard, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -46,6 +46,18 @@ export default function LocationSheet({
   const { addresses, current, select, refresh } = useAddresses();
   const search = usePlaceSearch();
   const [menuFor, setMenuFor] = useState<AddressResponse | null>(null);
+
+  // Lift the bottom-anchored sheet above the on-screen keyboard so the search
+  // field (and what you're typing) stays visible. RN Modals don't follow the
+  // Android soft-keyboard, so we track its height and pad the backdrop.
+  const [kbHeight, setKbHeight] = useState(0);
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = Keyboard.addListener(showEvt, (e) => setKbHeight(e.endCoordinates.height));
+    const onHide = Keyboard.addListener(hideEvt, () => setKbHeight(0));
+    return () => { onShow.remove(); onHide.remove(); };
+  }, []);
 
   const close = useCallback(() => { search.reset(); onClose(); }, [search, onClose]);
 
@@ -105,10 +117,10 @@ export default function LocationSheet({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
-      <View style={styles.backdrop}>
+      <View style={[styles.backdrop, kbHeight > 0 ? { paddingBottom: kbHeight } : null]}>
         <TouchableOpacity style={styles.backdropTap} activeOpacity={1} onPress={close} />
 
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
+        <View style={[styles.sheet, { paddingBottom: kbHeight > 0 ? Spacing.lg : insets.bottom + Spacing.lg }]}>
           <View style={styles.titleRow}>
             <Text style={styles.title}>{t('locationSheet.selectTitle')}</Text>
             <TouchableOpacity onPress={close} style={styles.closeBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityLabel="Close">

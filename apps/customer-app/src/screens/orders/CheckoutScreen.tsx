@@ -475,7 +475,7 @@ export default function CheckoutScreen({ navigation, route }: Props) {
         <Text style={styles.cancelBody}>{t('checkout.cancellationBody')}</Text>
       </View>
 
-      <View style={[styles.bottomSpacer, { height: 190 + insets.bottom }]} />
+      <View style={[styles.bottomSpacer, { height: 168 + insets.bottom }]} />
     </>
   );
 
@@ -508,7 +508,7 @@ export default function CheckoutScreen({ navigation, route }: Props) {
       />
 
       {/* ── Sticky bottom: Delivering-to + full-width Place Order ─────────── */}
-      <View style={[styles.stickyBottom, { paddingBottom: Spacing.md + insets.bottom }]}>
+      <View style={[styles.stickyBottom, { paddingBottom: Math.max(insets.bottom, Spacing.md) }]}>
         {/* Delivering-to summary — tap to open the address picker (ss/1.jpeg) */}
         <TouchableOpacity
           style={styles.deliverRow}
@@ -812,7 +812,7 @@ const makeStyles = (Colors: ColorPalette) =>
   stickyBottom: {
     position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: Colors.white,
     borderTopLeftRadius: Radius.xxl, borderTopRightRadius: Radius.xxl,
-    paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg, gap: Spacing.sm,
+    paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, gap: Spacing.sm,
     shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.14, shadowRadius: 18, elevation: 16,
   },
 
