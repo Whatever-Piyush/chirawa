@@ -19,9 +19,11 @@ const RIDER_RECORD = { fullName: 'Ramesh Kumar', user: { phone: '7700110001' } }
 const RIDER = { name: 'Ramesh Kumar', phone: '7700110001' };
 
 // Default: an actively-delivering order assigned to RIDER_PROFILE, owned by cust_1.
+// Carries ETA fields (ETA MVP Phase 1) so getOrder can build the `eta` block.
 const baseOrder = {
   id: 'order_1', riderId: RIDER_PROFILE, customerId: 'cust_1', shopId: 'shop_1',
   status: 'out_for_delivery', items: [], statusHistory: [], payments: [],
+  estimatedDeliveryAt: new Date(Date.now() + 600_000), etaSpreadSeconds: 120, etaSource: 'prep_road',
 };
 
 function makeService(opts: {
@@ -135,5 +137,29 @@ describe('getOrder — rider details visibility (BUG-2 + privacy hardening)', ()
     const order = await service.getOrder('order_1', 'cust_1', 'customer', '') as { id: string; rider?: unknown };
     expect(order.id).toBe('order_1');   // order retrieval succeeds despite the failed lookup
     expect(order.rider).toBeUndefined();
+  });
+});
+
+describe('getOrder — ETA block (ETA MVP Phase 1)', () => {
+  it('includes an eta { secondsRemaining, spreadSeconds, serverNow, source } when computed + non-terminal', async () => {
+    const { service } = makeService();
+    const order = await service.getOrder('order_1', 'cust_1', 'customer', '') as { eta?: { secondsRemaining: number; spreadSeconds: number; serverNow: string; source: string } };
+    expect(order.eta).toBeDefined();
+    expect(order.eta!.secondsRemaining).toBeGreaterThan(0);
+    expect(order.eta!.spreadSeconds).toBe(120);
+    expect(order.eta!.source).toBe('prep_road');
+    expect(typeof order.eta!.serverNow).toBe('string');
+  });
+
+  it('omits eta for a terminal (delivered) order', async () => {
+    const { service } = makeService({ order: { ...baseOrder, status: 'delivered' } });
+    const order = await service.getOrder('order_1', 'cust_1', 'customer', '') as { eta?: unknown };
+    expect(order.eta).toBeUndefined();
+  });
+
+  it('omits eta when none has been computed yet', async () => {
+    const { service } = makeService({ order: { ...baseOrder, estimatedDeliveryAt: null, etaSpreadSeconds: null, etaSource: null } });
+    const order = await service.getOrder('order_1', 'cust_1', 'customer', '') as { eta?: unknown };
+    expect(order.eta).toBeUndefined();
   });
 });

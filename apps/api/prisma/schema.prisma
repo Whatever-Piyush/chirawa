@@ -236,6 +236,9 @@ model Shop {
   openTime                 String   @default("09:00") @map("open_time") @db.VarChar(5)
   closeTime                String   @default("22:00") @map("close_time") @db.VarChar(5)
   estimatedDeliveryMinutes Int      @default(30) @map("estimated_delivery_minutes")
+  // Average packing/prep time used by the server ETA (ETA MVP Phase 1) — distinct from
+  // the marketing estimatedDeliveryMinutes shown on shop cards.
+  prepTimeMinutes          Int      @default(8) @map("prep_time_minutes")
   operatingHours           Json     @default("{}") @map("operating_hours")
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
@@ -550,10 +553,20 @@ model Order {
   // Timestamps
   confirmedAt      DateTime? @map("confirmed_at")
   sellerAcceptedAt DateTime? @map("seller_accepted_at")
+  preparingAt      DateTime? @map("preparing_at")
+  readyAt          DateTime? @map("ready_at")
   pickedUpAt       DateTime? @map("picked_up_at")
+  outForDeliveryAt DateTime? @map("out_for_delivery_at")
   deliveredAt      DateTime? @map("delivered_at")
   cancelledAt      DateTime? @map("cancelled_at")
   cancelReason     String?   @map("cancel_reason") @db.VarChar(255)
+
+  // Server-computed delivery ETA (ETA MVP Phase 1). estimatedDeliveryAt is the promise;
+  // etaSpreadSeconds is the ± half-width shown as a range; etaSource ∈ 'prep_road' | 'fallback'.
+  estimatedDeliveryAt DateTime? @map("estimated_delivery_at")
+  etaSpreadSeconds    Int?      @map("eta_spread_seconds")
+  etaComputedAt       DateTime? @map("eta_computed_at")
+  etaSource           String?   @map("eta_source") @db.VarChar(20)
 
   // Customer rating (post-delivery)
   rating        Int?      @map("rating")
@@ -576,6 +589,7 @@ model Order {
 
   @@index([customerId, createdAt(sort: Desc)])
   @@index([status, createdAt])
+  @@index([status, estimatedDeliveryAt])
   @@index([shopId, createdAt(sort: Desc)])
   @@index([riderId, status])
   @@index([groupId])

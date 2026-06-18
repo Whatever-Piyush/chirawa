@@ -10,6 +10,7 @@ interface Props {
   customer: LatLng;            // delivery pin (static)
   rider: LatLng | null;        // live rider position (moving), null if unknown
   stale: boolean;              // true when the rider location is older than the freshness window
+  etaSeconds?: number | null;  // server-computed ETA (ETA MVP Phase 1); preferred over the local estimate
   t: (k: string) => string;
 }
 
@@ -39,7 +40,7 @@ function regionFor(a: LatLng, b: LatLng | null): Region {
   };
 }
 
-export default function TrackingMap({ customer, rider, stale, t }: Props) {
+export default function TrackingMap({ customer, rider, stale, etaSeconds, t }: Props) {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const mapRef = useRef<MapView | null>(null);
@@ -52,7 +53,10 @@ export default function TrackingMap({ customer, rider, stale, t }: Props) {
   }, [rider?.lat, rider?.lng, customer.lat, customer.lng]);
 
   const showRider = rider !== null && !stale;
-  const etaMin = showRider && rider ? Math.max(1, Math.ceil((distanceKm(rider, customer) / 20) * 60)) : null;
+  // Prefer the server ETA (ETA MVP Phase 1); fall back to the local straight-line
+  // estimate only when no server value is available (and a live rider is shown).
+  const localMin = showRider && rider ? Math.max(1, Math.ceil((distanceKm(rider, customer) / 20) * 60)) : null;
+  const etaMin = etaSeconds != null ? Math.max(1, Math.ceil(etaSeconds / 60)) : localMin;
 
   return (
     <View style={styles.wrap}>
@@ -73,7 +77,7 @@ export default function TrackingMap({ customer, rider, stale, t }: Props) {
         )}
       </MapView>
 
-      {showRider && etaMin !== null ? (
+      {etaMin !== null ? (
         <View style={styles.etaBadge}>
           <Text style={styles.etaText}>🛵  {t('tracking.arrivingIn')} ~{etaMin} {t('tracking.minutes')}</Text>
         </View>

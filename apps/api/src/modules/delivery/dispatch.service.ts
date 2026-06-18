@@ -5,6 +5,7 @@ import {
   pointInPolygon, polygonCentroid, haversineMeters, type LatLng,
 } from '../../shared/utils/geo';
 import { emitOrderAssignedToRider, emitOrderStatusChanged } from '../../shared/events/event-bus';
+import { computeAndPersistEta } from '../orders/eta.service';
 
 export type AvailabilityStatus = 'online' | 'offline' | 'on_delivery';
 
@@ -128,6 +129,8 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
       paymentMethod:    order.paymentMethod,
     });
 
+    // Recompute the milestone ETA now that a rider is on the order (ETA MVP Phase 1).
+    await computeAndPersistEta(prisma, orderId);
     return { assigned: true as const, riderId: best.riderProfileId, zone: zone?.name ?? null };
   }
 
@@ -203,7 +206,11 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
     await prisma.$transaction([
       prisma.order.update({
         where: { id: orderId },
-        data:  { status: newStatus as never, ...(newStatus === 'picked_up' ? { pickedUpAt: new Date() } : {}) },
+        data:  {
+          status: newStatus as never,
+          ...(newStatus === 'picked_up'        ? { pickedUpAt:       new Date() } : {}),
+          ...(newStatus === 'out_for_delivery' ? { outForDeliveryAt: new Date() } : {}),
+        },
       }),
       prisma.orderStatusHistory.create({
         data: { orderId, status: newStatus as never, changedByRole: 'rider', changedById: userId },
@@ -214,6 +221,9 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
       orderId, status: newStatus, shopId: order.shopId,
       sellerId: '', riderId: rider.id, customerId: order.customerId,
     });
+
+    // Recompute the milestone ETA for the new phase (ETA MVP Phase 1). Best-effort.
+    await computeAndPersistEta(prisma, orderId);
     return { status: newStatus };
   }
 

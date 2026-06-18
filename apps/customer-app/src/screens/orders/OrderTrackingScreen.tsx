@@ -647,13 +647,22 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
   const isCod       = (orderPrisma.paymentMethod ?? 'cod') === 'cod';
   const riderPhone  = (order.rider as { phone?: string } | null)?.phone ?? null;
   const showMapNow  = custLat != null && custLng != null && !isCancelled && !isDelivered;
+  // Server-computed ETA (ETA MVP Phase 1) as a range; replaces the old hardcoded "~20 min".
+  const etaText = order.eta
+    ? (() => {
+        const sec = order.eta!.secondsRemaining, sp = order.eta!.spreadSeconds;
+        const lo = Math.max(1, Math.round((sec - sp) / 60));
+        const hi = Math.max(lo, Math.round((sec + sp) / 60));
+        return lo === hi ? `~${lo} ${t('tracking.minutes')}` : `${lo}–${hi} ${t('tracking.minutes')}`;
+      })()
+    : null;
   const headerBig   = isDelivered
     ? t('tracking.statusDelivered')
     : isCancelled
       ? t('tracking.statusCancelled')
-      : order.status === OrderStatus.OUT_FOR_DELIVERY
-        ? t('tracking.arrivingSoon')
-        : `${t('tracking.arrivingIn')} ~20 min`;
+      : etaText
+        ? `${t('tracking.arrivingIn')} ${etaText}`
+        : t('tracking.arrivingSoon');
   const riderMsg = order.status === OrderStatus.OUT_FOR_DELIVERY
     ? t('tracking.riderOnWay')
     : t('tracking.reachedStore');
@@ -696,7 +705,7 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
         {/* Live map */}
         {showMapNow && custLat != null && custLng != null && (
           <View style={[styles.card, styles.mapCard]}>
-            <TrackingMap customer={{ lat: custLat, lng: custLng }} rider={riderPos} stale={riderStale} t={t} />
+            <TrackingMap customer={{ lat: custLat, lng: custLng }} rider={riderPos} stale={riderStale} etaSeconds={order.eta?.secondsRemaining ?? null} t={t} />
           </View>
         )}
 

@@ -6,6 +6,7 @@ import { validatePromo, resolveAutoPromo, type ValidatedPromo } from '../promoti
 import { createResolverService, type AggLine } from '../orders/resolver.service';
 import { refundCapturedOrderPayment, refundOrderLine } from '../payments/payments.service';
 import { createCatalogService } from '../catalog/catalog.service';
+import { computeAndPersistEta, etaResponse } from './eta.service';
 import {
   NotFoundError, ForbiddenError,
   ValidationError, BusinessRuleError, AppError,
@@ -331,6 +332,8 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
         orderId: o.orderId, status: initStatus, shopId: o.shopId,
         sellerId: o.sellerUserId ?? '', riderId: null, customerId: userId,
       });
+      // Initial ETA at placement (ETA MVP Phase 1) — post-commit, best-effort.
+      await computeAndPersistEta(prisma, o.orderId);
     }
 
     const grandTotal = created.reduce((s, o) => s + o.total, 0);
@@ -400,7 +403,11 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       }
     }
 
-    return { ...order, rider };
+    // Server-computed delivery ETA as a duration + serverNow (ETA MVP Phase 1).
+    // Omitted for terminal/unset orders. Poll fallback if a socket push is missed.
+    const eta = etaResponse(order);
+
+    return { ...order, rider, eta };
   }
 
   async function getMyOrders(userId: string, role: string, riderProfileId: string) {
@@ -481,6 +488,8 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
         data: {
           status: newStatus as never,
           ...(newStatus === 'confirmed'        ? { confirmedAt: new Date() } : {}),
+          ...(newStatus === 'preparing'        ? { preparingAt: new Date() } : {}),
+          ...(newStatus === 'ready_for_pickup' ? { readyAt:     new Date() } : {}),
           ...(newStatus === 'picked_up'        ? { pickedUpAt:  new Date() } : {}),
           ...(newStatus === 'delivered'        ? { deliveredAt: new Date() } : {}),
           ...(newStatus === 'cancelled'        ? { cancelledAt: new Date(), cancelReason: reason } : {}),
@@ -496,6 +505,9 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       sellerId: '', riderId: order.riderId, customerId: order.customerId,
       ...(refundedPaise != null ? { refundedPaise } : {}),
     });
+
+    // Recompute the milestone ETA for the new phase (ETA MVP Phase 1). Best-effort.
+    await computeAndPersistEta(prisma, orderId);
   }
 
   // ── Seller-specific actions ──────────────────────────────────────────────

@@ -115,6 +115,7 @@ export const Events = {
   ORDER_ASSIGNED_TO_RIDER:    'order:assigned:to_rider',
   ORDER_ITEM_UNAVAILABLE:     'order:item:unavailable',
   RIDER_LOCATION_UPDATE:      'rider:location:update',
+  ORDER_ETA_CHANGED:          'order:eta:changed',
 } as const;
 
 // ── Event payload types ───────────────────────────────────────────────────────
@@ -168,10 +169,25 @@ export interface OrderItemUnavailablePayload {
   suggestion?:   { productId: string; name: string; pricePaise: number };
 }
 
+// Server-computed delivery ETA changed (ETA MVP Phase 1). estimatedDeliveryAt is an
+// ISO string; the socket layer derives secondsRemaining + serverNow at emit time.
+export interface OrderEtaChangedPayload {
+  orderId:             string;
+  customerId:          string;
+  estimatedDeliveryAt: string;  // ISO
+  etaSpreadSeconds:    number;
+  status:              string;
+  source:              string;
+}
+
 // ── Type-safe emit helpers ────────────────────────────────────────────────────
 // Each goes through dispatch(): local delivery + Redis fan-out to other processes.
 export function emitOrderStatusChanged(payload: OrderStatusChangedPayload): void {
   dispatch(Events.ORDER_STATUS_CHANGED, payload);
+}
+
+export function emitOrderEtaChanged(payload: OrderEtaChangedPayload): void {
+  dispatch(Events.ORDER_ETA_CHANGED, payload);
 }
 
 export function emitNewOrderForSeller(payload: NewOrderForSellerPayload): void {

@@ -11,6 +11,7 @@ import {
   type OrderCancelledForSellerPayload,
   type OrderAssignedToRiderPayload,
   type OrderItemUnavailablePayload,
+  type OrderEtaChangedPayload,
 } from '../events/event-bus';
 
 // Extend Fastify to expose Socket.io instance to routes
@@ -189,6 +190,23 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
     });
 
     app.log.debug(`📡 Order ${payload.orderId} status → ${payload.status}`);
+  });
+
+  eventBus.on(Events.ORDER_ETA_CHANGED, (payload: OrderEtaChangedPayload) => {
+    // Server-computed ETA changed (ETA MVP Phase 1). Send a DURATION + serverNow, not a
+    // bare absolute timestamp, so the client countdown is clock-skew safe (review F3).
+    const now = Date.now();
+    const body = {
+      orderId:          payload.orderId,
+      secondsRemaining: Math.max(0, Math.round((new Date(payload.estimatedDeliveryAt).getTime() - now) / 1000)),
+      spreadSeconds:    payload.etaSpreadSeconds,
+      serverNow:        new Date(now).toISOString(),
+      status:           payload.status,
+      source:           payload.source,
+    };
+    io.to(`order:${payload.orderId}`).emit('order:eta', body);
+    io.to(`user:${payload.customerId}`).emit('order:eta', body);
+    app.log.debug(`⏱️  Order ${payload.orderId} eta → ${body.secondsRemaining}s`);
   });
 
   eventBus.on(Events.NEW_ORDER_FOR_SELLER, (payload: NewOrderForSellerPayload) => {

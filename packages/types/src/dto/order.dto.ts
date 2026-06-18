@@ -54,6 +54,15 @@ export interface OrderDetailResponse {
     name: string;
     phone: string;
   };
+  // Server-computed delivery ETA (ETA MVP Phase 1). Duration + serverNow (not a bare
+  // absolute timestamp) so the client countdown is clock-skew safe. Omitted when the
+  // order is terminal or no ETA has been computed yet.
+  eta?: {
+    secondsRemaining: number;
+    spreadSeconds: number;
+    serverNow: string;
+    source: string;
+  };
   statusHistory: OrderStatusHistoryItem[];
   createdAt: string;
 }

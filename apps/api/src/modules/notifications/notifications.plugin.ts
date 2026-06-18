@@ -67,7 +67,15 @@ async function notificationsPlugin(app: FastifyInstance): Promise<void> {
 
         // ── Out for delivery → notify customer ───────────────────────────────
         case 'out_for_delivery': {
-          const notif = CustomerNotifications.outForDelivery('30 minute');
+          // Use the server-computed ETA (ETA MVP Phase 1) instead of a hardcoded
+          // string; fall back to a soft "jaldi" when it's not available.
+          const ord = await app.prisma.order.findUnique({
+            where: { id: orderId }, select: { estimatedDeliveryAt: true },
+          });
+          const mins = ord?.estimatedDeliveryAt
+            ? Math.max(1, Math.round((ord.estimatedDeliveryAt.getTime() - Date.now()) / 60000))
+            : null;
+          const notif = CustomerNotifications.outForDelivery(mins ? `${mins} minute` : 'jaldi');
           const token = await getToken(customerId);
           if (token) {
             await sendPush({ token, ...notif, data: { orderId, screen: 'OrderTracking' } });
