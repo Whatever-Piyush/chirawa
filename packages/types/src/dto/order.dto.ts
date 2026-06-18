@@ -63,6 +63,13 @@ export interface OrderDetailResponse {
     serverNow: string;
     source: string;
   };
+  // Refund visibility (Tracking V2 P0.2). Read-only, derived from Payment.refundedPaise
+  // (+ COD line refunds). `original` = back to the payment method; `cash_adjustment` = a
+  // COD cash-due reduction. A full refund timeline (states/ETA) is Phase 2.
+  refund?: {
+    amountPaise: number;
+    destination: 'original' | 'cash_adjustment';
+  };
   statusHistory: OrderStatusHistoryItem[];
   createdAt: string;
 }

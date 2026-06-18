@@ -163,3 +163,41 @@ describe('getOrder — ETA block (ETA MVP Phase 1)', () => {
     expect(order.eta).toBeUndefined();
   });
 });
+
+describe('getOrder — refund block (Tracking V2 P0.2)', () => {
+  type Refund = { amountPaise: number; destination: string } | undefined;
+
+  it('surfaces a prepaid refund from Payment.refundedPaise (destination original)', async () => {
+    const { service } = makeService({ order: {
+      ...baseOrder, status: 'cancelled', paymentMethod: 'upi',
+      payments: [{ status: 'refunded', method: 'upi', amountPaise: 15000, refundedPaise: 15000 }],
+    } });
+    const order = await service.getOrder('order_1', 'cust_1', 'customer', '') as { refund?: Refund };
+    expect(order.refund).toEqual({ amountPaise: 15000, destination: 'original' });
+  });
+
+  it('surfaces a COD line refund from OrderItem.refundedPaise (destination cash_adjustment)', async () => {
+    const { service } = makeService({ order: {
+      ...baseOrder, paymentMethod: 'cod', payments: [],
+      items: [{ productId: 'p1', fulfillmentStatus: 'unavailable_refunded', refundedPaise: 8500 }],
+    } });
+    const order = await service.getOrder('order_1', 'cust_1', 'customer', '') as { refund?: Refund };
+    expect(order.refund).toEqual({ amountPaise: 8500, destination: 'cash_adjustment' });
+  });
+
+  it('does not double-count a prepaid line refund (Payment + OrderItem both set)', async () => {
+    const { service } = makeService({ order: {
+      ...baseOrder, paymentMethod: 'upi',
+      payments: [{ status: 'partially_refunded', method: 'upi', amountPaise: 16000, refundedPaise: 8500 }],
+      items: [{ productId: 'p1', fulfillmentStatus: 'unavailable_refunded', refundedPaise: 8500 }],
+    } });
+    const order = await service.getOrder('order_1', 'cust_1', 'customer', '') as { refund?: Refund };
+    expect(order.refund).toEqual({ amountPaise: 8500, destination: 'original' });
+  });
+
+  it('omits refund when nothing was refunded', async () => {
+    const { service } = makeService();   // baseOrder: payments [], items []
+    const order = await service.getOrder('order_1', 'cust_1', 'customer', '') as { refund?: Refund };
+    expect(order.refund).toBeUndefined();
+  });
+});

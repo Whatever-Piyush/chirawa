@@ -358,7 +358,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       where: { id: orderId },
       include: {
         items: true, statusHistory: { orderBy: { changedAt: 'asc' } },
-        payments: { select: { status: true, method: true, amountPaise: true } },
+        payments: { select: { status: true, method: true, amountPaise: true, refundedPaise: true } },
       },
     });
     if (!order) throw new NotFoundError('Order');
@@ -407,7 +407,19 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     // Omitted for terminal/unset orders. Poll fallback if a socket push is missed.
     const eta = etaResponse(order);
 
-    return { ...order, rider, eta };
+    // Refund visibility (Tracking V2 P0.2) — read-only, derived. Prepaid full/line refunds
+    // land on Payment.refundedPaise; COD line adjustments only on the OrderItem. max() avoids
+    // double-counting a prepaid line refund (which increments both).
+    const paymentRefund = order.payments.reduce((s, p) => s + (p.refundedPaise ?? 0), 0);
+    const lineRefund = order.items.reduce(
+      (s, it) => s + (it.fulfillmentStatus === 'unavailable_refunded' ? it.refundedPaise : 0), 0,
+    );
+    const refundedPaise = Math.max(paymentRefund, lineRefund);
+    const refund = refundedPaise > 0
+      ? { amountPaise: refundedPaise, destination: (order.paymentMethod === 'cod' ? 'cash_adjustment' : 'original') as 'original' | 'cash_adjustment' }
+      : undefined;
+
+    return { ...order, rider, eta, refund };
   }
 
   async function getMyOrders(userId: string, role: string, riderProfileId: string) {
