@@ -43,23 +43,17 @@ const SOCKET_URL      = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chira
 const WHATSAPP_NUMBER = '916350076685';
 const POLL_MS         = 15_000;
 
-const STATUS_STEP: Partial<Record<OrderStatus, number>> = {
+// 9 DB states → 5 display phases (V2 timeline): Confirmed · Packing · Picked up · On the way · Delivered.
+const STATUS_STEP5: Partial<Record<OrderStatus, number>> = {
   [OrderStatus.PENDING_PAYMENT]:  0,
   [OrderStatus.PAID]:             0,
   [OrderStatus.CONFIRMED]:        0,
   [OrderStatus.PREPARING]:        1,
   [OrderStatus.READY_FOR_PICKUP]: 1,
   [OrderStatus.PICKED_UP]:        2,
-  [OrderStatus.OUT_FOR_DELIVERY]: 2,
-  [OrderStatus.DELIVERED]:        3,
+  [OrderStatus.OUT_FOR_DELIVERY]: 3,
+  [OrderStatus.DELIVERED]:        4,
 };
-
-const STEP_KEYS = [
-  'tracking.confirmed',
-  'tracking.preparing',
-  'tracking.onTheWay',
-  'tracking.delivered',
-] as const;
 
 const STATUS_EMOJI: Partial<Record<OrderStatus, string>> = {
   [OrderStatus.PENDING_PAYMENT]:  '🎉',
@@ -114,53 +108,132 @@ function PulsingRing() {
 
 // ─── Horizontal progress stepper ──────────────────────────────────────────────
 
-function ProgressStepper({
-  currentStep,
-  t,
-}: {
-  currentStep: number;
+// Local 12-hour clock formatter (avoids relying on Intl on Hermes/Android).
+function fmtClock(ms: number): string {
+  const d = new Date(ms);
+  let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${String(m).padStart(2, '0')} ${ap}`;
+}
+
+// ETA hero (V2 P1.1) — range before pickup, a live local countdown once on the way.
+// Clock-skew safe: anchor on the client receive-time of each `eta` + secondsRemaining.
+function EtaHero({ eta, active, t }: {
+  eta?: { secondsRemaining: number; spreadSeconds: number; serverNow: string; source: string };
+  active: boolean;
   t: (key: string) => string;
 }) {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const [now, setNow] = useState(Date.now());
+  const anchor = useRef<{ ms: number; sec: number } | null>(null);
+  useEffect(() => {
+    if (eta) anchor.current = { ms: Date.now(), sec: eta.secondsRemaining };
+  }, [eta?.secondsRemaining, eta?.serverNow]);
+  useEffect(() => { const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, []);
+
+  if (!eta || !anchor.current) {
+    return (
+      <View style={[styles.card, styles.etaHero]}>
+        <Ionicons name="time-outline" size={22} color={Colors.primary} />
+        <Text style={styles.etaHeroBig}>{t('tracking.calculatingEta')}</Text>
+      </View>
+    );
+  }
+  const liveSec = Math.max(0, anchor.current.sec - (now - anchor.current.ms) / 1000);
+  const byClock = fmtClock(Date.now() + liveSec * 1000);
+  let primary: string;
+  if (active) {
+    // Past the ETA (liveSec hit 0) → "Arriving soon" instead of a stuck "~1 min"
+    // (stopgap until the Phase-2 delay engine — pre-commit review §3).
+    const m = Math.ceil(liveSec / 60);
+    primary = m <= 0
+      ? t('tracking.arrivingSoon')
+      : `${t('tracking.arrivingIn')} ~${m} ${t('tracking.minutes')}`;
+  } else {
+    const sp = eta.spreadSeconds;
+    const lo = Math.max(1, Math.round((anchor.current.sec - sp) / 60));
+    const hi = Math.max(lo, Math.round((anchor.current.sec + sp) / 60));
+    primary = lo === hi
+      ? `${t('tracking.arrivingIn')} ~${lo} ${t('tracking.minutes')}`
+      : `${t('tracking.arrivingIn')} ${lo}–${hi} ${t('tracking.minutes')}`;
+  }
   return (
-    <View style={styles.stepper}>
-      {STEP_KEYS.map((key, i) => {
-        const done   = i < currentStep;
-        const active = i === currentStep;
-        return (
-          <React.Fragment key={key}>
-            <View style={styles.stepCol}>
-              {active ? (
-                <View style={styles.stepDotWrap}>
-                  <PulsingRing />
-                  <View style={[styles.stepDot, styles.stepDotActive]}>
-                    <Text style={[styles.stepDotText, styles.stepDotTextLight]}>{String(i + 1)}</Text>
-                  </View>
+    <View style={[styles.card, styles.etaHero]}>
+      <Ionicons name="time-outline" size={22} color={Colors.primary} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.etaHeroBig} numberOfLines={1}>{primary}</Text>
+        <Text style={styles.etaHeroSub}>
+          {t('tracking.byTime')} {byClock}{eta.source === 'fallback' ? ` · ${t('tracking.etaEstimate')}` : ''}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// Vertical order timeline (V2 P1.4) — 5 phases with timestamps, collapsible, cancelled branch.
+function OrderTimeline({ status, ts, t }: {
+  status: OrderStatus;
+  ts: { confirmed?: string | null; packing?: string | null; pickedUp?: string | null; onTheWay?: string | null; delivered?: string | null; cancelled?: string | null };
+  t: (key: string) => string;
+}) {
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const [open, setOpen] = useState(false);
+  const isCancelled = status === OrderStatus.CANCELLED;
+  const idx = STATUS_STEP5[status] ?? 0;
+  const phases = [
+    { label: t('tracking.confirmed'), at: ts.confirmed },
+    { label: t('tracking.preparing'), at: ts.packing },
+    { label: t('tracking.pickedUp'),  at: ts.pickedUp },
+    { label: t('tracking.onTheWay'),  at: ts.onTheWay },
+    { label: t('tracking.delivered'), at: ts.delivered },
+  ];
+  const currentLabel = isCancelled ? t('tracking.statusCancelled') : (phases[idx]?.label ?? '');
+  return (
+    <View style={styles.card}>
+      <TouchableOpacity style={styles.tlHeader} activeOpacity={0.7} onPress={() => setOpen((v) => !v)}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sectionTitle}>{t('tracking.progressTitle')}</Text>
+          <Text style={styles.tlCurrent}>{currentLabel}</Text>
+        </View>
+        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={Colors.textTertiary} />
+      </TouchableOpacity>
+      {open && (
+        <View style={styles.tlBody}>
+          {phases.map((p, i) => {
+            const active = !isCancelled && i === idx;
+            // A phase is "done" once its timestamp exists — robust for the cancelled branch
+            // (reached phases stay ticked) and for any skipped-phase data gap (pre-commit review §1).
+            const done   = !active && !!p.at;
+            return (
+              <View key={p.label} style={styles.tlRow}>
+                <View style={styles.tlDotCol}>
+                  {active ? (
+                    <View style={styles.stepDotWrap}><PulsingRing /><View style={[styles.tlDot, styles.tlDotActive]} /></View>
+                  ) : (
+                    <View style={[styles.tlDot, done && styles.tlDotDone]}>{done ? <Text style={styles.tlDotTick}>✓</Text> : null}</View>
+                  )}
+                  {i < phases.length - 1 && <View style={[styles.tlLine, done && styles.tlLineDone]} />}
                 </View>
-              ) : done ? (
-                <View style={[styles.stepDot, styles.stepDotDone]}>
-                  <Text style={[styles.stepDotText, styles.stepDotTextLight]}>✓</Text>
+                <View style={styles.tlTextCol}>
+                  <Text style={[styles.tlLabel, (done || active) && styles.tlLabelActive]}>{p.label}</Text>
+                  <Text style={styles.tlTime}>{p.at ? fmtClock(new Date(p.at).getTime()) : '—'}</Text>
                 </View>
-              ) : (
-                <View style={styles.stepDot}>
-                  <Text style={styles.stepDotText}>{String(i + 1)}</Text>
-                </View>
-              )}
-              <Text style={[
-                styles.stepLabel,
-                active && styles.stepLabelActive,
-                done   && styles.stepLabelDone,
-              ]}>
-                {t(key)}
-              </Text>
+              </View>
+            );
+          })}
+          {isCancelled && (
+            <View style={styles.tlRow}>
+              <View style={styles.tlDotCol}><View style={[styles.tlDot, styles.tlDotCancelled]}><Text style={styles.tlDotTick}>✕</Text></View></View>
+              <View style={styles.tlTextCol}>
+                <Text style={[styles.tlLabel, styles.tlLabelCancelled]}>{t('tracking.statusCancelled')}</Text>
+                <Text style={styles.tlTime}>{ts.cancelled ? fmtClock(new Date(ts.cancelled).getTime()) : '—'}</Text>
+              </View>
             </View>
-            {i < STEP_KEYS.length - 1 && (
-              <View style={[styles.stepLine, i < currentStep && styles.stepLineDone]} />
-            )}
-          </React.Fragment>
-        );
-      })}
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -423,6 +496,11 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
   const [cancelling, setCancelling] = useState(false);
   const [cancelSheetVisible, setCancelSheetVisible] = useState(false);
   const [selectedReason,     setSelectedReason]     = useState<string | null>(null);
+  // Tracking V2 Sprint 1: socket-drop banner (P0.1) + item-unavailable banner (P0.3).
+  const [socketStale, setSocketStale] = useState(false);
+  const [itemAlert,   setItemAlert]   = useState<
+    { productName: string; refundedPaise: number; cancelled: boolean; suggestion?: { productId: string; name: string } } | null
+  >(null);
 
   // Change-address picker + receiver-contact editor (pre-pickup only).
   const [addrPickerVisible, setAddrPickerVisible] = useState(false);
@@ -466,7 +544,11 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
 
       socket.on('connect', () => {
         socket.emit('order:subscribe', orderId);
+        setSocketStale(false);   // P0.1: clear the "reconnecting" banner on (re)connect
       });
+      // P0.1: socket-drop feedback — data still flows via the 15s poll, so this is informational.
+      socket.on('disconnect',    () => setSocketStale(true));
+      socket.on('connect_error', () => setSocketStale(true));
 
       socket.on('order:status', (data: { orderId: string; status: OrderStatus }) => {
         if (data.orderId !== orderId) return;
@@ -497,6 +579,22 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
         } : prev);
       });
 
+      // P0.3: an item went out of stock at pickup — the line was refunded (or the order
+      // cancelled). Surface it inline + refetch so the bill + refund card reconcile.
+      socket.on('order:item-unavailable', (data: {
+        orderId: string; productName: string; refundedPaise: number; cancelled: boolean;
+        suggestion?: { productId: string; name: string };
+      }) => {
+        if (data.orderId !== orderId) return;
+        setItemAlert({
+          productName:   data.productName,
+          refundedPaise: data.refundedPaise,
+          cancelled:     data.cancelled,
+          ...(data.suggestion ? { suggestion: data.suggestion } : {}),
+        });
+        void fetchOrder();
+      });
+
       socketRef.current = socket;
     }
 
@@ -519,6 +617,7 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
         socketRef.current.off('order:status');
         socketRef.current.off('order:location');
         socketRef.current.off('order:eta');
+        socketRef.current.off('order:item-unavailable');
         socketRef.current.disconnect();
         socketRef.current = null;
       }
@@ -615,7 +714,24 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
     return <BrandedLoader />;
   }
 
-  if (!order) return null;
+  // P0.1: the load finished but we have no order → the fetch failed. Show a recoverable
+  // error state with Retry instead of a blank screen (was `return null`).
+  if (!order) {
+    return (
+      <View style={[styles.errorWrap, { paddingTop: insets.top }]}>
+        <Ionicons name="cloud-offline-outline" size={48} color={Colors.textTertiary} />
+        <Text style={styles.errorTitle}>{t('tracking.loadErrorTitle')}</Text>
+        <Text style={styles.errorSub}>{t('tracking.loadErrorSub')}</Text>
+        <TouchableOpacity
+          style={styles.retryBtn}
+          activeOpacity={0.85}
+          onPress={() => { setLoading(true); void fetchOrder(); }}
+        >
+          <Text style={styles.retryBtnText}>{t('tracking.retry')}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   // ── Order-derived values — order is non-null past this point ─────────────
   // The API returns the raw Prisma object whose total field is `totalAmount`
@@ -632,13 +748,20 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
     ratingComment?: string | null;
     receiverName?: string | null;
     receiverPhone?: string | null;
+    // Phase timestamps (ETA Phase 1) — raw passthrough, used by the V2 timeline.
+    createdAt?: string | null;
+    confirmedAt?: string | null;
+    preparingAt?: string | null;
+    pickedUpAt?: string | null;
+    outForDeliveryAt?: string | null;
+    deliveredAt?: string | null;
+    cancelledAt?: string | null;
   };
   const custLat = orderPrisma.deliveryLat != null ? Number(orderPrisma.deliveryLat) : null;
   const custLng = orderPrisma.deliveryLng != null ? Number(orderPrisma.deliveryLng) : null;
   const showMap = custLat != null && custLng != null &&
     (order.status === OrderStatus.PICKED_UP || order.status === OrderStatus.OUT_FOR_DELIVERY);
   const riderStale = riderPosTs == null || (Math.max(nowTick, Date.now()) - riderPosTs) > LOCATION_STALE_MS;
-  const currentStep  = STATUS_STEP[order.status] ?? 0;
   const isDelivered  = order.status === OrderStatus.DELIVERED;
   const isCancelled  = order.status === OrderStatus.CANCELLED;
   const totalRupees  = Math.round((orderPrisma.totalAmount ?? 0) / 100);
@@ -665,23 +788,13 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
   // ── Redesigned-tracking derived values ──────────────────────────────────────
   const isCod       = (orderPrisma.paymentMethod ?? 'cod') === 'cod';
   const riderPhone  = (order.rider as { phone?: string } | null)?.phone ?? null;
-  const showMapNow  = custLat != null && custLng != null && !isCancelled && !isDelivered;
-  // Server-computed ETA (ETA MVP Phase 1) as a range; replaces the old hardcoded "~20 min".
-  const etaText = order.eta
-    ? (() => {
-        const sec = order.eta!.secondsRemaining, sp = order.eta!.spreadSeconds;
-        const lo = Math.max(1, Math.round((sec - sp) / 60));
-        const hi = Math.max(lo, Math.round((sec + sp) / 60));
-        return lo === hi ? `~${lo} ${t('tracking.minutes')}` : `${lo}–${hi} ${t('tracking.minutes')}`;
-      })()
-    : null;
-  const headerBig   = isDelivered
-    ? t('tracking.statusDelivered')
-    : isCancelled
-      ? t('tracking.statusCancelled')
-      : etaText
-        ? `${t('tracking.arrivingIn')} ${etaText}`
-        : t('tracking.arrivingSoon');
+  // P1.2 — show the live map only during active delivery (matches the rider reveal);
+  // pre-pickup we show a packing illustration instead of an empty "location unavailable" map.
+  const isActiveDelivery = order.status === OrderStatus.PICKED_UP || order.status === OrderStatus.OUT_FOR_DELIVERY;
+  const showMapNow  = isActiveDelivery && custLat != null && custLng != null;
+  const showPrepIllustration = !isActiveDelivery && !isCancelled && !isDelivered;
+  // P1.1 — the header is now phase-focused; the ETA lives in the EtaHero card below.
+  const headerBig   = getStatusMessage();
   const riderMsg = order.status === OrderStatus.OUT_FOR_DELIVERY
     ? t('tracking.riderOnWay')
     : t('tracking.reachedStore');
@@ -715,24 +828,95 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
           <TouchableOpacity onPress={handleBack} style={styles.headerBack} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Ionicons name="arrow-back" size={22} color={Colors.white} />
           </TouchableOpacity>
-          <Text style={styles.headerSmall} numberOfLines={1}>{getStatusMessage()}</Text>
+          <Text style={styles.headerSmall} numberOfLines={1}>#{orderId.slice(-6).toUpperCase()}</Text>
         </View>
         <Text style={styles.headerBig} numberOfLines={1}>{headerBig}</Text>
       </FauxGradient>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Live map */}
+        {/* P0.1 — socket-drop banner (data still arrives via the 15s poll) */}
+        {socketStale && (
+          <View style={styles.reconnectBanner}>
+            <ActivityIndicator size="small" color={Colors.textSecondary} />
+            <Text style={styles.reconnectText}>{t('tracking.reconnecting')}</Text>
+          </View>
+        )}
+
+        {/* P0.3 — item went out of stock at pickup (line refunded / order cancelled) */}
+        {itemAlert && (
+          <View style={styles.oosBanner}>
+            <Ionicons name="alert-circle-outline" size={20} color={Colors.warning ?? Colors.primary} style={{ marginTop: 1 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.oosText}>
+                {itemAlert.cancelled
+                  ? t('tracking.orderCancelledRefunded')
+                  : `‘${itemAlert.productName}’ ${t('tracking.itemOOS')} — ₹${Math.round(itemAlert.refundedPaise / 100)} ${t('tracking.refundedWord')}`}
+              </Text>
+              {itemAlert.suggestion && !itemAlert.cancelled && (
+                <TouchableOpacity onPress={() => navigation.navigate('ProductDetail', { productId: itemAlert.suggestion!.productId })} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                  <Text style={styles.oosSubLink}>{itemAlert.suggestion.name} · {t('tracking.addInstead')} ›</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <TouchableOpacity onPress={() => setItemAlert(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close" size={18} color={Colors.textTertiary} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* P1.1 — ETA hero (range pre-pickup, live countdown on the way) */}
+        {!isDelivered && !isCancelled && (
+          <EtaHero eta={order.eta} active={isActiveDelivery} t={t} />
+        )}
+
+        {/* P0.2 — refund visibility */}
+        {order.refund && order.refund.amountPaise > 0 && (
+          <View style={styles.refundCard}>
+            <View style={styles.refundIcon}>
+              <Ionicons name="cash-outline" size={20} color={Colors.success ?? Colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.refundCardTitle}>
+                {t('tracking.refundLabel')} ₹{Math.round(order.refund.amountPaise / 100)}
+              </Text>
+              <Text style={styles.refundCardSub}>
+                {order.refund.destination === 'cash_adjustment'
+                  ? t('tracking.refundCashAdjust')
+                  : t('tracking.refundOriginal')}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Live map — V2 P1.2: only during active delivery (picked_up / out_for_delivery) */}
         {showMapNow && custLat != null && custLng != null && (
           <View style={[styles.card, styles.mapCard]}>
             <TrackingMap customer={{ lat: custLat, lng: custLng }} rider={riderPos} stale={riderStale} etaSeconds={order.eta?.secondsRemaining ?? null} t={t} />
           </View>
         )}
 
-        {/* Progress stepper */}
-        {!isCancelled && !isDelivered && (
-          <View style={[styles.card, styles.stepperCard]}>
-            <ProgressStepper currentStep={currentStep} t={t} />
+        {/* Pre-pickup packing illustration (replaces the empty "location unavailable" map) */}
+        {showPrepIllustration && (
+          <View style={[styles.card, styles.prepCard]}>
+            <Text style={styles.prepEmoji}>🧺</Text>
+            <Text style={styles.prepText}>{t('tracking.packingSub')}</Text>
           </View>
+        )}
+
+        {/* Order timeline — V2 P1.4 (5 phases · timestamps · collapsible · cancelled branch) */}
+        {!isDelivered && (
+          <OrderTimeline
+            status={order.status}
+            ts={{
+              confirmed: orderPrisma.confirmedAt ?? orderPrisma.createdAt,
+              packing:   orderPrisma.preparingAt,
+              pickedUp:  orderPrisma.pickedUpAt,
+              onTheWay:  orderPrisma.outForDeliveryAt,
+              delivered: orderPrisma.deliveredAt,
+              cancelled: orderPrisma.cancelledAt,
+            }}
+            t={t}
+          />
         )}
 
         {/* Delivered celebration + rating */}
@@ -1012,6 +1196,52 @@ const makeStyles = (Colors: ColorPalette) =>
   container:    { flex: 1, backgroundColor: Colors.background },
   scrollContent:{ padding: Spacing.lg, gap: Spacing.md, paddingBottom: Spacing.xxl },
   center:       { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  // ── Tracking V2 Sprint 2 (ETA hero · packing illustration · timeline) ──
+  etaHero:      { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  etaHeroBig:   { fontSize: FontSize.lg, fontWeight: '800', color: Colors.textPrimary },
+  etaHeroSub:   { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 1 },
+
+  prepCard:     { alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.xl, gap: Spacing.xs },
+  prepEmoji:    { fontSize: 40 },
+  prepText:     { fontSize: FontSize.md, fontWeight: '700', color: Colors.textSecondary },
+
+  tlHeader:     { flexDirection: 'row', alignItems: 'center' },
+  tlCurrent:    { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '700', marginTop: 1 },
+  tlBody:       { marginTop: Spacing.md },
+  tlRow:        { flexDirection: 'row', gap: Spacing.md },
+  tlDotCol:     { alignItems: 'center', width: 22 },
+  tlDot:        { width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: Colors.border, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
+  tlDotDone:    { backgroundColor: Colors.success ?? Colors.primary, borderColor: Colors.success ?? Colors.primary },
+  tlDotActive:  { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  tlDotCancelled: { backgroundColor: Colors.error, borderColor: Colors.error },
+  tlDotTick:    { color: Colors.white, fontSize: 9, fontWeight: '900' },
+  tlLine:       { width: 2, flex: 1, minHeight: 18, backgroundColor: Colors.border, marginVertical: 2 },
+  tlLineDone:   { backgroundColor: Colors.success ?? Colors.primary },
+  tlTextCol:    { flex: 1, paddingBottom: Spacing.md },
+  tlLabel:      { fontSize: FontSize.sm, color: Colors.textTertiary, fontWeight: '600' },
+  tlLabelActive:{ color: Colors.textPrimary, fontWeight: '800' },
+  tlLabelCancelled: { color: Colors.error, fontWeight: '800' },
+  tlTime:       { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 1 },
+
+  // ── Tracking V2 Sprint 1 ──────────────────────────────────────────
+  errorWrap:    { flex: 1, backgroundColor: Colors.background, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl, gap: Spacing.sm },
+  errorTitle:   { fontSize: FontSize.lg, fontWeight: '800', color: Colors.textPrimary, textAlign: 'center', marginTop: Spacing.sm },
+  errorSub:     { fontSize: FontSize.sm, color: Colors.textSecondary, textAlign: 'center' },
+  retryBtn:     { marginTop: Spacing.md, backgroundColor: Colors.primary, borderRadius: Radius.full, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md },
+  retryBtnText: { color: Colors.white, fontWeight: '800', fontSize: FontSize.sm },
+
+  reconnectBanner: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, backgroundColor: Colors.surfaceAlt, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
+  reconnectText:   { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: '600' },
+
+  oosBanner:   { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, backgroundColor: Colors.warningLight, borderRadius: Radius.md, padding: Spacing.md },
+  oosText:     { color: Colors.textPrimary, fontSize: FontSize.sm, fontWeight: '600' },
+  oosSubLink:  { color: Colors.primary, fontSize: FontSize.sm, fontWeight: '700', marginTop: 2 },
+
+  refundCard:      { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, backgroundColor: Colors.successLight, borderRadius: Radius.lg, padding: Spacing.lg },
+  refundIcon:      { width: 36, height: 36, borderRadius: Radius.full, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
+  refundCardTitle: { fontSize: FontSize.md, fontWeight: '800', color: Colors.textPrimary },
+  refundCardSub:   { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 1 },
 
   card: {
     backgroundColor: Colors.card, borderRadius: Radius.lg,
