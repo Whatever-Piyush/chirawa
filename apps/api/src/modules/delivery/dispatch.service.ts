@@ -217,13 +217,15 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
       }),
     ]);
 
+    // Recompute + persist + emit the milestone ETA BEFORE the status event, so any
+    // ORDER_STATUS_CHANGED consumer (e.g. the out_for_delivery push) reads the fresh,
+    // persisted ETA rather than the previous phase's value (P2 hardening, review #10).
+    await computeAndPersistEta(prisma, orderId);
+
     emitOrderStatusChanged({
       orderId, status: newStatus, shopId: order.shopId,
       sellerId: '', riderId: rider.id, customerId: order.customerId,
     });
-
-    // Recompute the milestone ETA for the new phase (ETA MVP Phase 1). Best-effort.
-    await computeAndPersistEta(prisma, orderId);
     return { status: newStatus };
   }
 

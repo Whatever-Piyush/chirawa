@@ -479,6 +479,24 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
         setRiderPosTs(Date.now());
       });
 
+      // Server-computed ETA push (ETA P3 / review #4). Merge it into order.eta so the
+      // header + map badge update live, without waiting for the 15s poll. Idempotent —
+      // the dual-room (order + user) duplicate emit is harmless.
+      socket.on('order:eta', (data: {
+        orderId: string; secondsRemaining: number; spreadSeconds: number; serverNow: string; source: string;
+      }) => {
+        if (data.orderId !== orderId) return;
+        setOrder((prev) => prev ? {
+          ...prev,
+          eta: {
+            secondsRemaining: data.secondsRemaining,
+            spreadSeconds:    data.spreadSeconds,
+            serverNow:        data.serverNow,
+            source:           data.source,
+          },
+        } : prev);
+      });
+
       socketRef.current = socket;
     }
 
@@ -500,6 +518,7 @@ export default function OrderTrackingScreen({ navigation, route }: Props) {
         socketRef.current.emit('order:unsubscribe', orderId);
         socketRef.current.off('order:status');
         socketRef.current.off('order:location');
+        socketRef.current.off('order:eta');
         socketRef.current.disconnect();
         socketRef.current = null;
       }

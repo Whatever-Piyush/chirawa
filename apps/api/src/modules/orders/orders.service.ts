@@ -500,14 +500,15 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       }),
     ]);
 
+    // Persist + emit the milestone ETA BEFORE the status event, so ORDER_STATUS_CHANGED
+    // consumers read the fresh, persisted ETA (P2 hardening, review #10). Best-effort.
+    await computeAndPersistEta(prisma, orderId);
+
     emitOrderStatusChanged({
       orderId, status: newStatus, shopId: order.shopId,
       sellerId: '', riderId: order.riderId, customerId: order.customerId,
       ...(refundedPaise != null ? { refundedPaise } : {}),
     });
-
-    // Recompute the milestone ETA for the new phase (ETA MVP Phase 1). Best-effort.
-    await computeAndPersistEta(prisma, orderId);
   }
 
   // ── Seller-specific actions ──────────────────────────────────────────────
