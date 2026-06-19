@@ -131,7 +131,9 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   const { state: authState } = useAuth();
   // Shared cart subtotal — the "You might also like" rail adds through this same
   // context, so it's our signal that an item was added outside the items list.
-  const { subtotalPaise: cartCtxSubtotal } = useCart();
+  // pendingMutations / flushPendingMutations gate + serialize checkout against
+  // in-flight cart writes (YMAL race fix, Phase 1).
+  const { subtotalPaise: cartCtxSubtotal, pendingMutations, flushPendingMutations, setQuantity } = useCart();
 
   const [cart, setCart]               = useState<CartResponse | null>(null);
   const [cartLoading, setCartLoading] = useState(true);
@@ -244,13 +246,11 @@ export default function CheckoutScreen({ navigation, route }: Props) {
     }
   }, [navigation, t, fetchPricing]);
 
-  // Keep the bill in sync with "You might also like" adds. That rail writes to the
-  // shared CartContext (server cart), but not to this screen's locally-loaded
-  // `cart`/`pricing` — so without this the subtotal, bill details and the Place
-  // Order total stay stale while the server would still bill the added item.
-  // Re-pull whenever the context subtotal moves (the same refresh the in-list
-  // steppers do). The in-list steppers hit the API directly and don't touch the
-  // context, and reloadCart bypasses the context too, so neither can loop this.
+  // Keep the bill in sync with cart writes that don't update this screen's local
+  // `cart`/`pricing` directly. The "You might also like" rail AND the in-list qty
+  // steppers both mutate through the shared CartContext now (so every write is
+  // tracked in pendingMutations), so we re-pull the bill whenever the context
+  // subtotal moves. reloadCart itself doesn't touch the context, so it can't loop this.
   const lastCtxSubtotalRef = useRef<number | null>(null);
   useEffect(() => {
     if (!cart) return;                                  // wait until the cart loads
@@ -266,14 +266,16 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   const changeQty = useCallback(async (productId: string, qty: number) => {
     setUpdatingId(productId);
     try {
-      await api.updateCartItem(productId, Math.max(0, qty));
-      await reloadCart(addressId);
-    } catch (err: unknown) {
-      Alert.alert(t('common.error'), err instanceof Error ? err.message : t('common.retry'));
+      // Route the in-list stepper through the TRACKED CartContext mutation — no
+      // direct cart-write API call here — so the write registers in pendingMutations
+      // (gating Place Order and awaited by flushPendingMutations), exactly like a
+      // YMAL add. CartContext surfaces its own errors (toast) + reverts; the
+      // cartCtxSubtotal watcher re-pulls this screen's bill once the subtotal moves.
+      await setQuantity(productId, Math.max(0, qty));
     } finally {
       setUpdatingId(null);
     }
-  }, [addressId, reloadCart, t]);
+  }, [setQuantity]);
 
   const pulseAndPlace = () => {
     Animated.sequence([
@@ -288,6 +290,11 @@ export default function CheckoutScreen({ navigation, route }: Props) {
 
     setPlacing(true);
     try {
+      // Ensure every in-flight cart write (e.g. a YMAL add tapped a moment ago)
+      // has committed server-side BEFORE we create the order — otherwise
+      // placeOrder consumes a pre-add cart and the item is lost.
+      await flushPendingMutations();
+
       const result = await api.placeOrder({
         cartId: cart.cartId, addressId, paymentMethod,
       });
@@ -319,7 +326,7 @@ export default function CheckoutScreen({ navigation, route }: Props) {
     } finally {
       setPlacing(false);
     }
-  }, [cart, addressId, paymentMethod, receiver, navigation, t]);
+  }, [cart, addressId, paymentMethod, receiver, navigation, t, flushPendingMutations]);
 
   // Razorpay returned a successful payment → re-verify server-side, then go to
   // tracking. The order already exists (pending_payment); verify flips it to paid.
@@ -360,7 +367,10 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   const selectedAddr   = ctxAddresses.find((a) => a.id === addressId) ?? null;
 
   const withinHours   = isOpenNow();
-  const canPlaceOrder = !!addressId && !placing && !!cart && withinHours;
+  // Block checkout while a cart write is still in flight (e.g. a just-tapped YMAL
+  // add) so Place Order can't consume a pre-add cart. handlePlaceOrder also awaits
+  // flushPendingMutations as a belt-and-suspenders for the sub-tap-timing window.
+  const canPlaceOrder = !!addressId && !placing && !!cart && withinHours && pendingMutations === 0;
 
   const ListHeader = (
     <>

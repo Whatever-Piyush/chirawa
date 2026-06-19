@@ -25,8 +25,10 @@ interface CartContextValue {
   quantities:     Record<string, number>;  // cartKey → qty (for steppers)
   lastAddedItem:  LastAddedItem | null;
   recentlyAdded:  LastAddedItem[];         // last 3 distinct added (oldest→newest)
+  pendingMutations: number;                // in-flight add/update/remove writes (YMAL race fix)
   addItem:        (item: AddItemInput) => Promise<void>;
   setQuantity:    (productId: string, qty: number, variantId?: string) => Promise<void>;
+  flushPendingMutations: () => Promise<void>; // resolves once no cart write is in flight
   refresh:        () => Promise<void>;
 }
 
@@ -62,6 +64,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cartItems, setCartItems] = useState<{ productId: string; name: string; imageUrl: string | null }[]>([]);
   const addOrderRef   = useRef<string[]>([]);              // productIds, most-recent last
   const colorByPidRef = useRef<Record<string, string>>({});
+  // In-flight cart writes (add/update/remove). Drives Place Order gating +
+  // flushPendingMutations so an outstanding YMAL add can't be lost when checkout fires.
+  const [pendingMutations, setPendingMutations] = useState(0);
+  const pendingRef = useRef<Set<Promise<void>>>(new Set());
 
   const count = useMemo(
     () => Object.values(quantities).reduce((s, q) => s + q, 0),
@@ -106,6 +112,31 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isAuthed]);
 
+  // ── Pending cart-mutation tracking (YMAL race fix, Phase 1) ────────────────
+  // Register every in-flight add/update/remove (the network write + its refresh)
+  // so Checkout can disable Place Order while writes are outstanding AND await
+  // them before creating the order. Without this, a YMAL add still in flight when
+  // Place Order fires is lost: placeOrder consumes + deletes the pre-add cart and
+  // the late write resurrects a new (orphan) cart holding the item.
+  const track = useCallback((work: Promise<void>): Promise<void> => {
+    const tracked = work.finally(() => {
+      pendingRef.current.delete(tracked);
+      setPendingMutations(pendingRef.current.size);
+    });
+    pendingRef.current.add(tracked);
+    setPendingMutations(pendingRef.current.size);
+    return tracked;
+  }, []);
+
+  // Resolve once no cart mutation is in flight. Loops so writes that begin
+  // mid-flush (e.g. another rapid YMAL tap) are awaited too. `allSettled` never
+  // rejects, so a failed mutation can't make this throw.
+  const flushPendingMutations = useCallback(async (): Promise<void> => {
+    while (pendingRef.current.size > 0) {
+      await Promise.allSettled([...pendingRef.current]);
+    }
+  }, []);
+
   const addItem = useCallback(async (item: AddItemInput) => {
     const key = cartKey(item.productId, item.variantId);
     const cur = quantities[key] ?? 0;
@@ -125,16 +156,18 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setCartItems((prev) => prev.some((p) => p.productId === item.productId)
       ? prev
       : [...prev, { productId: item.productId, name: item.name, imageUrl: item.imageUrl ?? null }]);
-    try {
-      if (cur > 0) await api.updateCartItem(item.productId, cur + 1, item.variantId);
-      else         await api.addToCart({ productId: item.productId, quantity: 1, ...(item.variantId ? { variantId: item.variantId } : {}) });
-      await refresh();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Could not add to cart';
-      toast.show(msg, 'error');
-      await refresh();   // revert optimistic change to server truth
-    }
-  }, [quantities, refresh, toast]);
+    await track((async () => {
+      try {
+        if (cur > 0) await api.updateCartItem(item.productId, cur + 1, item.variantId);
+        else         await api.addToCart({ productId: item.productId, quantity: 1, ...(item.variantId ? { variantId: item.variantId } : {}) });
+        await refresh();
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Could not add to cart';
+        toast.show(msg, 'error');
+        await refresh();   // revert optimistic change to server truth
+      }
+    })());
+  }, [quantities, refresh, toast, track]);
 
   const setQuantity = useCallback(async (productId: string, qty: number, variantId?: string) => {
     const key = cartKey(productId, variantId);
@@ -147,15 +180,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     });
     // Optimistically drop the thumbnail when a line is removed (slides out).
     if (next === 0) setCartItems((prev) => prev.filter((p) => p.productId !== productId));
-    try {
-      await api.updateCartItem(productId, next, variantId);
-      await refresh();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Could not update cart';
-      toast.show(msg, 'error');
-      await refresh();
-    }
-  }, [refresh, toast]);
+    await track((async () => {
+      try {
+        await api.updateCartItem(productId, next, variantId);
+        await refresh();
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Could not update cart';
+        toast.show(msg, 'error');
+        await refresh();
+      }
+    })());
+  }, [refresh, toast, track]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -166,7 +201,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   return (
-    <CartContext.Provider value={{ count, subtotalPaise, quantities, lastAddedItem, recentlyAdded, addItem, setQuantity, refresh }}>
+    <CartContext.Provider value={{ count, subtotalPaise, quantities, lastAddedItem, recentlyAdded, pendingMutations, addItem, setQuantity, flushPendingMutations, refresh }}>
       {children}
     </CartContext.Provider>
   );
@@ -176,6 +211,8 @@ export function useCart(): CartContextValue {
   const ctx = useContext(CartContext);
   return ctx ?? {
     count: 0, subtotalPaise: 0, quantities: {}, lastAddedItem: null, recentlyAdded: [],
-    addItem: async () => {}, setQuantity: async () => {}, refresh: async () => {},
+    pendingMutations: 0,
+    addItem: async () => {}, setQuantity: async () => {},
+    flushPendingMutations: async () => {}, refresh: async () => {},
   };
 }
