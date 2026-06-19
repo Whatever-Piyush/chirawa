@@ -64,9 +64,12 @@ rider_online()   { auth RIDER  PATCH /delivery/availability '{"status":"online",
 #   METHOD = cod | upi ;  PIN = created | paid | confirmed (default: created)
 #   Echoes the order id. Each block calls this for its OWN fixture (no shared OID).
 mk_order() {
-  local method="${1:-cod}" pin="${2:-created}" oid
+  local method="${1:-cod}" pin="${2:-created}" oid cid
   cart_reset; cart_add "$PROD_ID" 1
-  oid="$( auth CUST POST /orders "{\"addressId\":\"$ADDR_ID\",\"paymentMethod\":\"$method\"}" | jq -r '.orderId // empty' )"
+  # placeOrderSchema requires cartId (uuid) alongside addressId+paymentMethod (H-1 fix).
+  cid="$( auth CUST GET /cart | jq -r '.cartId // empty' )"
+  [ -n "$cid" ] || h_abort "mk_order($method,$pin): cart empty / no cartId (status=$( last_status ))"
+  oid="$( auth CUST POST /orders "{\"cartId\":\"$cid\",\"addressId\":\"$ADDR_ID\",\"paymentMethod\":\"$method\"}" | jq -r '.orderId // empty' )"
   [ -n "$oid" ] || h_abort "mk_order($method,$pin): order not created (status=$( last_status ))"
   case "$pin" in
     created) : ;;                                   # cod=>confirmed, upi=>pending_payment

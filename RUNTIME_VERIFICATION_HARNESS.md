@@ -209,7 +209,7 @@ Identical engine to C-B1 with `$RIDER_PHONE`. 9. **DB:** check `rider_profiles.p
    ```bash
    auth "$CUST" DELETE /cart >/dev/null
    auth "$CUST" POST /cart/items "{\"productId\":\"$PROD\",\"quantity\":2}" >/dev/null
-   R=$(auth "$CUST" POST /orders "{\"addressId\":\"$ADDR\",\"paymentMethod\":\"cod\"}")
+   R=$(auth "$CUST" POST /orders "{\"cartId\":\"$(auth "$CUST" GET /cart | jq -r .cartId)\",\"addressId\":\"$ADDR\",\"paymentMethod\":\"cod\"}")  # cartId required (H-1)
    echo "$R" | jq '{orderId,orderIds,groupId,status,totalAmount,droppedLines}'
    OID=$(echo "$R" | jq -r .orderId)
    # Oversell: add qty > stock of tracked product, then order → whole order rejected
@@ -239,7 +239,7 @@ Identical engine to C-B1 with `$RIDER_PHONE`. 9. **DB:** check `rider_profiles.p
    ```bash
    auth "$CUST" DELETE /cart >/dev/null
    auth "$CUST" POST /cart/items "{\"productId\":\"$PROD\",\"quantity\":1}" >/dev/null
-   OID=$(auth "$CUST" POST /orders "{\"addressId\":\"$ADDR\",\"paymentMethod\":\"upi\"}" | jq -r .orderId)
+   OID=$(auth "$CUST" POST /orders "{\"cartId\":\"$(auth "$CUST" GET /cart | jq -r .cartId)\",\"addressId\":\"$ADDR\",\"paymentMethod\":\"upi\"}" | jq -r .orderId)  # cartId required (H-1)
    P=$(auth "$CUST" POST /payments/orders/$OID '{}'); echo "$P" | jq '{razorpayOrderId,amountPaise,isDev}'
    RZO=$(echo "$P" | jq -r .razorpayOrderId)
    auth "$CUST" POST /payments/verify/$OID "{\"razorpayOrderId\":\"$RZO\",\"razorpayPaymentId\":\"pay_DEV1\",\"razorpaySignature\":\"sig\"}" | jq .
@@ -268,7 +268,7 @@ Identical engine to C-B1 with `$RIDER_PHONE`. 9. **DB:** check `rider_profiles.p
 5. **Procedure (webhook idempotency + reconcile):**
    ```bash
    # (a) Synthetic captured webhook in dev:
-   OID=$(auth "$CUST" POST /orders "{\"addressId\":\"$ADDR\",\"paymentMethod\":\"upi\"}" | jq -r .orderId)
+   OID=$(auth "$CUST" POST /orders "{\"cartId\":\"$(auth "$CUST" GET /cart | jq -r .cartId)\",\"addressId\":\"$ADDR\",\"paymentMethod\":\"upi\"}" | jq -r .orderId)  # cartId required (H-1)
    RZO=$(auth "$CUST" POST /payments/orders/$OID '{}' | jq -r .razorpayOrderId)
    BODY='{"id":"evt_TEST1","event":"payment.captured","payload":{"payment":{"entity":{"id":"pay_WH1","order_id":"'$RZO'","method":"upi","amount":1,"status":"captured"}}}}'
    curl -s $API/payments/webhook/razorpay -H 'content-type: application/json' -d "$BODY"     # → {received:true,processed:true}
