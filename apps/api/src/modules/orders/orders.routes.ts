@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { createOrdersService } from './orders.service';
 import { createPaymentsService } from '../payments/payments.service';
-import { placeOrderSchema, rateOrderSchema, type PlaceOrderInput, type RateOrderInput } from './orders.schema';
+import { placeOrderSchema, rateOrderSchema, codCollectedSchema, type PlaceOrderInput, type RateOrderInput } from './orders.schema';
 import { authenticate, requireRole } from '../../shared/middleware/auth.middleware';
 import { ValidationError } from '../../shared/errors/app-errors';
 import { runIdempotent, readIdempotencyKey } from '../../shared/utils/idempotency';
@@ -37,12 +37,13 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
       return { status: 201, body: order };
     };
 
-    // Idempotency-Key (optional): guards against double-tap / retry-after-timeout
-    // creating duplicate orders + duplicate Razorpay charges. Scoped per user.
-    const idemKey = readIdempotencyKey(request.headers['idempotency-key']);
-    const result = idemKey
-      ? await runIdempotent(app.redis, `order:${request.auth!.userId}`, idemKey, createOrder)
-      : await createOrder();
+    // Idempotency guards against double-tap / retry-after-timeout creating duplicate
+    // orders + duplicate Razorpay charges. We ALWAYS dedupe: honor a client-supplied
+    // Idempotency-Key when present, otherwise derive a server-side key from the cartId
+    // — stable across a double-tap, unique per cart — so a buggy/keyless client is
+    // still protected (Option 3). Scoped per user.
+    const idemKey = readIdempotencyKey(request.headers['idempotency-key']) ?? `auto:${parsed.data.cartId}`;
+    const result = await runIdempotent(app.redis, `order:${request.auth!.userId}`, idemKey, createOrder);
 
     return reply.status(result.status).send(result.body);
   });
@@ -117,9 +118,10 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
   // POST /api/v1/orders/:id/cod-collected
   app.post('/:id/cod-collected',
     { preHandler: [requireRole('rider')] },
-    async (request: FastifyRequest<{ Params: { id: string }; Body: { amountPaise: number } }>, reply) => {
-      const { amountPaise } = request.body as { amountPaise: number };
-      const result = await ordersService.codCollected(request.params.id, request.auth!.profileId, amountPaise, request.auth!.userId);
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+      const parsed = codCollectedSchema.safeParse(request.body ?? {});
+      if (!parsed.success) throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid input');
+      const result = await ordersService.codCollected(request.params.id, request.auth!.profileId, parsed.data.amountPaise, request.auth!.userId);
       return reply.send(result);
     },
   );

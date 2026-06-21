@@ -32,6 +32,20 @@ const sellerPayoutSelect = {
   razorpayContactId: true, razorpayFundAccountId: true,
 } as const;
 
+// P0-1: goods value a seller is settled for = each line's snapshot
+// (unitPrice × quantity) MINUS any per-line refund. `refundedPaise` defaults to 0,
+// so normal lines are unchanged; an item-unavailable line refunded to the customer
+// (refundedPaise = unitPrice × quantity) contributes 0, so the seller is no longer
+// paid for goods that were refunded. Single source of truth for both settle paths.
+type SettlementLine = { unitPrice: number; quantity: number; refundedPaise: number };
+export function settlementGoodsPaise(orders: { items: SettlementLine[] }[]): number {
+  return orders.reduce(
+    (sum, order) => sum + order.items.reduce(
+      (s, item) => s + (item.unitPrice * item.quantity - item.refundedPaise), 0,
+    ), 0,
+  );
+}
+
 export async function runDailySettlement(prisma: PrismaClient): Promise<void> {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
@@ -64,7 +78,7 @@ export async function runDailySettlement(prisma: PrismaClient): Promise<void> {
           deliveredAt: { gte: yesterday, lt: today },
         },
         include: {
-          items: { select: { unitPrice: true, quantity: true } },
+          items: { select: { unitPrice: true, quantity: true, refundedPaise: true } },
         },
       });
 
@@ -81,10 +95,9 @@ export async function runDailySettlement(prisma: PrismaClient): Promise<void> {
       });
       if (existing) { skipped++; continue; }
 
-      // Calculate total from ORDER ITEM SNAPSHOTS — never products.price
-      const totalProductPaise = orders.reduce((sum, order) =>
-        sum + order.items.reduce((s, item) => s + (item.unitPrice * item.quantity), 0), 0,
-      );
+      // Calculate total from ORDER ITEM SNAPSHOTS — never products.price.
+      // P0-1: settlementGoodsPaise subtracts per-line refunds (item-unavailable).
+      const totalProductPaise = settlementGoodsPaise(orders);
 
       // Create settlement record
       const settlement = await prisma.settlement.create({
@@ -310,9 +323,8 @@ export async function processSingleSellerSettle(
     include: { seller: { select: sellerPayoutSelect } },
   });
 
-  const totalProductPaise = orders.reduce((sum, order) =>
-    sum + order.items.reduce((s, item) => s + (item.unitPrice * item.quantity), 0), 0,
-  );
+  // P0-1: subtract per-line refunds so a refunded item-unavailable line isn't paid.
+  const totalProductPaise = settlementGoodsPaise(orders);
 
   const settlement = await prisma.settlement.upsert({
     where: {

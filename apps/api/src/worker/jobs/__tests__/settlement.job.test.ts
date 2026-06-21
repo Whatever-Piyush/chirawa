@@ -9,7 +9,7 @@ vi.mock('../../../modules/payments/razorpay.service', () => ({
 }));
 
 import * as razorpay from '../../../modules/payments/razorpay.service';
-import { initiatePayout } from '../settlement.job';
+import { initiatePayout, settlementGoodsPaise } from '../settlement.job';
 
 const isPayoutConfigured      = vi.mocked(razorpay.isPayoutConfigured);
 const ensureSellerFundAccount = vi.mocked(razorpay.ensureSellerFundAccount);
@@ -141,5 +141,41 @@ describe('initiatePayout (0.3 — RazorpayX payout state machine)', () => {
     expect(sellerProfileUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ data: { razorpayContactId: 'cont_NEW', razorpayFundAccountId: 'fa_NEW' } }),
     );
+  });
+});
+
+// ── P0-1 regression: settlement excludes refunded / item-unavailable lines ──────
+// A line reported unavailable is refunded to the customer (OrderItem.refundedPaise =
+// unitPrice × quantity). Before the fix the seller was still paid that line's full
+// snapshot, so the platform paid the refunded amount twice (customer refund + payout).
+describe('settlementGoodsPaise — excludes refunded lines (P0-1)', () => {
+  const line = (unitPrice: number, quantity: number, refundedPaise = 0) =>
+    ({ unitPrice, quantity, refundedPaise });
+
+  it('sums unit_price × quantity for a normal order — no refunds, behavior unchanged', () => {
+    expect(settlementGoodsPaise([{ items: [line(100, 1), line(200, 2)] }])).toBe(500);
+  });
+
+  it('excludes a fully-refunded item-unavailable line (the BUG-002 scenario)', () => {
+    // 2-line order: A ₹100 delivered, B ₹100 reported unavailable → refunded to customer.
+    const orders = [{ items: [line(10000, 1), line(10000, 1, 10000)] }];
+    expect(settlementGoodsPaise(orders)).toBe(10000); // only A — NOT 20000
+  });
+
+  it('subtracts exactly refundedPaise for a partially-refunded line', () => {
+    expect(settlementGoodsPaise([{ items: [line(20000, 1, 5000)] }])).toBe(15000);
+  });
+
+  it('aggregates across multiple orders, netting each refund', () => {
+    const orders = [
+      { items: [line(10000, 1), line(5000, 2)] },         // 20000
+      { items: [line(10000, 1, 10000), line(3000, 1)] },  // 3000 (first line refunded)
+    ];
+    expect(settlementGoodsPaise(orders)).toBe(23000);
+  });
+
+  it('returns 0 for no orders and for an order whose every line was refunded', () => {
+    expect(settlementGoodsPaise([])).toBe(0);
+    expect(settlementGoodsPaise([{ items: [line(10000, 1, 10000)] }])).toBe(0);
   });
 });

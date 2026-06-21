@@ -24,3 +24,11 @@ export const rateOrderSchema = z.object({
 });
 
 export type RateOrderInput = z.infer<typeof rateOrderSchema>;
+
+// BUG-001: the COD amount is advisory only — the server derives the recorded value
+// from the order total. Kept optional so older clients (which send it) still validate.
+export const codCollectedSchema = z.object({
+  amountPaise: z.number().int().nonnegative().optional(),
+});
+
+export type CodCollectedInput = z.infer<typeof codCollectedSchema>;

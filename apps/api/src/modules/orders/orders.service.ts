@@ -7,6 +7,7 @@ import { createResolverService, type AggLine } from '../orders/resolver.service'
 import { refundCapturedOrderPayment, refundOrderLine } from '../payments/payments.service';
 import { createCatalogService } from '../catalog/catalog.service';
 import { computeAndPersistEta, etaResponse } from './eta.service';
+import { ORDER_TRANSITIONS, assertTransition, transitionOrderStatus } from './order-status';
 import {
   NotFoundError, ForbiddenError,
   ValidationError, BusinessRuleError, AppError,
@@ -73,28 +74,22 @@ export async function decrementStockOrThrow(
 }
 
 // ── Order state machine (Phase 1.7) ──────────────────────────────────────────
-// Single source of truth for legal status transitions. Keeps illegal jumps
-// (e.g. confirmed→ready_for_pickup, skipping preparing) out of the DB.
-export const ORDER_TRANSITIONS: Record<string, readonly string[]> = {
-  pending_payment:  ['paid', 'cancelled'],
-  paid:             ['confirmed', 'cancelled'],
-  confirmed:        ['preparing', 'cancelled'],
-  preparing:        ['ready_for_pickup', 'cancelled'],
-  ready_for_pickup: ['picked_up', 'cancelled'],
-  picked_up:        ['out_for_delivery', 'cancelled'],
-  out_for_delivery: ['delivered', 'cancelled'],
-  delivered:        [],
-  cancelled:        [],
-};
+// The state machine + the single transition enforcement point now live in
+// ./order-status. Re-exported here for back-compat with existing importers.
+export { ORDER_TRANSITIONS, assertTransition };
 
-// Throws BusinessRuleError on an illegal transition. A same-status write is
-// treated as an idempotent no-op (e.g. accepting an already-confirmed COD order).
-export function assertTransition(from: string, to: string): void {
-  if (from === to) return;
-  const allowed = ORDER_TRANSITIONS[from];
-  if (!allowed || !allowed.includes(to)) {
-    throw new BusinessRuleError(`Illegal order transition: ${from} → ${to}`);
-  }
+// P0-2: the full-refund amount for an order's captured prepaid payment (undefined
+// for COD / unpaid). Lets a caller REVOKE FULFILLABILITY (cancel) BEFORE issuing the
+// external refund while still telling the customer the exact amount up-front — for a
+// full cancel the refund helper always moves order.totalAmount.
+function expectedRefundPaise(order: {
+  paymentMethod: string;
+  totalAmount: number;
+  payments: { status: string; razorpayPaymentId: string | null }[];
+}): number | undefined {
+  if (order.paymentMethod === 'cod') return undefined;
+  const hasCaptured = order.payments.some((p) => p.status === 'captured' && p.razorpayPaymentId);
+  return hasCaptured ? order.totalAmount : undefined;
 }
 
 // Minimal Prisma slice for releaseOrderAssignment — testable with a fake client.
@@ -342,6 +337,10 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       orderId:     primary.orderId,
       orderIds:    created.map((o) => o.orderId),
       groupId,
+      // Per-shop breakdown so the client can show "₹X from Shop A, ₹Y from Shop B"
+      // on the order-placed + group-tracking screens (multi-shop UX). Order matches
+      // `orderIds`; `total` is each child order's grand total (paise).
+      shops:       created.map((o) => ({ orderId: o.orderId, shopId: o.shopId, shopName: o.shopName, total: o.total })),
       status:      initStatus,
       totalAmount: grandTotal,
       // Aggregated lines nobody had in stock at checkout — the client shows these
@@ -461,7 +460,10 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     const orders = await prisma.order.findMany({
       where:   { groupId },
       orderBy: { createdAt: 'asc' },
-      include: { items: { select: { productId: true, productName: true, quantity: true, unitPrice: true, subtotal: true } } },
+      include: {
+        items: { select: { productId: true, productName: true, quantity: true, unitPrice: true, subtotal: true } },
+        shop:  { select: { name: true } },
+      },
     });
     if (orders.length === 0) throw new NotFoundError('Order group');
     if (orders.some((o) => o.customerId !== userId)) throw new ForbiddenError('Not your order');
@@ -479,7 +481,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       discount:    orders.reduce((s, o) => s + o.discount, 0),
       totalAmount: orders.reduce((s, o) => s + o.totalAmount, 0),
       orders: orders.map((o) => ({
-        id: o.id, status: o.status, totalAmount: o.totalAmount, items: o.items,
+        id: o.id, shopName: o.shop.name, status: o.status, totalAmount: o.totalAmount, items: o.items,
       })),
     };
   }
@@ -491,26 +493,15 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   ) {
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
 
-    // Reject illegal jumps before writing (Phase 1.7).
-    assertTransition(order.status, newStatus);
-
-    await prisma.$transaction([
-      prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: newStatus as never,
-          ...(newStatus === 'confirmed'        ? { confirmedAt: new Date() } : {}),
-          ...(newStatus === 'preparing'        ? { preparingAt: new Date() } : {}),
-          ...(newStatus === 'ready_for_pickup' ? { readyAt:     new Date() } : {}),
-          ...(newStatus === 'picked_up'        ? { pickedUpAt:  new Date() } : {}),
-          ...(newStatus === 'delivered'        ? { deliveredAt: new Date() } : {}),
-          ...(newStatus === 'cancelled'        ? { cancelledAt: new Date(), cancelReason: reason } : {}),
-        },
+    // Defect #1: route the status write through the same CAS primitive as every
+    // other transition — assertTransition + atomic compare-and-set (WHERE status =
+    // current) + history — so a concurrent transition can't be silently clobbered.
+    const moved = await prisma.$transaction(async (tx) =>
+      transitionOrderStatus(tx, orderId, order.status, newStatus, {
+        role: changedByRole, id: changedById, ...(reason != null ? { reason } : {}),
       }),
-      prisma.orderStatusHistory.create({
-        data: { orderId, status: newStatus as never, changedByRole: changedByRole as never, changedById, reason },
-      }),
-    ]);
+    );
+    if (!moved) throw new BusinessRuleError('Order status changed concurrently');
 
     // Persist + emit the milestone ETA BEFORE the status event, so ORDER_STATUS_CHANGED
     // consumers read the fresh, persisted ETA (P2 hardening, review #10). Best-effort.
@@ -573,23 +564,26 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   async function sellerRejectOrder(orderId: string, sellerUserId: string, reason: string) {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: { shop: { include: { seller: { select: { userId: true } } } } },
+      include: {
+        shop:     { include: { seller: { select: { userId: true } } } },
+        payments: { select: { status: true, razorpayPaymentId: true } },
+      },
     });
     if (!order) throw new NotFoundError('Order');
     if (order.shop.seller.userId !== sellerUserId) throw new ForbiddenError('Not your order');
     if (!['paid', 'confirmed'].includes(order.status)) {
       throw new BusinessRuleError('Order reject nahi ho sakta');
     }
-    // A seller-rejected prepaid order must be refunded too (Chunk 3.5).
-    const refundedPaise = await refundCapturedOrderPayment(
-      prisma, orderId, `Seller rejected: ${reason}`,
-    );
+    // P0-2: cancel FIRST (revoke fulfillability + free the rider), then refund LAST,
+    // so a successful refund can never leave a fulfillable order. A seller-rejected
+    // prepaid order must be refunded too (Chunk 3.5).
     await updateOrderStatus(
       orderId, 'cancelled', 'seller', sellerUserId, reason,
-      refundedPaise ?? undefined,
+      expectedRefundPaise(order),
     );
     // Free any assigned rider/batch on a seller rejection too (Phase 1.6).
     if (order.riderId) await releaseOrderAssignment(prisma, orderId, order.batchId);
+    await refundCapturedOrderPayment(prisma, orderId, `Seller rejected: ${reason}`);
     return { message: 'Order reject ho gaya' };
   }
 
@@ -618,7 +612,10 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   async function cancelOrder(orderId: string, userId: string, reason?: string) {
     const order = await prisma.order.findUnique({
       where:   { id: orderId },
-      include: { shop: { include: { seller: { select: { userId: true } } } } },
+      include: {
+        shop:     { include: { seller: { select: { userId: true } } } },
+        payments: { select: { status: true, razorpayPaymentId: true } },
+      },
     });
     if (!order) throw new NotFoundError('Order');
     if (order.customerId !== userId) throw new ForbiddenError('Not your order');
@@ -626,16 +623,14 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       throw new BusinessRuleError('ऑर्डर रद्द नहीं किया जा सकता — यह पहले से आगे बढ़ चुका है');
     }
 
-    // Prepaid order → auto-refund via Razorpay before flipping to cancelled, so
-    // the cancelled notification can tell the customer the exact refund amount.
-    // COD / unpaid orders refund nothing (helper returns null).
-    const refundedPaise = await refundCapturedOrderPayment(
-      prisma, orderId, reason ?? 'Customer cancelled',
-    );
-
+    // P0-2: REVOKE FULFILLABILITY FIRST. Flip the order to cancelled (then notify the
+    // seller and free the rider) BEFORE the external Razorpay refund, so a successful
+    // refund can never leave the order in a fulfillable state. The cancelled
+    // notification still quotes the exact amount (expectedRefundPaise = what the
+    // refund will move). COD / unpaid orders refund nothing.
     await updateOrderStatus(
       orderId, 'cancelled', 'customer', userId, reason,
-      refundedPaise ?? undefined,
+      expectedRefundPaise(order),
     );
 
     // Notify the seller in real time (service → event bus → socket plugin)
@@ -649,6 +644,11 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     // cancellation push, then the order leaves their active list (Phase 1.6).
     if (order.riderId) await releaseOrderAssignment(prisma, orderId, order.batchId);
 
+    // Order is already non-fulfillable; issue the refund LAST (retryable tail — a
+    // gateway failure leaves a cancelled order with the refund owed, never a refunded
+    // order that can still be fulfilled).
+    await refundCapturedOrderPayment(prisma, orderId, reason ?? 'Customer cancelled');
+
     return { message: 'Order cancel ho gaya' };
   }
 
@@ -656,30 +656,45 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   // riderUserId = the caller's User.id (for the status-history actor). BUG-1 fix:
   // previously both were the User.id, so the ownership guard always 403'd and the
   // COD ledger update (keyed by RiderProfile) silently no-op'd.
-  async function codCollected(orderId: string, riderProfileId: string, amountPaise: number, riderUserId: string) {
+  async function codCollected(orderId: string, riderProfileId: string, amountPaise: number | undefined, riderUserId: string) {
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundError('Order');
     if (order.riderId !== riderProfileId) throw new ForbiddenError('Not your delivery');
     if (order.paymentMethod !== 'cod') throw new BusinessRuleError('Yeh COD order nahi hai');
 
-    await prisma.$transaction([
-      prisma.order.update({
-        where: { id: orderId },
-        data:  { status: 'delivered', deliveredAt: new Date(), codCollectedPaise: amountPaise },
-      }),
-      prisma.orderStatusHistory.create({
-        data: { orderId, status: 'delivered', changedByRole: 'rider', changedById: riderUserId },
-      }),
-      prisma.riderProfile.update({
-        where: { id: riderProfileId },
-        data:  { codBalancePaise: { increment: amountPaise } },
-      }),
-    ]);
+    // BUG-001 (D3): idempotent terminal state — a retried collection succeeds WITHOUT
+    // re-crediting. Must precede assertTransition (which no-ops a delivered→delivered call).
+    if (order.status === 'delivered') return { message: 'Cash collection confirm ho gaya' };
 
-    emitOrderStatusChanged({
-      orderId, status: 'delivered',
-      shopId: order.shopId, sellerId: '', riderId: riderProfileId, customerId: order.customerId,
+    // BUG-001 (D1): the recorded cash is server-derived from the order total; the
+    // client-supplied amountPaise is advisory only and is never written.
+    const amountDue = order.totalAmount;
+    if (amountPaise != null && amountPaise !== amountDue) {
+      console.warn(`COD amount mismatch (ignored) order=${orderId} sent=${amountPaise} due=${amountDue}`);
+    }
+
+    // Single enforcement point (transitionOrderStatus): assertTransition + atomic
+    // compare-and-set + history. Only the call that actually flips out_for_delivery →
+    // delivered credits the balance (race-safe; rejects illegal source states — D2).
+    const credited = await prisma.$transaction(async (tx) => {
+      const flipped = await transitionOrderStatus(
+        tx, orderId, order.status, 'delivered',
+        { role: 'rider', id: riderUserId }, { codCollectedPaise: amountDue },
+      );
+      if (!flipped) return false;
+      await tx.riderProfile.update({
+        where: { id: riderProfileId },
+        data:  { codBalancePaise: { increment: amountDue } },
+      });
+      return true;
     });
+
+    if (credited) {
+      emitOrderStatusChanged({
+        orderId, status: 'delivered',
+        shopId: order.shopId, sellerId: '', riderId: riderProfileId, customerId: order.customerId,
+      });
+    }
     return { message: 'Cash collection confirm ho gaya' };
   }
 
@@ -696,20 +711,21 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     if (order.riderId !== riderProfileId) throw new ForbiddenError('Not your delivery');
     if (order.paymentMethod === 'cod') throw new BusinessRuleError('COD order: cash collection confirm karein');
 
-    await prisma.$transaction([
-      prisma.order.update({
-        where: { id: orderId },
-        data:  { status: 'delivered', deliveredAt: new Date() },
-      }),
-      prisma.orderStatusHistory.create({
-        data: { orderId, status: 'delivered', changedByRole: 'rider', changedById: riderUserId },
-      }),
-    ]);
+    // Idempotent terminal state — a retried delivery succeeds without re-stamping (V5).
+    if (order.status === 'delivered') return { message: 'Order delivered confirm ho gaya' };
 
-    emitOrderStatusChanged({
-      orderId, status: 'delivered',
-      shopId: order.shopId, sellerId: '', riderId: riderProfileId, customerId: order.customerId,
-    });
+    // Single enforcement point: assertTransition + atomic compare-and-set + history.
+    // Rejects an illegal source state (e.g. picked_up → delivered) and never reverts.
+    const delivered = await prisma.$transaction(async (tx) =>
+      transitionOrderStatus(tx, orderId, order.status, 'delivered', { role: 'rider', id: riderUserId }),
+    );
+
+    if (delivered) {
+      emitOrderStatusChanged({
+        orderId, status: 'delivered',
+        shopId: order.shopId, sellerId: '', riderId: riderProfileId, customerId: order.customerId,
+      });
+    }
     return { message: 'Order delivered confirm ho gaya' };
   }
 
@@ -727,14 +743,24 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     });
     if (!assignment) throw new ForbiddenError('Not your delivery');
 
-    const order = await prisma.order.findUnique({ where: { id: orderId }, include: { items: true } });
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, payments: { select: { status: true, razorpayPaymentId: true } } },
+    });
     if (!order) throw new NotFoundError('Order');
     if (!['confirmed', 'preparing', 'ready_for_pickup'].includes(order.status)) {
       throw new BusinessRuleError('Item ab report nahi kar sakte — order aage badh chuka hai');
     }
     const line = order.items.find((i) => i.id === orderItemId);
     if (!line) throw new NotFoundError('Order item');
-    if (line.fulfillmentStatus !== 'fulfilled') {
+    // Atomic claim: flip this line fulfilled→unavailable_refunded exactly once. A
+    // concurrent double-report (rider double-tap / retry) loses the compare-and-set
+    // (count 0) and aborts here, so the line is refunded at most once.
+    const lineClaim = await prisma.orderItem.updateMany({
+      where: { id: orderItemId, fulfillmentStatus: 'fulfilled' },
+      data:  { fulfillmentStatus: 'unavailable_refunded', refundedPaise: line.subtotal },
+    });
+    if (lineClaim.count === 0) {
       throw new BusinessRuleError('Yeh item pehle hi report ho chuka hai');
     }
 
@@ -760,12 +786,14 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     // (b) refund / cancel.
     if (order.items.length === 1) {
       // Only line → cancel the whole child order (full refund + free the rider).
-      const refundedPaise = await refundCapturedOrderPayment(prisma, orderId, `Item unavailable: ${line.productName}`);
+      // P0-2: cancel FIRST (revoke fulfillability), then refund LAST — a successful
+      // refund must never leave a fulfillable order.
+      await updateOrderStatus(orderId, 'cancelled', 'rider', userId, `Item unavailable: ${line.productName}`, expectedRefundPaise(order));
       await prisma.orderItem.update({
         where: { id: line.id }, data: { fulfillmentStatus: 'unavailable_refunded', refundedPaise: line.subtotal },
       });
-      await updateOrderStatus(orderId, 'cancelled', 'rider', userId, `Item unavailable: ${line.productName}`, refundedPaise ?? undefined);
       if (order.riderId) await releaseOrderAssignment(prisma, orderId, order.batchId);
+      const refundedPaise = await refundCapturedOrderPayment(prisma, orderId, `Item unavailable: ${line.productName}`);
       emitOrderItemUnavailable({
         customerId: order.customerId, orderId, productName: line.productName,
         refundedPaise: refundedPaise ?? line.subtotal, cancelled: true, ...(suggestion ? { suggestion } : {}),

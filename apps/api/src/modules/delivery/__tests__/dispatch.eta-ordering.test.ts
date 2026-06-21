@@ -18,19 +18,21 @@ const computeAndPersistEta = vi.mocked(eta.computeAndPersistEta);
 const emitOrderStatusChanged = vi.mocked(bus.emitOrderStatusChanged);
 
 function makePrisma() {
-  return {
+  const prisma = {
     riderProfile:       { findUnique: vi.fn().mockResolvedValue({ id: 'rp1' }) },
     deliveryAssignment: { findFirst:  vi.fn().mockResolvedValue({ id: 'a1', isActive: true }) },
     order: {
       findUniqueOrThrow: vi.fn().mockResolvedValue({
         id: 'o1', batchId: null, shopId: 's1', customerId: 'c1', status: 'picked_up',
       }),
-      update: vi.fn().mockResolvedValue({}),
-      count:  vi.fn().mockResolvedValue(0),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      count:      vi.fn().mockResolvedValue(0),
     },
     orderStatusHistory: { create: vi.fn().mockResolvedValue({}) },
-    $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
-  } as unknown as Parameters<typeof createDispatchService>[0];
+    $transaction: vi.fn(),
+  };
+  prisma.$transaction.mockImplementation((fn: (tx: typeof prisma) => unknown) => fn(prisma));
+  return prisma as unknown as Parameters<typeof createDispatchService>[0];
 }
 
 describe('riderAdvance — ETA persisted before status event (P2 #10)', () => {

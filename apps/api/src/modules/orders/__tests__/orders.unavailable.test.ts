@@ -29,9 +29,9 @@ const mkLine = (over: Record<string, unknown> = {}) => ({
 
 // Build a mock prisma whose order.findUnique returns the given order. riderId is
 // null so the single-line path skips releaseOrderAssignment (tested elsewhere).
-function makePrisma(order: Record<string, unknown>) {
+function makePrisma(order: Record<string, unknown>, lineClaimCount = 1) {
   const tx = {
-    order:              { update: vi.fn(async () => ({})), count: vi.fn(async () => 0) },
+    order:              { update: vi.fn(async () => ({})), updateMany: vi.fn(async () => ({ count: 1 })), count: vi.fn(async () => 0) },
     orderItem:          { update: vi.fn(async () => ({})) },
     orderStatusHistory: { create: vi.fn(async () => ({})) },
     deliveryAssignment: { updateMany: vi.fn(async () => ({ count: 1 })) },
@@ -47,7 +47,7 @@ function makePrisma(order: Record<string, unknown>) {
       findUniqueOrThrow: vi.fn(async () => order),
       update:            vi.fn(async () => ({})),
     },
-    orderItem:          { update: vi.fn(async () => ({})) },
+    orderItem:          { update: vi.fn(async () => ({})), updateMany: vi.fn(async () => ({ count: lineClaimCount })) },
     orderStatusHistory: { create: vi.fn(async () => ({})) }, // used by updateOrderStatus
     product: {
       update:    vi.fn(async () => ({})),
@@ -100,10 +100,11 @@ describe('riderReportItemUnavailable (Phase 5 stale-stock safety net)', () => {
     expect(prisma.$transaction).toHaveBeenCalled();
   });
 
-  it('single-line order: cancels the whole order with a full refund', async () => {
-    const { prisma } = makePrisma({
+  it('single-line order: cancels the whole order with a full refund — CANCEL BEFORE REFUND (P0-2)', async () => {
+    const { prisma, tx } = makePrisma({
       id: 'o1', status: 'confirmed', shopId: 's1', customerId: 'c1', riderId: null,
-      batchId: null, paymentMethod: 'upi', items: [mkLine()],
+      batchId: null, paymentMethod: 'upi', totalAmount: 2000,
+      payments: [{ status: 'captured', razorpayPaymentId: 'pay_rzp_1' }], items: [mkLine()],
     });
     const svc = createOrdersService(prisma as never, {} as never);
     const res = await svc.riderReportItemUnavailable('rider1', 'o1', 'item1');
@@ -111,15 +112,33 @@ describe('riderReportItemUnavailable (Phase 5 stale-stock safety net)', () => {
     expect(res.cancelled).toBe(true);
     expect(refundCapturedOrderPayment).toHaveBeenCalledWith(prisma, 'o1', expect.any(String));
     expect(emitOrderItemUnavailable).toHaveBeenCalledWith(expect.objectContaining({ cancelled: true }));
+    // P0-2: the order is flipped to cancelled BEFORE the external refund runs, so a
+    // refund can never leave the single-line order still fulfillable.
+    const refundOrder = (refundCapturedOrderPayment as unknown as { mock: { invocationCallOrder: number[] } })
+      .mock.invocationCallOrder[0]!;
+    expect(tx.order.updateMany.mock.invocationCallOrder[0]!).toBeLessThan(refundOrder);
   });
 
-  it('rejects a line that was already reported', async () => {
+  it('rejects a line that was already reported (line claim CAS finds 0 rows)', async () => {
     const { prisma } = makePrisma({
       id: 'o1', status: 'preparing', shopId: 's1', customerId: 'c1', riderId: null,
       batchId: null, paymentMethod: 'upi', items: [mkLine({ fulfillmentStatus: 'unavailable_refunded' })],
-    });
+    }, 0);
     const svc = createOrdersService(prisma as never, {} as never);
     await expect(svc.riderReportItemUnavailable('rider1', 'o1', 'item1')).rejects.toBeInstanceOf(BusinessRuleError);
+  });
+
+  it('#4 concurrent double-report: the second report loses the line claim (no double refund)', async () => {
+    // lineClaimCount=0 simulates the atomic CAS finding the line already claimed by a
+    // concurrent report (rider double-tap / retry) — the loser must NOT refund.
+    const { prisma } = makePrisma({
+      id: 'o1', status: 'preparing', shopId: 's1', customerId: 'c1', riderId: null,
+      batchId: null, paymentMethod: 'upi', items: [mkLine(), mkLine({ id: 'item2', productId: 'prod2' })],
+    }, 0);
+    const svc = createOrdersService(prisma as never, {} as never);
+    await expect(svc.riderReportItemUnavailable('rider1', 'o1', 'item1')).rejects.toBeInstanceOf(BusinessRuleError);
+    expect(refundOrderLine).not.toHaveBeenCalled();
+    expect(refundCapturedOrderPayment).not.toHaveBeenCalled();
   });
 
   it('rejects once the order has moved past pickup', async () => {

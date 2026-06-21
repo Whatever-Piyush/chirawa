@@ -31,8 +31,9 @@ describe('processWebhook — process-then-record idempotency (Phase 1.8)', () =>
     const p = makePrisma();
     const result = await svc(p).processWebhook(failedEvent(), 'sig');
 
+    // Guard: payment.failed only touches PENDING rows — never overwrites a captured payment.
     expect(p.paymentUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { razorpayOrderId: 'rzp_1' }, data: expect.objectContaining({ status: 'failed' }),
+      where: { razorpayOrderId: 'rzp_1', status: 'pending' }, data: expect.objectContaining({ status: 'failed' }),
     }));
     expect(p.webhookCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ eventId: 'evt_1' }) }));
     expect(result).toEqual({ processed: true, eventType: 'payment.failed' });

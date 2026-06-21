@@ -9,6 +9,7 @@ import {
   ValidationError, BusinessRuleError, PaymentError,
 } from '../../shared/errors/app-errors';
 import { emitOrderStatusChanged, emitNewOrderForSeller } from '../../shared/events/event-bus';
+import { assertTransition, transitionOrderStatus } from '../orders/order-status';
 
 export function createPaymentsService(prisma: PrismaClient) {
 
@@ -17,6 +18,27 @@ export function createPaymentsService(prisma: PrismaClient) {
     if (!order) throw new NotFoundError('Order');
     if (order.customerId !== userId) throw new ForbiddenError('Not your order');
     if (order.status !== 'pending_payment') throw new BusinessRuleError('Order payment already processed');
+
+    // F-1: reuse an existing pending payment instead of creating a second row.
+    // POST /orders already creates the payment for non-COD checkout (createCartPaymentOrder);
+    // a second create here left the order with TWO pending rows, which then broke capture —
+    // markOrderPaid writes one razorpayPaymentId across ALL pending rows of the order, and
+    // Payment.razorpayPaymentId is @unique, so the duplicate row caused a unique-violation 500.
+    // Returning the existing pending row keeps this endpoint idempotent without touching the
+    // place / verify / capture paths.
+    const existing = await prisma.payment.findFirst({
+      where:   { orderId, status: 'pending', razorpayOrderId: { not: null } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existing?.razorpayOrderId) {
+      return {
+        razorpayOrderId: existing.razorpayOrderId,
+        razorpayKeyId:   env.RAZORPAY_KEY_ID,
+        amountPaise:     order.totalAmount,
+        currency:        'INR',
+        isDev:           !isRazorpayConfigured(),
+      };
+    }
 
     if (!isRazorpayConfigured()) {
       const mockId = `order_DEV_${Date.now()}`;
@@ -75,10 +97,42 @@ export function createPaymentsService(prisma: PrismaClient) {
     const orderIds = [...new Set(payments.map((p) => p.orderId))];
     for (const id of orderIds) {
       const o = await prisma.order.findUnique({ where: { id }, select: { status: true } });
-      if (o && !['paid', 'confirmed', 'delivered'].includes(o.status)) {
-        await markOrderPaid(prisma, id, paymentId, method);
+      if (!o || ['paid', 'confirmed', 'delivered'].includes(o.status)) continue;
+      if (o.status === 'cancelled') {
+        // Capture landed on an ALREADY-cancelled order — the money was taken but the
+        // order will never be fulfilled, so refund it (was silently dropped before).
+        await refundCancelledCapture(id, paymentId);
+        continue;
+      }
+      await markOrderPaid(prisma, id, paymentId, method);
+    }
+  }
+
+  // Refund a capture that arrived after the order was cancelled. Claims the pending
+  // Payment row (pending→refunded) first, so a webhook retry / verify race refunds
+  // at most once; reverts the claim if the external refund fails (retryable).
+  async function refundCancelledCapture(orderId: string, razorpayPaymentId: string): Promise<void> {
+    const order = await prisma.order.findUnique({ where: { id: orderId }, select: { totalAmount: true } });
+    if (!order) return;
+    const claim = await prisma.payment.updateMany({
+      where: { orderId, status: 'pending' },
+      data:  { status: 'refunded', razorpayPaymentId, refundedPaise: order.totalAmount },
+    });
+    if (claim.count === 0) return;   // already handled (retry / concurrent settle)
+    if (isRazorpayConfigured()) {
+      try {
+        await createRefund(razorpayPaymentId, order.totalAmount, { reason: 'Payment captured after order cancellation', orderId });
+      } catch (err) {
+        await prisma.payment.updateMany({
+          where: { orderId, status: 'refunded' },
+          data:  { status: 'pending', razorpayPaymentId: null, refundedPaise: 0 },
+        });
+        throw err;
       }
     }
+    await prisma.transaction.create({
+      data: { type: 'refund', amountPaise: order.totalAmount, referenceId: orderId, referenceType: 'order', description: 'Auto-refund: payment captured after order cancellation' },
+    });
   }
 
   async function verifyClientPayment(
@@ -129,7 +183,9 @@ export function createPaymentsService(prisma: PrismaClient) {
       const entity = event.payload.payment?.entity;
       if (entity) {
         await prisma.payment.updateMany({
-          where: { razorpayOrderId: entity.order_id },
+          // Only pending rows — never overwrite an already-captured payment (a late /
+          // duplicate payment.failed for the same razorpayOrderId must not flip captured→failed).
+          where: { razorpayOrderId: entity.order_id, status: 'pending' },
           data:  { status: 'failed', failureReason: entity.error_description ?? 'Payment failed' },
         });
       }
@@ -154,26 +210,48 @@ export function createPaymentsService(prisma: PrismaClient) {
     const captured = order.payments.find((p) => p.status === 'captured' && p.razorpayPaymentId);
     if (!captured?.razorpayPaymentId) throw new BusinessRuleError('No captured payment found');
 
+    // Reject an illegal cancel (e.g. an already-delivered order — V4) before any work.
+    assertTransition(order.status, 'cancelled');
+
+    // P0-2: CLAIM the payment AND CANCEL the order ATOMICALLY, in one transaction,
+    // BEFORE the external refund. This revokes fulfillability up-front — once the money
+    // is refunded the order is already cancelled, so it can never be refunded-but-
+    // fulfillable. A lost claim (concurrent refund, count=0) or a concurrent status
+    // change rolls back here with nothing spent and the admin retries.
+    const claimed = await prisma.$transaction(async (tx) => {
+      const claim = await tx.payment.updateMany({
+        where: { id: captured.id, status: 'captured' },
+        data:  { status: 'refunded', refundedPaise: order.totalAmount },
+      });
+      if (claim.count === 0) return false;   // another refund won the claim — abort
+      const moved = await transitionOrderStatus(
+        tx, orderId, order.status, 'cancelled', { role: 'admin', id: adminId, reason },
+      );
+      // Order advanced concurrently → throw to roll the claim back; nothing has moved.
+      if (!moved) throw new BusinessRuleError('Order status changed; please retry the refund');
+      return true;
+    });
+    if (!claimed) throw new BusinessRuleError('Refund already in progress for this payment');
+
+    // External refund runs only AFTER the order is durably cancelled. On failure, REVERT
+    // the claim so the refund is retryable; the order STAYS cancelled — never fulfillable
+    // while a refund is outstanding (the safe failure direction).
     if (isRazorpayConfigured()) {
-      await createRefund(captured.razorpayPaymentId, order.totalAmount, { reason, orderId, adminId });
+      try {
+        await createRefund(captured.razorpayPaymentId, order.totalAmount, { reason, orderId, adminId });
+      } catch (err) {
+        await prisma.payment.updateMany({
+          where: { id: captured.id, status: 'refunded' },
+          data:  { status: 'captured', refundedPaise: captured.refundedPaise },
+        });
+        throw err;
+      }
     }
 
-    await prisma.$transaction([
-      prisma.payment.update({
-        where: { id: captured.id },
-        data:  { status: 'refunded', refundedPaise: order.totalAmount },
-      }),
-      prisma.order.update({
-        where: { id: orderId },
-        data:  { status: 'cancelled', cancelledAt: new Date(), cancelReason: reason },
-      }),
-      prisma.orderStatusHistory.create({
-        data: { orderId, status: 'cancelled', changedByRole: 'admin', changedById: adminId, reason: `Refund: ${reason}` },
-      }),
-      prisma.transaction.create({
-        data: { type: 'refund', amountPaise: order.totalAmount, referenceId: orderId, referenceType: 'order', description: `Refund for order ${orderId}: ${reason}` },
-      }),
-    ]);
+    // Ledger only after the refund actually happened.
+    await prisma.transaction.create({
+      data: { type: 'refund', amountPaise: order.totalAmount, referenceId: orderId, referenceType: 'order', description: `Refund for order ${orderId}: ${reason}` },
+    });
 
     emitOrderStatusChanged({
       orderId, status: 'cancelled',
@@ -227,25 +305,38 @@ export async function refundCapturedOrderPayment(
   const captured = order.payments.find((p) => p.status === 'captured' && p.razorpayPaymentId);
   if (!captured?.razorpayPaymentId) return null;
 
-  // Hit Razorpay only when configured; in dev-mock mode we still record the
-  // refund so the order/accounting state is consistent.
+  // Defect #2: CLAIM the payment atomically (captured→refunded) BEFORE any external
+  // call. Concurrent callers: exactly one wins (count=1); the rest get count=0 and
+  // return null without refunding — so createRefund runs at most once.
+  const claim = await prisma.payment.updateMany({
+    where: { id: captured.id, status: 'captured' },
+    data:  { status: 'refunded', refundedPaise: order.totalAmount },
+  });
+  if (claim.count === 0) return null;
+
+  // External refund runs only with the claim held. On failure, REVERT the claim so
+  // the payment returns to 'captured' and the refund is retryable (no orphan state).
+  // (In dev-mock mode the claim already recorded the refund; no external call.)
   if (isRazorpayConfigured()) {
-    await createRefund(captured.razorpayPaymentId, order.totalAmount, { reason, orderId });
+    try {
+      await createRefund(captured.razorpayPaymentId, order.totalAmount, { reason, orderId });
+    } catch (err) {
+      await prisma.payment.updateMany({
+        where: { id: captured.id, status: 'refunded' },
+        data:  { status: 'captured', refundedPaise: captured.refundedPaise },
+      });
+      throw err;
+    }
   }
 
-  await prisma.$transaction([
-    prisma.payment.update({
-      where: { id: captured.id },
-      data:  { status: 'refunded', refundedPaise: order.totalAmount },
-    }),
-    prisma.transaction.create({
-      data: {
-        type: 'refund', amountPaise: order.totalAmount,
-        referenceId: orderId, referenceType: 'order',
-        description: `Auto-refund on cancellation: ${reason}`,
-      },
-    }),
-  ]);
+  // Record the ledger only after the refund actually happened.
+  await prisma.transaction.create({
+    data: {
+      type: 'refund', amountPaise: order.totalAmount,
+      referenceId: orderId, referenceType: 'order',
+      description: `Auto-refund on cancellation: ${reason}`,
+    },
+  });
 
   return order.totalAmount;
 }
@@ -306,19 +397,24 @@ export async function markOrderPaid(
   if (!order) return;
   if (['paid', 'confirmed', 'delivered', 'cancelled'].includes(order.status)) return;
 
-  await prisma.$transaction([
-    prisma.order.update({ where: { id: orderId }, data: { status: 'paid' } }),
-    prisma.orderStatusHistory.create({
-      data: { orderId, status: 'paid', changedByRole: 'customer', changedById: order.customerId, reason: `Payment: ${razorpayPaymentId}` },
-    }),
-    prisma.payment.updateMany({
+  // Single enforcement point: assertTransition (pending_payment → paid) + atomic
+  // compare-and-set + history, kept in one transaction with the payment capture + ledger.
+  const paid = await prisma.$transaction(async (tx) => {
+    const moved = await transitionOrderStatus(
+      tx, orderId, order.status, 'paid',
+      { role: 'customer', id: order.customerId, reason: `Payment: ${razorpayPaymentId}` },
+    );
+    if (!moved) return false;
+    await tx.payment.updateMany({
       where: { orderId, status: 'pending' },
       data:  { razorpayPaymentId, status: 'captured', capturedAt: new Date(), method: method as never },
-    }),
-    prisma.transaction.create({
+    });
+    await tx.transaction.create({
       data: { type: 'customer_payment', amountPaise: order.totalAmount, referenceId: orderId, referenceType: 'order', description: 'Online payment received' },
-    }),
-  ]);
+    });
+    return true;
+  });
+  if (!paid) return;
 
   // Notify customer
   emitOrderStatusChanged({

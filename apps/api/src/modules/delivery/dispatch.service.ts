@@ -6,6 +6,7 @@ import {
 } from '../../shared/utils/geo';
 import { emitOrderAssignedToRider, emitOrderStatusChanged } from '../../shared/events/event-bus';
 import { computeAndPersistEta } from '../orders/eta.service';
+import { transitionOrderStatus } from '../orders/order-status';
 
 export type AvailabilityStatus = 'online' | 'offline' | 'on_delivery';
 
@@ -203,29 +204,23 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
       if (notPicked > 0) throw new BusinessRuleError('Pehle batch ke saare orders pickup karein');
     }
 
-    await prisma.$transaction([
-      prisma.order.update({
-        where: { id: orderId },
-        data:  {
-          status: newStatus as never,
-          ...(newStatus === 'picked_up'        ? { pickedUpAt:       new Date() } : {}),
-          ...(newStatus === 'out_for_delivery' ? { outForDeliveryAt: new Date() } : {}),
-        },
-      }),
-      prisma.orderStatusHistory.create({
-        data: { orderId, status: newStatus as never, changedByRole: 'rider', changedById: userId },
-      }),
-    ]);
+    // Single enforcement point: assertTransition + atomic compare-and-set + history.
+    // Rejects a reverse move (e.g. delivered → out_for_delivery / picked_up — V1/V2).
+    const moved = await prisma.$transaction(async (tx) =>
+      transitionOrderStatus(tx, orderId, order.status, newStatus, { role: 'rider', id: userId }),
+    );
 
-    // Recompute + persist + emit the milestone ETA BEFORE the status event, so any
-    // ORDER_STATUS_CHANGED consumer (e.g. the out_for_delivery push) reads the fresh,
-    // persisted ETA rather than the previous phase's value (P2 hardening, review #10).
-    await computeAndPersistEta(prisma, orderId);
+    if (moved) {
+      // Recompute + persist + emit the milestone ETA BEFORE the status event, so any
+      // ORDER_STATUS_CHANGED consumer (e.g. the out_for_delivery push) reads the fresh,
+      // persisted ETA rather than the previous phase's value (P2 hardening, review #10).
+      await computeAndPersistEta(prisma, orderId);
 
-    emitOrderStatusChanged({
-      orderId, status: newStatus, shopId: order.shopId,
-      sellerId: '', riderId: rider.id, customerId: order.customerId,
-    });
+      emitOrderStatusChanged({
+        orderId, status: newStatus, shopId: order.shopId,
+        sellerId: '', riderId: rider.id, customerId: order.customerId,
+      });
+    }
     return { status: newStatus };
   }
 
