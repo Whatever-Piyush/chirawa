@@ -2,6 +2,7 @@
   "expo": {
     "name": "Bringly Seller",
     "slug": "chirawa-seller",
+    "owner": "aaaaaadiii",
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
@@ -20,7 +21,8 @@
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.CAMERA"
       ]
     },
     "plugins": [
@@ -42,7 +44,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "af29f665-a0e7-4f50-912f-ac041760145b"
+        "projectId": "aaef7351-4246-4a3c-b64d-151da185e187"
       }
     }
   }
