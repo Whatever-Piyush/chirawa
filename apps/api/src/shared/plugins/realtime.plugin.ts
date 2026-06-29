@@ -13,6 +13,7 @@ import {
   type OrderItemUnavailablePayload,
   type OrderEtaChangedPayload,
 } from '../events/event-bus';
+import { isAuthorizedForOrderRoom, emitToOrderAndUser } from './realtime.helpers';
 
 // Extend Fastify to expose Socket.io instance to routes
 declare module 'fastify' {
@@ -83,7 +84,7 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
 
   // ── Connection Handler ────────────────────────────────────────────────────
   io.on('connection', (socket: Socket & { data: SocketData }) => {
-    const { userId, role } = socket.data;
+    const { userId, role, profileId } = socket.data;
     app.log.debug(`🔌 Socket connected: ${userId} (${role})`);
 
     // Auto-join personal room — for direct notifications
@@ -94,11 +95,29 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
     if (role === 'rider')  void socket.join(`rider:${userId}`);
 
     // ── Subscribe to order updates ──────────────────────────────────────────
-    // Client joins this room to receive live status + location for that order
-    socket.on('order:subscribe', (orderId: string) => {
+    // Client joins this room to receive live status + location for that order.
+    // IDOR guard: only the order's customer / owning seller / assigned rider /
+    // admin may join — never an arbitrary authenticated user. Fail-closed.
+    socket.on('order:subscribe', async (orderId: string) => {
       if (typeof orderId !== 'string' || !orderId) return;
-      app.log.debug(`${userId} subscribed to order:${orderId}`);
-      void socket.join(`order:${orderId}`);
+      try {
+        const order = await app.prisma.order.findUnique({
+          where:  { id: orderId },
+          select: {
+            customerId: true,
+            riderId:    true,                                       // RiderProfile.id
+            shop:       { select: { seller: { select: { userId: true } } } },
+          },
+        });
+        if (!isAuthorizedForOrderRoom({ userId, role, profileId }, order)) {
+          app.log.warn(`🚫 order:subscribe DENIED — ${userId} (${role}) → order:${orderId}`);
+          return;
+        }
+        app.log.debug(`${userId} subscribed to order:${orderId}`);
+        void socket.join(`order:${orderId}`);
+      } catch (err) {
+        app.log.error({ err }, `order:subscribe authz check failed for order:${orderId}`);
+      }
     });
 
     socket.on('order:unsubscribe', (orderId: string) => {
@@ -175,17 +194,11 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
   // This is where the two systems meet.
 
   eventBus.on(Events.ORDER_STATUS_CHANGED, (payload: OrderStatusChangedPayload) => {
-    // Broadcast to everyone watching this order
-    io.to(`order:${payload.orderId}`).emit('order:status', {
+    // Single union emit to the order room + the customer's personal room. A
+    // customer subscribed to BOTH receives this exactly once (was emitted twice).
+    emitToOrderAndUser(io, payload.orderId, payload.customerId, 'order:status', {
       orderId:   payload.orderId,
       status:    payload.status,
-      timestamp: new Date().toISOString(),
-    });
-
-    // Also notify customer's personal room (even if not subscribed to order room)
-    io.to(`user:${payload.customerId}`).emit('order:status', {
-      orderId: payload.orderId,
-      status:  payload.status,
       timestamp: new Date().toISOString(),
     });
 
@@ -204,8 +217,9 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
       status:           payload.status,
       source:           payload.source,
     };
-    io.to(`order:${payload.orderId}`).emit('order:eta', body);
-    io.to(`user:${payload.customerId}`).emit('order:eta', body);
+    // Single union emit (order room + customer room) — dedups for the customer
+    // watching their own order, who is in both rooms (was emitted twice).
+    emitToOrderAndUser(io, payload.orderId, payload.customerId, 'order:eta', body);
     app.log.debug(`⏱️  Order ${payload.orderId} eta → ${body.secondsRemaining}s`);
   });
 
