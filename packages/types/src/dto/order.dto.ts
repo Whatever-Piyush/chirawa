@@ -14,6 +14,11 @@ export interface PlaceOrderRequest {
 export interface PlaceOrderResponse {
   orderId: string;
   orderIds?: string[];
+  // Set when the cart spanned >1 shop (Catalog Engine Phase 5): the OrderGroup id
+  // plus a per-shop breakdown, so the order-placed + group-tracking screens can
+  // show "₹X from Shop A, ₹Y from Shop B". `shops` order matches `orderIds`.
+  groupId?: string | null;
+  shops?: Array<{ orderId: string; shopId: string; shopName: string; total: Paise }>;
   status: OrderStatus;
   totalAmount: Paise;
   message?: string;

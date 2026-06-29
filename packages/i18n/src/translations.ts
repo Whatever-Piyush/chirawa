@@ -162,6 +162,8 @@ export const translations = {
     placeOrder:        { en: 'Place Order',                          hi: 'ऑर्डर दें' },
     orderPlacedTitle:  { en: 'Order Placed!',                        hi: 'ऑर्डर हो गया!' },
     orderPlacedSub:    { en: 'Your order is confirmed and being prepared', hi: 'आपका ऑर्डर कन्फर्म हो गया है और तैयार हो रहा है' },
+    // Multi-shop: cart split into one order per shop. {n} = number of orders.
+    ordersPlacedCount: { en: '{n} orders placed',                    hi: '{n} ऑर्डर हो गए' },
     trackOrder:        { en: 'Track order',                          hi: 'ऑर्डर ट्रैक करें' },
     orderFor:          { en: 'Order for',                           hi: 'ऑर्डर इनके लिए' },
     billDetails:       { en: 'Bill details',                        hi: 'बिल विवरण' },
@@ -205,6 +207,11 @@ export const translations = {
   },
   tracking: {
     title:           { en: 'Order Tracking',                    hi: 'ऑर्डर ट्रैकिंग' },
+    // Multi-shop group overview. {n} = number of shops.
+    groupHeading:    { en: 'Your order · {n} shops',            hi: 'आपका ऑर्डर · {n} दुकानें' },
+    groupArriving:   { en: 'Being prepared at {n} shops',       hi: '{n} दुकानों पर तैयार हो रहा है' },
+    viewDetails:     { en: 'View details',                      hi: 'विवरण देखें' },
+    billTotal:       { en: 'Bill total',                        hi: 'कुल बिल' },
     confirmed:       { en: 'Confirmed',                         hi: 'कन्फर्म' },
     preparing:       { en: 'Preparing',                         hi: 'तैयार हो रहा है' },
     onTheWay:        { en: 'On the Way',                        hi: 'रास्ते में' },

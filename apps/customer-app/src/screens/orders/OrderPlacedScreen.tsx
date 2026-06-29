@@ -14,7 +14,10 @@ type Props = NativeStackScreenProps<RootStackParamList, 'OrderPlaced'>;
 const AUTO_ADVANCE_MS = 2000;
 
 export default function OrderPlacedScreen({ navigation, route }: Props) {
-  const { orderId } = route.params;
+  const { orderId, groupId, shops, totalAmount } = route.params;
+  // Multi-shop: the cart was split into one order per shop. Show the per-shop
+  // breakdown + grand total so the customer sees exactly what went where.
+  const isGroup = !!groupId && !!shops && shops.length > 1;
   const t = useT();
   const insets = useSafeAreaInsets();
   const { colors: Colors } = useTheme();
@@ -27,7 +30,8 @@ export default function OrderPlacedScreen({ navigation, route }: Props) {
   const textOpacity = useRef(new Animated.Value(0)).current;
   const textShift   = useRef(new Animated.Value(16)).current;
 
-  const goToTracking = () => navigation.replace('OrderTracking', { orderId });
+  const goToTracking = () =>
+    navigation.replace('OrderTracking', groupId ? { orderId, groupId } : { orderId });
 
   useEffect(() => {
     Animated.sequence([
@@ -71,10 +75,31 @@ export default function OrderPlacedScreen({ navigation, route }: Props) {
         <Animated.View style={{ opacity: textOpacity, transform: [{ translateY: textShift }], alignItems: 'center' }}>
           <Text style={styles.title}>{t('checkout.orderPlacedTitle')}</Text>
           <Text style={styles.subtitle}>{t('checkout.orderPlacedSub')}</Text>
-          <View style={styles.orderIdPill}>
-            <Ionicons name="receipt-outline" size={14} color={Colors.textSecondary} />
-            <Text style={styles.orderIdText}>#{orderId.slice(-6).toUpperCase()}</Text>
-          </View>
+
+          {isGroup ? (
+            // Per-shop breakdown: "₹195 — Shop A", "₹184 — Shop B", then the total.
+            <View style={styles.breakdownCard}>
+              <Text style={styles.breakdownHeading}>
+                {t('checkout.ordersPlacedCount').replace('{n}', String(shops!.length))}
+              </Text>
+              {shops!.map((s) => (
+                <View key={s.orderId} style={styles.breakdownRow}>
+                  <Text style={styles.breakdownShop} numberOfLines={1}>{s.shopName}</Text>
+                  <Text style={styles.breakdownAmt}>₹{Math.round(s.total / 100)}</Text>
+                </View>
+              ))}
+              <View style={styles.breakdownDivider} />
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownTotalLabel}>{t('checkout.grandTotal')}</Text>
+                <Text style={styles.breakdownTotalAmt}>₹{Math.round((totalAmount ?? 0) / 100)}</Text>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.orderIdPill}>
+              <Ionicons name="receipt-outline" size={14} color={Colors.textSecondary} />
+              <Text style={styles.orderIdText}>#{orderId.slice(-6).toUpperCase()}</Text>
+            </View>
+          )}
         </Animated.View>
       </View>
 
@@ -116,6 +141,20 @@ const makeStyles = (Colors: ColorPalette) =>
       paddingHorizontal: Spacing.md, paddingVertical: 6, marginTop: Spacing.lg,
     },
     orderIdText: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textSecondary, letterSpacing: 0.5 },
+
+    // Multi-shop per-shop breakdown card.
+    breakdownCard: {
+      alignSelf: 'stretch', marginTop: Spacing.lg, marginHorizontal: Spacing.xl,
+      backgroundColor: Colors.surfaceAlt, borderRadius: Radius.lg,
+      padding: Spacing.lg, gap: Spacing.sm,
+    },
+    breakdownHeading: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textSecondary, marginBottom: Spacing.xs },
+    breakdownRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.md },
+    breakdownShop: { flex: 1, fontSize: FontSize.md, color: Colors.textPrimary, fontWeight: FontWeight.semibold },
+    breakdownAmt: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+    breakdownDivider: { height: 1, backgroundColor: Colors.border, marginVertical: Spacing.xs },
+    breakdownTotalLabel: { fontSize: FontSize.md, fontWeight: FontWeight.heavy, color: Colors.textPrimary },
+    breakdownTotalAmt: { fontSize: FontSize.lg, fontWeight: FontWeight.heavy, color: Colors.primary },
 
     trackBtn: {
       flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,

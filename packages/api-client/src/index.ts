@@ -414,6 +414,7 @@ export class ChirawaApiClient {
     totalAmount: number;
     orders: Array<{
       id: string;
+      shopName: string;
       status: string;
       totalAmount: number;
       items: Array<{ productId: string; productName: string; quantity: number; unitPrice: number; subtotal: number }>;

@@ -157,6 +157,8 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   // Razorpay checkout (online payment). Non-null = the sheet is open for this order.
   const [rzpData, setRzpData] = useState<{
     orderId: string; keyId: string; razorpayOrderId: string; amountPaise: number;
+    // Multi-shop breakdown carried through payment so OrderPlaced can show it.
+    groupId?: string; shops?: Array<{ orderId: string; shopName: string; total: number }>; totalAmount?: number;
   } | null>(null);
   const [verifying, setVerifying] = useState(false);
 
@@ -172,6 +174,10 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   }, []);
 
   const placeBtnScale = useRef(new Animated.Value(1)).current;
+  // Synchronous re-entrancy lock for Place Order. A ref (not state) so a second tap
+  // during the pulse animation — before `placing` re-renders — is a no-op. Server-side
+  // idempotency is the real guarantee; this just stops the duplicate request at source.
+  const submittingRef = useRef(false);
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerTitle: t('checkout.title') });
@@ -278,6 +284,11 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   }, [setQuantity]);
 
   const pulseAndPlace = () => {
+    // Claim the submit synchronously BEFORE the animation starts; a rapid second
+    // tap returns here instead of queuing a second handlePlaceOrder.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setPlacing(true);
     Animated.sequence([
       Animated.spring(placeBtnScale, { toValue: 0.95, friction: 5, tension: 300, useNativeDriver: true }),
       Animated.spring(placeBtnScale, { toValue: 1.05, friction: 5, tension: 300, useNativeDriver: true }),
@@ -286,7 +297,7 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   };
 
   const handlePlaceOrder = useCallback(async () => {
-    if (!cart || !addressId) return;
+    if (!cart || !addressId) { submittingRef.current = false; setPlacing(false); return; }
 
     setPlacing(true);
     try {
@@ -305,8 +316,18 @@ export default function CheckoutScreen({ navigation, route }: Props) {
         try { await api.updateOrderReceiver(result.orderId, receiver.name, receiver.phone); } catch { /* tolerate */ }
       }
 
+      // Per-shop breakdown for the order-placed + group-tracking screens. Only
+      // present (and only >1) when the cart spanned multiple shops.
+      const groupExtras = result.groupId && result.shops && result.shops.length > 1
+        ? {
+            groupId:     result.groupId,
+            shops:       result.shops.map((s) => ({ orderId: s.orderId, shopName: s.shopName, total: s.total })),
+            totalAmount: result.totalAmount,
+          }
+        : null;
+
       if (paymentMethod === PaymentMethod.COD) {
-        navigation.replace('OrderPlaced', { orderId: result.orderId });
+        navigation.replace('OrderPlaced', { orderId: result.orderId, ...(groupExtras ?? {}) });
         return;
       }
 
@@ -317,6 +338,7 @@ export default function CheckoutScreen({ navigation, route }: Props) {
           keyId:           result.razorpayKeyId,
           razorpayOrderId: result.razorpayOrderId,
           amountPaise:     result.amountPaise ?? result.totalAmount,
+          ...(groupExtras ?? {}),
         });
       } else {
         Alert.alert(t('common.error'), t('checkout.paymentInitFailed'));
@@ -325,6 +347,7 @@ export default function CheckoutScreen({ navigation, route }: Props) {
       Alert.alert(t('common.error'), err instanceof Error ? err.message : t('common.error'));
     } finally {
       setPlacing(false);
+      submittingRef.current = false;
     }
   }, [cart, addressId, paymentMethod, receiver, navigation, t, flushPendingMutations]);
 
@@ -341,7 +364,10 @@ export default function CheckoutScreen({ navigation, route }: Props) {
         razorpayPaymentId: r.razorpayPaymentId,
         razorpaySignature: r.razorpaySignature,
       });
-      navigation.replace('OrderPlaced', { orderId: data.orderId });
+      navigation.replace('OrderPlaced', {
+        orderId: data.orderId,
+        ...(data.groupId && data.shops ? { groupId: data.groupId, shops: data.shops, totalAmount: data.totalAmount } : {}),
+      });
     } catch (err: unknown) {
       Alert.alert(t('checkout.paymentFailed'), err instanceof Error ? err.message : t('checkout.paymentFailed'));
     } finally {

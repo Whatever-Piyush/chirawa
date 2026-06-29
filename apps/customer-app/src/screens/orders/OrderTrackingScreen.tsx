@@ -479,8 +479,161 @@ function RatingCard({
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 
+// Dispatcher: a multi-shop cart carries a groupId → show the group overview;
+// otherwise the existing single-order tracking. Split into two components so the
+// single-order hooks below never run for a group (and vice-versa).
 export default function OrderTrackingScreen({ navigation, route }: Props) {
-  const { orderId } = route.params;
+  const { orderId, groupId } = route.params;
+  if (groupId) return <GroupTracking navigation={navigation} groupId={groupId} />;
+  return <SingleOrderTracking navigation={navigation} orderId={orderId} />;
+}
+
+// ─── Group overview (multi-shop) ─────────────────────────────────────────────
+// A thin overview over the per-shop child orders: combined status + bill, one
+// card per shop, each drilling into the EXISTING single-order tracking screen.
+type GroupData = Awaited<ReturnType<typeof api.getOrderGroup>>;
+
+// Compact per-child status word, mapped onto the existing tracking labels.
+function groupStatusLabel(status: string, t: (k: string) => string): string {
+  switch (status) {
+    case 'pending_payment':
+    case 'paid':
+    case 'confirmed':         return t('tracking.confirmed');
+    case 'preparing':         return t('tracking.preparing');
+    case 'ready_for_pickup':
+    case 'picked_up':
+    case 'out_for_delivery':  return t('tracking.onTheWay');
+    case 'delivered':         return t('tracking.delivered');
+    case 'cancelled':         return t('tracking.statusCancelled');
+    default:                  return status;
+  }
+}
+
+function GroupTracking({ navigation, groupId }: { navigation: Props['navigation']; groupId: string }) {
+  const t = useT();
+  const insets = useSafeAreaInsets();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
+
+  const [group,   setGroup]   = useState<GroupData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchGroup = useCallback(async () => {
+    try {
+      setGroup(await api.getOrderGroup(groupId));
+    } catch {
+      // tolerate — render the error/retry state below
+    } finally {
+      setLoading(false);
+    }
+  }, [groupId]);
+
+  useLayoutEffect(() => { navigation.setOptions({ headerShown: false }); }, [navigation]);
+  useEffect(() => { void fetchGroup(); }, [fetchGroup]);
+
+  const handleBack = () =>
+    navigation.canGoBack() ? navigation.goBack() : navigation.navigate('MainTabs', { screen: 'Home' });
+
+  if (loading) return <BrandedLoader />;
+
+  if (!group) {
+    return (
+      <View style={[styles.errorWrap, { paddingTop: insets.top }]}>
+        <Ionicons name="cloud-offline-outline" size={48} color={Colors.textTertiary} />
+        <Text style={styles.errorTitle}>{t('tracking.loadErrorTitle')}</Text>
+        <Text style={styles.errorSub}>{t('tracking.loadErrorSub')}</Text>
+        <TouchableOpacity style={styles.retryBtn} activeOpacity={0.85} onPress={() => { setLoading(true); void fetchGroup(); }}>
+          <Text style={styles.retryBtnText}>{t('tracking.retry')}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const shopCount = group.orders.length;
+
+  return (
+    <View style={styles.container}>
+      {/* Gradient header — group status across all shops */}
+      <FauxGradient
+        from={Gradients.warm[0]}
+        to={Gradients.warm[1]}
+        steps={12}
+        style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}
+      >
+        <View style={styles.headerTopRow}>
+          <TouchableOpacity onPress={handleBack} style={styles.headerBack} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="arrow-back" size={22} color={Colors.white} />
+          </TouchableOpacity>
+          <Text style={styles.headerSmall} numberOfLines={1}>#{groupId.slice(-6).toUpperCase()}</Text>
+        </View>
+        <Text style={styles.headerBig} numberOfLines={1}>{groupStatusLabel(group.status, t)}</Text>
+      </FauxGradient>
+
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <Text style={styles.groupHeading}>
+          {t('tracking.groupHeading').replace('{n}', String(shopCount))}
+        </Text>
+
+        {/* One card per shop → tap to open the full single-order tracking */}
+        {group.orders.map((child) => (
+          <TouchableOpacity
+            key={child.id}
+            style={[styles.card, styles.groupCard]}
+            activeOpacity={0.85}
+            // push (not navigate): force a NEW single-order screen on top of the
+            // group so Back returns here — navigate to the same route name would
+            // just swap this screen's params and lose the group overview.
+            onPress={() => navigation.push('OrderTracking', { orderId: child.id })}
+          >
+            <View style={styles.groupCardTop}>
+              <Text style={styles.groupShopName} numberOfLines={1}>{child.shopName}</Text>
+              <Text style={styles.groupShopAmt}>₹{Math.round(child.totalAmount / 100)}</Text>
+            </View>
+            {child.items.map((it) => (
+              <Text key={it.productId} style={styles.groupItemLine} numberOfLines={1}>
+                • {it.productName} ×{it.quantity}
+              </Text>
+            ))}
+            <View style={styles.groupCardBottom}>
+              <Text style={styles.groupStatusChip}>{groupStatusLabel(child.status, t)}</Text>
+              <View style={styles.groupViewDetails}>
+                <Text style={styles.groupViewDetailsText}>{t('tracking.viewDetails')}</Text>
+                <Ionicons name="chevron-forward" size={15} color={Colors.primary} />
+              </View>
+            </View>
+          </TouchableOpacity>
+        ))}
+
+        {/* Combined bill */}
+        <View style={[styles.card, styles.groupBillCard]}>
+          <View style={styles.groupBillRow}>
+            <Text style={styles.groupBillLabel}>{t('checkout.itemsTotal')}</Text>
+            <Text style={styles.groupBillValue}>₹{Math.round(group.subtotal / 100)}</Text>
+          </View>
+          <View style={styles.groupBillRow}>
+            <Text style={styles.groupBillLabel}>{t('cart.deliveryFee')}</Text>
+            <Text style={styles.groupBillValue}>₹{Math.round(group.deliveryFee / 100)}</Text>
+          </View>
+          {group.discount > 0 && (
+            <View style={styles.groupBillRow}>
+              <Text style={styles.groupBillLabel}>{t('checkout.discount')}</Text>
+              <Text style={styles.groupBillValue}>−₹{Math.round(group.discount / 100)}</Text>
+            </View>
+          )}
+          <View style={styles.groupBillDivider} />
+          <View style={styles.groupBillRow}>
+            <Text style={styles.groupBillTotalLabel}>{t('tracking.billTotal')}</Text>
+            <Text style={styles.groupBillTotalValue}>₹{Math.round(group.totalAmount / 100)}</Text>
+          </View>
+        </View>
+
+        <View style={{ height: insets.bottom + Spacing.xl }} />
+      </ScrollView>
+    </View>
+  );
+}
+
+function SingleOrderTracking({ navigation, orderId }: { navigation: Props['navigation']; orderId: string }) {
   const t = useT();
   const toast = useToast();
   const insets = useSafeAreaInsets();
@@ -1196,6 +1349,25 @@ const makeStyles = (Colors: ColorPalette) =>
   container:    { flex: 1, backgroundColor: Colors.background },
   scrollContent:{ padding: Spacing.lg, gap: Spacing.md, paddingBottom: Spacing.xxl },
   center:       { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  // ── Group overview (multi-shop) ──
+  groupHeading:     { fontSize: FontSize.sm, fontWeight: '800', color: Colors.textSecondary, marginTop: Spacing.xs },
+  groupCard:        { gap: Spacing.xs },
+  groupCardTop:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.md },
+  groupShopName:    { flex: 1, fontSize: FontSize.md, fontWeight: '800', color: Colors.textPrimary },
+  groupShopAmt:     { fontSize: FontSize.md, fontWeight: '800', color: Colors.textPrimary },
+  groupItemLine:    { fontSize: FontSize.sm, color: Colors.textSecondary },
+  groupCardBottom:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: Spacing.xs },
+  groupStatusChip:  { fontSize: FontSize.xs, fontWeight: '800', color: Colors.primary, backgroundColor: Colors.primaryLight, borderRadius: Radius.full, paddingHorizontal: Spacing.sm, paddingVertical: 3, overflow: 'hidden' },
+  groupViewDetails: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  groupViewDetailsText: { fontSize: FontSize.sm, fontWeight: '800', color: Colors.primary },
+  groupBillCard:    { gap: Spacing.sm },
+  groupBillRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  groupBillLabel:   { fontSize: FontSize.sm, color: Colors.textSecondary },
+  groupBillValue:   { fontSize: FontSize.sm, fontWeight: '700', color: Colors.textPrimary },
+  groupBillDivider: { height: 1, backgroundColor: Colors.border, marginVertical: 2 },
+  groupBillTotalLabel: { fontSize: FontSize.md, fontWeight: '900', color: Colors.textPrimary },
+  groupBillTotalValue: { fontSize: FontSize.lg, fontWeight: '900', color: Colors.primary },
 
   // ── Tracking V2 Sprint 2 (ETA hero · packing illustration · timeline) ──
   etaHero:      { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },

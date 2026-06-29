@@ -61,8 +61,16 @@ export type RootStackParamList = {
   // Optional params let the add-address flow return its new address (and an
   // optional "someone else" receiver) so Checkout auto-selects + applies them.
   Checkout: { newAddressId?: string; receiverName?: string; receiverPhone?: string } | undefined;
-  OrderTracking: { orderId: string };
-  OrderPlaced: { orderId: string };
+  // groupId is set for multi-shop carts: OrderTracking renders the group overview
+  // (per-shop child orders) instead of a single order. shops/totalAmount let the
+  // OrderPlaced screen show the per-shop breakdown without an extra fetch.
+  OrderTracking: { orderId: string; groupId?: string };
+  OrderPlaced: {
+    orderId: string;
+    groupId?: string;
+    shops?: Array<{ orderId: string; shopName: string; total: number }>;
+    totalAmount?: number;
+  };
   AddressList: undefined;
   AddressMap: { autoLocate?: boolean; returnTo?: 'Checkout'; center?: { lat: number; lng: number } } | undefined;
   AddressDetails: {
