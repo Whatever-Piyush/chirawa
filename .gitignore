@@ -45,3 +45,10 @@ apps/*/node_modules/
 
 # PM2
 ecosystem.config.js.backup
+
+# Local patch / scratch artifacts at repo root (not for the shared repo)
+/*.diff
+/*.patch
+
+# External AI-tooling configs
+.codex/
