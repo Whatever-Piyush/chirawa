@@ -87,11 +87,12 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
     navigation.setOptions({ headerShown: true, title: activeName });
   }, [navigation, activeName]);
 
-  // Load the shop rail once.
+  // Load the shop rail once. The Special surface is featured-only, so the rail
+  // mirrors that — keep only featured shops (drops the aggregate "Chirawa store").
   useEffect(() => {
     let active = true;
     fetchShops()
-      .then((list) => { if (active) setShops(list); })
+      .then((list) => { if (active) setShops(list.filter((s) => s.isFeatured)); })
       .catch(() => { /* tolerate — rail collapses to the active shop only */ });
     return () => { active = false; };
   }, []);
@@ -118,10 +119,11 @@ export default function ShopDetailScreen({ navigation, route }: Props) {
     return () => { active = false; };
   }, [activeId]);
 
-  // Always show the incoming shop in the rail even before fetchShops resolves.
+  // Featured shops, but never drop the shop we actually opened (prepend it if the
+  // featured list doesn't include it — and it's the only entry until the fetch lands).
   const railShops = useMemo<Pick<ApiShop, 'id' | 'name'>[]>(() => {
-    if (shops.length > 0) return shops;
-    return [{ id: shopId, name: shopName }];
+    if (shops.some((s) => s.id === shopId)) return shops;
+    return [{ id: shopId, name: shopName }, ...shops];
   }, [shops, shopId, shopName]);
 
   const onSelectShop = useCallback((id: string, name: string) => {
