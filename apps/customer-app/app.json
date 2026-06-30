@@ -56,6 +56,14 @@
         {
           "contactsPermission": "Bringly receiver ka naam aur number bharne ke liye aapke contacts use karti hai."
         }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Bringly aapki aawaz se search karne ke liye microphone use karti hai.",
+          "speechRecognitionPermission": "Bringly aapki aawaz ko text mein badalne ke liye speech recognition use karti hai.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
       ]
     ],
     "owner": "piyushlatta",

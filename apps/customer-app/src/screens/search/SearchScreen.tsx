@@ -20,6 +20,7 @@ import { useToast } from '../../components/ui/Toast';
 import Shimmer from '../../components/ui/Shimmer';
 import { Text } from '../../components/ui';
 import { Ionicons } from '@expo/vector-icons';
+import VoiceSearchSheet from '../../components/search/VoiceSearchSheet';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -270,6 +271,23 @@ export default function SearchScreen({ navigation }: Props) {
 
   // Autocomplete dropdown (server /search/suggest) — tiny, fast, race-guarded.
   const [suggestItems, setSuggestItems] = useState<SearchSuggestion[]>([]);
+
+  // Voice search listening sheet.
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  // Recognition bias from our actual catalog — the biggest precision lever.
+  const voiceContext = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const term of [
+      ...categories.map((c) => c.name),
+      ...POPULAR_CHIPS,
+      ...feedProducts.map((p) => p.name),
+    ]) {
+      const v = term.trim();
+      if (v && !seen.has(v)) { seen.add(v); out.push(v); }
+    }
+    return out.slice(0, 100);
+  }, [categories, feedProducts]);
 
   const inputRef           = useRef<TextInput>(null);
   const debounceRef        = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -625,7 +643,7 @@ export default function SearchScreen({ navigation }: Props) {
             autoCapitalize="none"
             autoCorrect={false}
           />
-          {query.length > 0 && (
+          {query.length > 0 ? (
             <TouchableOpacity
               onPress={() => {
                 setQuery(''); setProducts([]); setShops([]); setSearched(''); setSuggestItems([]);
@@ -636,6 +654,14 @@ export default function SearchScreen({ navigation }: Props) {
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Ionicons name="close" size={18} color={Colors.textMuted} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={() => setVoiceOpen(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel={t('voice.listening')}
+            >
+              <Ionicons name="mic-outline" size={20} color={Colors.primary} />
             </TouchableOpacity>
           )}
         </View>
@@ -852,6 +878,14 @@ export default function SearchScreen({ navigation }: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Voice search — listening sheet (auto-runs the search on a final transcript) */}
+      <VoiceSearchSheet
+        visible={voiceOpen}
+        contextualStrings={voiceContext}
+        onClose={() => setVoiceOpen(false)}
+        onResult={fireQuery}
+      />
     </View>
   );
 }
