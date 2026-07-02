@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import { NotFoundError } from '../../shared/errors/app-errors';
+import { currentISTTimeHHMM } from '../../shared/config/operating-hours';
 import { AGG_CACHE_KEY } from './aggregation.service';
 import { expandHinglish } from './hinglish-aliases';
 
@@ -118,12 +119,16 @@ export function buildCategoryImages(cats: CategoryImageRow[], perCat = 3): Recor
   return map;
 }
 
-function computeIsOpen(shop: {
-  isOpen: boolean; openTime: string; closeTime: string;
-}): boolean {
+// P1-4: shop open/close times are IST wall-clock strings ("09:00"), so the
+// comparison must use IST wall-clock too. This used Date#getHours() (server-
+// local), which on the UTC production host shifted every shop's open/closed
+// badge by +5:30. Exported for tests; `now` is injectable for the same reason.
+export function computeIsOpen(
+  shop: { isOpen: boolean; openTime: string; closeTime: string },
+  now: Date = new Date(),
+): boolean {
   if (!shop.isOpen) return false;
-  const now  = new Date();
-  const hhmm = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  const hhmm = currentISTTimeHHMM(now);
   return hhmm >= shop.openTime && hhmm <= shop.closeTime;
 }
 

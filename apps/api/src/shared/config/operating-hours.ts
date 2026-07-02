@@ -27,5 +27,20 @@ export function isWithinOperatingHours(date: Date = new Date()): boolean {
   return hour >= OPERATING_HOURS.openHour && hour < OPERATING_HOURS.closeHour;
 }
 
+/**
+ * Current wall-clock time in Asia/Kolkata as "HH:MM" (00–23), independent of
+ * server timezone. Shop open/close times ("09:00") are IST wall-clock strings,
+ * so anything comparing against them must use THIS — never Date#getHours(),
+ * which on the UTC production host shifts every comparison by +5:30 (P1-4).
+ */
+export function currentISTTimeHHMM(date: Date = new Date()): string {
+  // en-GB keeps hour12:false in the 00–23 range (en-US can yield "24:xx").
+  return date.toLocaleTimeString('en-GB', {
+    timeZone: OPERATING_HOURS.timezone,
+    hour:     '2-digit',
+    minute:   '2-digit',
+  });
+}
+
 /** Human-friendly window, e.g. "9 AM – 8 PM" (used in error messages/UI). */
 export const OPERATING_HOURS_LABEL = '9 AM – 8 PM';
