@@ -14,4 +14,9 @@ export const FEATURES = {
   // "Sold by → Explore shop" row on product detail) so users browse the whole
   // catalog in one place. Flip to true once multiple distinct shops go live.
   shopBrowsing: false,
+  // v1 launch is COD-only (Phase 5, founder decision). The checkout still SHOWS
+  // "Pay Online" — as a "coming soon" option, so nothing looks broken — but it
+  // can't be selected. The API enforces this regardless (PAYMENTS_ONLINE_ENABLED,
+  // apps/api/src/config/features.ts); flip BOTH together to launch online payments.
+  onlinePayments: false,
 } as const;

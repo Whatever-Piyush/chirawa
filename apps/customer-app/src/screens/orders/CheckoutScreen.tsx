@@ -32,6 +32,8 @@ import { useCart } from '../../context/CartContext';
 import { type RazorpaySuccess } from '../../components/payment/RazorpayCheckout';
 import ProductCard, { type ProductCardData } from '../../components/product/ProductCard';
 import BrandedLoader from '../../components/BrandedLoader';
+import { useToast } from '../../components/ui';
+import { FEATURES } from '../../config/features';
 import LocationSheet from '../../components/location/LocationSheet';
 import { useAddresses } from '../../context/AddressContext';
 import { fetchProducts, toProductCard } from '../../services/catalog';
@@ -153,6 +155,7 @@ export default function CheckoutScreen({ navigation, route }: Props) {
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PaymentMethod.COD);
   const [placing,       setPlacing]       = useState(false);
+  const toast = useToast();
 
   // Razorpay checkout (online payment). Non-null = the sheet is open for this order.
   const [rzpData, setRzpData] = useState<{
@@ -501,15 +504,21 @@ export default function CheckoutScreen({ navigation, route }: Props) {
       <View style={styles.section}>
         <Text style={styles.cardTitle}>{t('checkout.paymentMethod')}</Text>
         {([
-          { method: PaymentMethod.COD, icon: 'cash-outline',  title: t('checkout.cod'),       hint: t('checkout.codHint') },
-          { method: PaymentMethod.UPI, icon: 'card-outline',  title: t('checkout.payOnline'), hint: t('checkout.onlineHint') },
+          // COD-only launch (Phase 5): "Pay Online" stays VISIBLE as a coming-soon
+          // option (hiding it would look broken) but can't be selected — a tap
+          // explains via toast. The API rejects non-COD orders regardless.
+          { method: PaymentMethod.COD, icon: 'cash-outline',  title: t('checkout.cod'),       hint: t('checkout.codHint'),    comingSoon: false },
+          { method: PaymentMethod.UPI, icon: 'card-outline',  title: t('checkout.payOnline'), hint: t('checkout.onlineHint'), comingSoon: !FEATURES.onlinePayments },
         ] as const).map((opt) => {
           const selected = paymentMethod === opt.method;
           return (
             <TouchableOpacity
               key={opt.method}
-              style={[styles.payOption, selected && styles.payOptionSelected]}
-              onPress={() => setPaymentMethod(opt.method)}
+              style={[styles.payOption, selected && styles.payOptionSelected, opt.comingSoon && styles.payOptionComingSoon]}
+              onPress={() => {
+                if (opt.comingSoon) { toast.show(t('checkout.comingSoon'), 'info'); return; }
+                setPaymentMethod(opt.method);
+              }}
               activeOpacity={0.8}
             >
               <Ionicons name={opt.icon} size={22} color={selected ? Colors.primary : Colors.textSecondary} />
@@ -517,9 +526,15 @@ export default function CheckoutScreen({ navigation, route }: Props) {
                 <Text style={styles.payOptionTitle}>{opt.title}</Text>
                 <Text style={styles.payOptionHint}>{opt.hint}</Text>
               </View>
-              <View style={[styles.payRadio, selected && styles.payRadioSelected]}>
-                {selected && <View style={styles.payRadioDot} />}
-              </View>
+              {opt.comingSoon ? (
+                <View style={styles.comingSoonBadge}>
+                  <Text style={styles.comingSoonBadgeText}>{t('common.comingSoon')}</Text>
+                </View>
+              ) : (
+                <View style={[styles.payRadio, selected && styles.payRadioSelected]}>
+                  {selected && <View style={styles.payRadioDot} />}
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
@@ -920,6 +935,9 @@ const makeStyles = (Colors: ColorPalette) =>
     backgroundColor: Colors.surface, marginTop: Spacing.md,
   },
   payOptionSelected: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight, ...Shadow.xs },
+  // COD-only launch: the online option is visible but dimmed, with a badge in
+  // place of the radio (comingSoonBadge below) — deliberately not "broken grey".
+  payOptionComingSoon: { opacity: 0.6 },
   payOptionTitle: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
   payOptionHint:  { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 1 },
   payRadio: {
