@@ -2,7 +2,7 @@ import fp from 'fastify-plugin';
 import { Queue } from 'bullmq';
 import Redis from 'ioredis';
 import type { FastifyInstance } from 'fastify';
-import { QueueNames } from '../../worker/queues';
+import { QueueNames, DEFAULT_JOB_OPTIONS } from '../../worker/queues';
 import { env } from '../../config/env';
 
 declare module 'fastify' {
@@ -30,13 +30,13 @@ async function queuePlugin(app: FastifyInstance): Promise<void> {
   await connection.connect();
 
   const queues = {
-    settlement:     new Queue(QueueNames.SETTLEMENT,     { connection }),
-    reconciliation: new Queue(QueueNames.RECONCILIATION, { connection }),
-    cleanup:        new Queue(QueueNames.CLEANUP,        { connection }),
-    referral:       new Queue(QueueNames.REFERRAL,       { connection }),
-    notification:   new Queue(QueueNames.NOTIFICATION,   { connection }),
-    assignment:     new Queue(QueueNames.ORDER_ASSIGNMENT, { connection }),
-    sellerAccept:   new Queue(QueueNames.SELLER_ACCEPT,     { connection }),
+    settlement:     new Queue(QueueNames.SETTLEMENT, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
+    reconciliation: new Queue(QueueNames.RECONCILIATION, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
+    cleanup:        new Queue(QueueNames.CLEANUP, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
+    referral:       new Queue(QueueNames.REFERRAL, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
+    notification:   new Queue(QueueNames.NOTIFICATION, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
+    assignment:     new Queue(QueueNames.ORDER_ASSIGNMENT, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
+    sellerAccept:   new Queue(QueueNames.SELLER_ACCEPT, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
   };
 
   app.decorate('queues', queues);

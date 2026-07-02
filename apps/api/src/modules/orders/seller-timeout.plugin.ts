@@ -21,7 +21,10 @@ async function sellerTimeoutPlugin(app: FastifyInstance): Promise<void> {
       JobNames.AUTO_ACCEPT,
       { orderId: payload.orderId } satisfies AutoAcceptPayload,
       // Stable jobId dedupes against the worker's reconciliation path (0.4).
-      { delay: SELLER_ACCEPT_MS, jobId: autoAcceptJobId(payload.orderId), removeOnComplete: true, removeOnFail: true },
+      // removeOnComplete: true is deliberate — it frees the deterministic jobId
+      // immediately so reconciliation can re-arm the safety net for this order;
+      // failures are KEPT (DEFAULT_JOB_OPTIONS retention) for evidence (P1-8).
+      { delay: SELLER_ACCEPT_MS, jobId: autoAcceptJobId(payload.orderId), removeOnComplete: true },
     ).catch((err) => app.log.error({ err }, 'Failed to schedule seller auto-accept'));
   });
 

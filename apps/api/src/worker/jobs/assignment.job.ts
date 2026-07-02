@@ -36,7 +36,7 @@ export async function processAssignBatch(
     await queue.add(
       JobNames.ASSIGN_BATCH,
       { batchId, attempt: attempt + 1 } satisfies AssignBatchPayload,
-      { delay: RETRY_DELAY_MS, removeOnComplete: true, removeOnFail: true },
+      { delay: RETRY_DELAY_MS }, // retries/retention from DEFAULT_JOB_OPTIONS (P1-8)
     );
     console.log(`🛵 [assign] batch ${batchId} no rider (attempt ${attempt}/${MAX_ATTEMPTS}) — retrying in ${RETRY_DELAY_MS}ms`);
     return;

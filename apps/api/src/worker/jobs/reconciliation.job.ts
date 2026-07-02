@@ -111,7 +111,9 @@ async function progressReconciledOrder(
   await sellerAcceptQueue.add(
     JobNames.AUTO_ACCEPT,
     { orderId } satisfies AutoAcceptPayload,
-    { delay: SELLER_ACCEPT_MS, jobId: autoAcceptJobId(orderId), removeOnComplete: true, removeOnFail: true },
+    // removeOnComplete: true frees the deterministic jobId for re-arming;
+    // failures are KEPT via DEFAULT_JOB_OPTIONS retention (P1-8).
+    { delay: SELLER_ACCEPT_MS, jobId: autoAcceptJobId(orderId), removeOnComplete: true },
   ).catch((err) => console.error(`Failed to schedule auto-accept for ${orderId}:`, err));
 
   // 2. Direct seller FCM (mirrors notifications.plugin's NEW_ORDER_FOR_SELLER).

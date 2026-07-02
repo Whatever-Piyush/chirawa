@@ -4,7 +4,7 @@ import { Worker, Queue } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import Redis from 'ioredis';
 import { env } from '../config/env';
-import { QueueNames, JobNames } from './queues';
+import { QueueNames, JobNames, DEFAULT_JOB_OPTIONS } from './queues';
 import { setupSchedules } from './scheduler';
 import { runDailySettlement, processSingleSellerSettle, runPayoutReconciliation } from './jobs/settlement.job';
 import { runPaymentReconciliation } from './jobs/reconciliation.job';
@@ -30,15 +30,15 @@ const redisForCleanup = new Redis(env.REDIS_URL, {
 
 const prisma = new PrismaClient();
 
-const settlementQueue     = new Queue(QueueNames.SETTLEMENT,     { connection: redisConnection });
-const reconciliationQueue = new Queue(QueueNames.RECONCILIATION, { connection: redisConnection });
-const cleanupQueue        = new Queue(QueueNames.CLEANUP,        { connection: redisConnection });
-const referralQueue       = new Queue(QueueNames.REFERRAL,       { connection: redisConnection });
-const assignmentQueue     = new Queue(QueueNames.ORDER_ASSIGNMENT, { connection: redisConnection });
+const settlementQueue     = new Queue(QueueNames.SETTLEMENT, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
+const reconciliationQueue = new Queue(QueueNames.RECONCILIATION, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
+const cleanupQueue        = new Queue(QueueNames.CLEANUP, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
+const referralQueue       = new Queue(QueueNames.REFERRAL, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
+const assignmentQueue     = new Queue(QueueNames.ORDER_ASSIGNMENT, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
 // Reconciliation (worker) enqueues seller auto-accept here; the API-tier worker
 // in seller-timeout.plugin consumes it (0.4).
-const sellerAcceptQueue   = new Queue(QueueNames.SELLER_ACCEPT,   { connection: redisConnection });
-const enrichmentQueue     = new Queue(QueueNames.ENRICHMENT,      { connection: redisConnection });
+const sellerAcceptQueue   = new Queue(QueueNames.SELLER_ACCEPT, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
+const enrichmentQueue     = new Queue(QueueNames.ENRICHMENT, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
 
 // OFF bulk-dump source for catalog image enrichment (Phase 2). No dump configured
 // → the worker marks items needs_manual; never touches the live OFF API for bulk.
@@ -105,9 +105,18 @@ const workers = [settlementWorker, reconciliationWorker, cleanupWorker, referral
 
 workers.forEach((worker) => {
   worker.on('completed', (job) => console.log(`✅ Job completed: ${job.name}`));
+  // 'failed' fires per ATTEMPT (P1-8). Distinguish will-retry from final so
+  // logs tell the truth and Sentry only pages when BullMQ has actually given
+  // up — not 5 times for one flaky Redis blip.
   worker.on('failed',    (job, err) => {
-    console.error(`❌ Job failed: ${job?.name}:`, err.message);
-    captureError(err, { jobName: job?.name, jobId: job?.id });
+    const attemptsMade  = job?.attemptsMade ?? 0;
+    const attemptsTotal = job?.opts.attempts ?? 1;
+    if (job && attemptsMade < attemptsTotal) {
+      console.warn(`⚠️ Job failed, retrying (${attemptsMade}/${attemptsTotal}): ${job.name} [${job.id}]:`, err.message);
+      return;
+    }
+    console.error(`❌ Job FAILED permanently (${attemptsMade}/${attemptsTotal} attempts): ${job?.name} [${job?.id}]:`, err.stack ?? err.message);
+    captureError(err, { jobName: job?.name, jobId: job?.id, attemptsMade });
   });
   worker.on('error',     (err) => { console.error('Worker error:', err.message); captureError(err); });
 });
