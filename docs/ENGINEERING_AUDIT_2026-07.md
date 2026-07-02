@@ -186,3 +186,20 @@ Full problem/solution/risk/rollback/testing notes are in each commit message.
 Still open from the P0 list (need infra decisions/server access, not just code):
 **P0-3** single deploy path + rollback, **P0-4** backups + restore drill, and the
 `deploy.yml`-not-gated-on-CI gap from P0-6.
+*(Update: P0-4 closed by the Data Safety pass — see §7 of git history / docs/DISASTER_RECOVERY.md.
+P0-3 and the CI gap closed by Production Hardening Phase 2 — see §7 below.)*
+
+## 7. Production Hardening Phase 2 — Deployment & Rollback (implemented)
+
+Closes **P0-3**, the CI-gating gap from **P0-6**, and **P1-6**. Committed separately on
+`eng/p0-hardening` (same review-then-merge-deliberately rule as §6). Full flow:
+`docs/DEPLOYMENT.md`; rollback runbook: `docs/ROLLBACK_DRILL.md`; decision record:
+`docs/adr/004-deploy-pipeline.md`. **Requires the one-time server migration in
+docs/DEPLOYMENT.md §4 before the first deploy.**
+
+| # | Commit | Concern | Verification |
+|---|---|---|---|
+| 1 | `feat(env)` | NODE_ENV required (no silent `development` default); prod hard-fails placeholder Fast2SMS/R2 creds, localhost URLs, template JWT keys; warn-only for designed degradations (FCM/Mappls/RazorpayX/Sentry); `env:check` preflight. | 24 schema tests (409/409 total); `env:check` exercised in dev + prod modes |
+| 2 | `feat(runtime)` | PM2 runs compiled `dist/` (P1-6: no more tsx-on-source in prod); Dockerfile compiles TS, prunes dev deps, non-root + HEALTHCHECK (1.23 GB → 540 MB); `packageManager` pinned pnpm\@9.15.9 (latest pnpm crashes on Node 20 — corepack was unpinned). | compiled API + worker booted locally (health 200, PG+Redis connect, clean shutdown); image booted: /health 200, HEALTHCHECK healthy, non-root, 0 dev deps |
+| 3 | `feat(deploy)` | Deploy gated on the real CI workflow (`workflow_call` + `needs`); exact-SHA checkout instead of `git pull`; single `scripts/server-release.sh` (install → generate → build → env:check → guarded migrate → reload → health → history); one-click `rollback.yml` + one-command `scripts/rollback.sh` (migrations skipped); dead ghcr push removed; `deploy.sh` placeholder-host Docker script replaced. | workflows YAML-validated; scripts `bash -n`; rollback target resolution tested against fixture histories |
+| 4 | `docs(deploy)` | DEPLOYMENT.md (flow + gates + one-time server migration + validation checklist), ROLLBACK_DRILL.md (runbook + quarterly drill), ADR 004, github-secrets.md updated. | — |
