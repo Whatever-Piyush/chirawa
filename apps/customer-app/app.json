@@ -32,7 +32,9 @@
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.READ_CONTACTS"
+        "android.permission.READ_CONTACTS",
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
@@ -62,14 +64,16 @@
         {
           "microphonePermission": "Bringly aapki aawaz se search karne ke liye microphone use karti hai.",
           "speechRecognitionPermission": "Bringly aapki aawaz ko text mein badalne ke liye speech recognition use karti hai.",
-          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
         }
       ]
     ],
-    "owner": "piyushlatta",
+    "owner": "aaaaaadiii",
     "extra": {
       "eas": {
-        "projectId": "db00e0a8-c8c7-4d48-9e59-b032891ce81b"
+        "projectId": "04300f7e-e771-46c0-9ef2-f0ec9160dbd6"
       }
     }
   }
