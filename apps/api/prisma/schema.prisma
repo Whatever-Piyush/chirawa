@@ -593,6 +593,9 @@ model Order {
   @@index([shopId, createdAt(sort: Desc)])
   @@index([riderId, status])
   @@index([groupId])
+  // Batch fan-out: batch→orders relation loads and releaseOrderAssignment's
+  // live-order count both filter on batchId.
+  @@index([batchId])
   @@map("orders")
 }
 
@@ -666,6 +669,10 @@ model Payment {
   order Order @relation(fields: [orderId], references: [id])
 
   @@index([orderId])
+  // Webhook + verify hot path: settleOrdersForRazorpayOrder / payment.failed
+  // updateMany both filter on razorpayOrderId — unindexed this is a table scan
+  // on every payment event.
+  @@index([razorpayOrderId])
   @@map("payments")
 }
 
