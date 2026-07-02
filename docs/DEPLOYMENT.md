@@ -72,8 +72,9 @@ interleave. Migrations are backup-guarded by `scripts/migrate-with-backup.ts` (s
 Run once on the server before the first deploy from this pipeline; each step is idempotent.
 
 ```bash
-# 1. pnpm must match package.json "packageManager" (corepack keeps it pinned)
-corepack enable && corepack prepare pnpm@11.3.0 --activate && pnpm --version   # → 11.3.0
+# 1. pnpm must match package.json "packageManager" (corepack keeps it pinned).
+#    9.15.9 is deliberate — newer pnpm majors crash on Node 20 (see §7 of the audit).
+corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm --version   # → 9.15.9
 
 # 2. NODE_ENV no longer defaults — it must be explicit in the server env file
 grep -q '^NODE_ENV=production' /opt/chirawa/apps/api/.env || \
@@ -139,7 +140,24 @@ The worker logs structured JSON via pino (same shape as the API) to
    `redis-cli`, and grep the structured logs by `jobName`/`settlementId`/
    `batchId`/`orderId` fields.
 
-## 9. Validation checklist
+## 9. Log rotation (one-time server step)
+
+PM2 captures both processes' stdout/stderr to `/var/log/chirawa/*.log` with **no
+rotation** — left alone they grow until the disk fills and Postgres starts failing
+writes. The policy lives in git at `scripts/logrotate/chirawa` (daily or 100 MB,
+whichever first; 14 rotations kept, compressed; `copytruncate` because PM2 never
+reopens its log files). Install once:
+
+```bash
+sudo cp /opt/chirawa/scripts/logrotate/chirawa /etc/logrotate.d/chirawa
+sudo chmod 644 /etc/logrotate.d/chirawa
+sudo logrotate -d /etc/logrotate.d/chirawa   # dry run — should list the 4 app logs
+```
+
+`deploy-history.log` is deliberately excluded (append-only audit trail that
+rollback tooling reads — see the header comment in the config file).
+
+## 10. Validation checklist
 
 Before merging to main:
 - [ ] CI green on the PR (typecheck, tests, image build)

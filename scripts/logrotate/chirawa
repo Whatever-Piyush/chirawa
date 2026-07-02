@@ -1,0 +1,30 @@
+# Chirawa — logrotate policy for PM2-captured app logs (Ops Phase, log rotation)
+# Place at: /etc/logrotate.d/chirawa   (owned by root, mode 0644)
+#   sudo cp scripts/logrotate/chirawa /etc/logrotate.d/chirawa
+#   sudo chmod 644 /etc/logrotate.d/chirawa
+# Verify without waiting a day:  sudo logrotate -d /etc/logrotate.d/chirawa
+# Force one rotation to test:    sudo logrotate -f /etc/logrotate.d/chirawa
+# (this file is the source of truth in git; copy it over manually — deploys
+# do NOT touch /etc. Same rule as scripts/nginx/chirawa.conf.)
+#
+# Why copytruncate: PM2 holds the log files open and never reopens them on its
+# own. copytruncate copies-then-truncates in place, so PM2 keeps writing to the
+# same fd — no `pm2 reloadLogs` hook, no dependency on pm2 being in root's
+# PATH under logrotate's environment. The cost is a tiny window between copy
+# and truncate where lines can be lost; acceptable for app logs (payment truth
+# lives in Postgres + Razorpay, not here).
+#
+# Deliberately NOT rotated: /var/log/chirawa/deploy-history.log — append-only
+# audit trail (one line per deploy), grows by bytes per week, and rollback
+# tooling reads it. Rotating it away would erase deploy history.
+
+/var/log/chirawa/api-*.log /var/log/chirawa/worker-*.log {
+    daily
+    maxsize 100M
+    rotate 14
+    compress
+    missingok
+    notifempty
+    copytruncate
+    dateext
+}
