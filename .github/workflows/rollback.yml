@@ -1,0 +1,63 @@
+name: Rollback production
+
+# One-click rollback (audit P0-3): Actions → Rollback production → Run
+# workflow. Leave `sha` empty to return to the previous successful release
+# (resolved from /var/log/chirawa/deploy-history.log on the server).
+#
+# Rollback re-releases old code but does NOT undo database migrations —
+# migrations are forward-only. If a migration itself is the problem, that is a
+# restore decision: docs/ROLLBACK_DRILL.md → docs/DISASTER_RECOVERY.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit SHA to roll back to (empty = previous successful release)'
+        required: false
+        default: ''
+
+# Shares the deploy lock — a rollback can never interleave with a deploy.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Rollback
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Roll back on server (migrations skipped)
+        uses: appleboy/ssh-action@v1
+        with:
+          host:     ${{ secrets.HETZNER_HOST }}
+          username: appuser
+          key:      ${{ secrets.HETZNER_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            set -e
+            cd /opt/chirawa
+            TARGET="${{ inputs.sha }}"
+            if [ -z "$TARGET" ]; then
+              TARGET=$(bash scripts/server-previous-release.sh)
+            fi
+            echo "⏪ Rolling back to $TARGET"
+            git fetch origin
+            git checkout --detach "$TARGET"
+            SKIP_MIGRATIONS=1 bash scripts/server-release.sh
+
+      - name: Verify public health endpoint
+        run: |
+          STATUS=""
+          for i in $(seq 1 10); do
+            sleep 5
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' https://api.chirawa.in/health || true)
+            echo "attempt $i → $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Rollback healthy"
+              exit 0
+            fi
+          done
+          echo "❌ Public health check FAILED after rollback (last status: $STATUS) — escalate: docs/DISASTER_RECOVERY.md"
+          exit 1
