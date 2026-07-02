@@ -41,7 +41,14 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
       methods:     ['GET', 'POST'],
       credentials: true,
     },
-    transports:          ['websocket', 'polling'],
+    // WebSocket ONLY (audit P0-2). PM2 cluster round-robins connections across
+    // instances with no session affinity, and Engine.IO long-polling REQUIRES
+    // affinity — a polling client gets "Session ID unknown" 400s and never
+    // connects. Every client (customer/rider/seller apps, test-realtime.mjs)
+    // already forces transports: ['websocket']; disabling polling server-side
+    // makes the broken mode unreachable. Clients on WS-blocking networks fall
+    // back to the apps' REST polling (e.g. OrderTracking's poll loop).
+    transports:          ['websocket'],
     pingTimeout:         20000,
     pingInterval:        25000,
     upgradeTimeout:      10000,
