@@ -1,0 +1,318 @@
+{
+  "runId": "2026-07-02T21-50-53",
+  "base": "http://127.0.0.1:3200",
+  "host": {
+    "platform": "darwin",
+    "node": "v24.3.0"
+  },
+  "summary": {
+    "total": 26,
+    "passed": 26,
+    "failed": 0
+  },
+  "results": [
+    {
+      "id": "C1",
+      "desc": "Login + OTP: send-otp issues, wrong code rejected, abuse rate-limited, dev verify mints tokens, refresh rotates",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "otpExpiry": 300,
+        "wrongOtpStatus": 400,
+        "otpAbuseLimitedAt": 422,
+        "rotated": true
+      }
+    },
+    {
+      "id": "C2",
+      "desc": "Browse: feed, categories, product detail all populated",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "feedItems": 247,
+        "categories": 22,
+        "detailFields": 13
+      }
+    },
+    {
+      "id": "C3",
+      "desc": "Search: real term ranks results; nonsense degrades to empty, not error",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "doodhHits": 11,
+        "nonsenseHits": 0
+      }
+    },
+    {
+      "id": "C4",
+      "desc": "Cart: add, update quantity, totals consistent",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "cartId": "f1a249ff-f8fc-4706-8ef8-24432d82248c",
+        "lineSubtotal": 78000
+      }
+    },
+    {
+      "id": "C5",
+      "desc": "Checkout pricing: preview math holds (total = subtotal + fee − discount)",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "subtotal": 60000,
+        "fee": 1000,
+        "discount": 0,
+        "total": 61000
+      }
+    },
+    {
+      "id": "C6",
+      "desc": "COD order placement: confirmed, cart cleared, retrievable, events fired",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "orderId": "3667eb54-4068-4c02-9a5e-9d00044a2740",
+        "total": 40000,
+        "sellerSocketEvent": true
+      }
+    },
+    {
+      "id": "C7",
+      "desc": "Online payment is GATED (launch config): non-COD placement + payment-order creation rejected",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "placeStatus": 422,
+        "code": "BUSINESS_RULE_VIOLATION",
+        "createPaymentStatus": 422
+      }
+    },
+    {
+      "id": "S1",
+      "desc": "Seller accept: sellerAcceptedAt set, order still fulfillable",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "sellerAcceptedAt": "2026-07-02T21:50:55.300Z"
+      }
+    },
+    {
+      "id": "S3",
+      "desc": "Seller prepare: confirmed → preparing (+ customer socket sees it)",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "status": "preparing"
+      }
+    },
+    {
+      "id": "S4",
+      "desc": "Seller complete: preparing → ready_for_pickup",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "status": "ready_for_pickup"
+      }
+    },
+    {
+      "id": "R1",
+      "desc": "Rider assignment: worker assigns within window; rider socket + active-delivery agree",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "rider": "7700110002",
+        "socketEvent": true,
+        "assignmentId": "8e51fa1d-567c-4357-85a3-4b15854c44aa"
+      }
+    },
+    {
+      "id": "R2",
+      "desc": "Rider pickup: ready_for_pickup → picked_up → out_for_delivery",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "status": "out_for_delivery"
+      }
+    },
+    {
+      "id": "R4",
+      "desc": "Rider navigation: socket rider:location → customer order:location + REST rider-location",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "socketLat": 28.2431,
+        "rest": {
+          "location": {
+            "lat": 28.2431,
+            "lng": 75.6489,
+            "ageMs": 412
+          }
+        }
+      }
+    },
+    {
+      "id": "R3",
+      "desc": "COD delivery: cod-collected → delivered, server-derived amount, rider COD ledger credited",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "codCollectedPaise": 40000,
+        "riderLedgerDelta": 40000
+      }
+    },
+    {
+      "id": "S2",
+      "desc": "Seller reject: fresh order → cancelled, customer notified",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "orderId": "d3a34274-e66a-4b0b-a712-5c8bfca4a682",
+        "status": "cancelled"
+      }
+    },
+    {
+      "id": "C9",
+      "desc": "Customer cancel (COD): confirmed → cancelled + seller socket order:cancelled",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "orderId": "5e9347fb-9f6f-42b6-98b6-9d5fc1768341"
+      }
+    },
+    {
+      "id": "A1",
+      "desc": "Admin dashboard + dispatch live-ops respond with real data",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "dashboardKeys": [
+          "status"
+        ],
+        "dispatchKeys": [
+          "generatedAt",
+          "activeOrderCount",
+          "unassignedCount",
+          "onlineRiderCount",
+          "activeOrders",
+          "riders"
+        ],
+        "nonAdminBlocked": true
+      }
+    },
+    {
+      "id": "A3",
+      "desc": "Admin reports: /metrics + /coverage; seller sales-summary/settlements",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "metricsKeys": [
+          "windowDays",
+          "metrics",
+          "alerts",
+          "deferred"
+        ],
+        "salesKeys": [
+          "shopName",
+          "today",
+          "week",
+          "month",
+          "bestSeller"
+        ]
+      }
+    },
+    {
+      "id": "A4",
+      "desc": "Notifications: in-app rows persisted + FCM pushes logged (dev mode) for the lifecycle",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "persistedRows": 40,
+        "fcmMode": "real-credentials",
+        "fcmDispatchLines": 9,
+        "latest": "order_confirmed"
+      }
+    },
+    {
+      "id": "V2",
+      "desc": "Webhook signature verification rejects a forged webhook",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "status": 200,
+        "sideEffects": "none"
+      }
+    },
+    {
+      "id": "V5",
+      "desc": "Monitoring: /health + /ready green; worker heartbeat pings arriving",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "health": "ok",
+        "ready": {
+          "database": true,
+          "redis": true
+        },
+        "heartbeatsReceived": 1
+      }
+    },
+    {
+      "id": "V3",
+      "desc": "Retries: poisoned single-seller-settle exhausts 5 attempts, retained in failed set",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "state": "failed",
+        "attemptsMade": 5,
+        "failedReason": "\nInvalid `prisma.order.findMany()` invocation in\n/Users/batman/AngryBird/chirawa",
+        "retention": {
+          "age": 604800,
+          "count": 1000
+        }
+      }
+    },
+    {
+      "id": "V6",
+      "desc": "Database integrity: money + lifecycle invariants hold across everything just created",
+      "phase": "A",
+      "pass": true,
+      "evidence": {
+        "invariantsChecked": 7,
+        "violations": 0
+      }
+    },
+    {
+      "id": "C8",
+      "desc": "Online payment (dev-mock): place upi → pending_payment → verify → paid/confirmed + captured payment",
+      "phase": "B",
+      "pass": true,
+      "evidence": {
+        "orderId": "f6d48654-a115-4c47-8720-feb25eaff2bd",
+        "statusAfterVerify": "paid",
+        "paymentStatus": "captured"
+      }
+    },
+    {
+      "id": "C10",
+      "desc": "Refund on cancel (prepaid): payment captured → refunded, full amount recorded",
+      "phase": "B",
+      "pass": true,
+      "evidence": {
+        "refundedPaise": 40000,
+        "total": 40000
+      }
+    },
+    {
+      "id": "V4",
+      "desc": "Logging: production-shaped JSON on stdout, structured fields present",
+      "phase": "B",
+      "pass": true,
+      "evidence": {
+        "lines": 222,
+        "json": 222,
+        "withSvcOrReq": 186
+      }
+    }
+  ]
+}
