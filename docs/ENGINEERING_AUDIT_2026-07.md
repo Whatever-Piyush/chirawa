@@ -264,3 +264,29 @@ Spec item → where it lives:
 
 Operational docs are now complete as a set: DEPLOYMENT.md (how code ships) → ROLLBACK_DRILL.md
 (how to un-ship it) → DISASTER_RECOVERY.md (database) → RUNBOOK.md (everything day-2).
+
+## 11. Production Hardening Phase 5 — Infrastructure & Production Configuration (implemented)
+
+The "Phase 5 — Infrastructure & Security" spec (12 items), shaped by two founder decisions:
+**COD-only at launch** (Razorpay stays wired + properly configured, but not selectable —
+"coming soon" in the app, rejected by the API) and **Mappls, never Google** (backend now has
+zero Google call sites; one client-side Android *tile* key remains, env-injected). Committed
+separately on `eng/p0-hardening` ("Infra 1–7"); full narratives in the commit messages.
+**Deliverable: `docs/PRODUCTION_READINESS_CHECKLIST.md`** — every remaining console/server
+action, with the code-enforced parts marked done.
+
+| # | Commit | Concern | Verification |
+|---|---|---|---|
+| 1 | `feat(payments)` | COD-only launch flag `PAYMENTS_ONLINE_ENABLED` (default false): placeOrder rejects non-COD first-check; payment-order creation refuses; verify/webhook/refund stay open (in-flight money survives a flag flip); Razorpay env hard-fail now conditional on the flag; webhook dev-skip FAILS CLOSED in production (was reachable once the hard-fail relaxed). | 465/465 at the time; 12 new tests (guard-before-IO, fail-closed matrix, env shapes) |
+| 2 | `feat(customer-app)` | "Pay Online" visible but dimmed + "Coming soon" badge + toast; COD only selectable method; `FEATURES.onlinePayments` beside the other launch flags. | app tsc clean; badge styles + i18n existed unwired — now wired |
+| 3 | `feat(pricing)` | Distance via Mappls Distance Matrix (biking profile, lng-first coords) — last backend Google call removed; `GOOGLE_MAPS_API_KEY` deleted from env schema + examples; MAPPLS_* documented (was missing from apps/api/.env.example entirely). Contract verified against the official mappls-api spec (doc v1.0.0, 2025-06). | 7 new tests pin URL shape/parsing/fallbacks; 472/472 |
+| 4 | `fix(security)` | REAL Google Maps key was hardcoded in customer-app/app.json (compromised — git history). Now env-injected at build time via app.config.js (`GOOGLE_MAPS_ANDROID_API_KEY`); rotation + Android-restriction tracked in the checklist. | `expo config --type prebuild` resolved with and without the env var |
+| 5 | `feat(db)` | Seeds refuse production (NODE_ENV or non-local DATABASE_URL; explicit SEED_FORCE sentence to override) — they create OTP-loginable well-known phones. Founder admin via `admin:create -- --phone <n>` (validated, idempotent, OTP-auth only — no PIN to leak). | guard + script exercised live: refused ×2, seeded dev, created + promoted idempotently |
+| 6 | `docs(launch)` | PRODUCTION_READINESS_CHECKLIST.md — all 12 spec items: Razorpay live-cred + webhook setup (captured/failed events), RazorpayX payout activation, Fast2SMS + DLT registration workflow (verified bulkV2 `route=dlt` contract documented in sms.service.ts; OTP route needs no DLT), FCM service account + google-services key restrictions, Mappls console setup + Google key rotation, secret-audit findings, placeholder-consequence table, env-separation verification, final pre-launch gate. | secrets sweep run (AIza/rzp_live/PEM): one finding, fixed in #4 |
+| 7 | `docs(audit)` | This section. | — |
+
+Spec-item → status: 1 Razorpay ✅ (#1+checklist §1), 2 webhooks ✅ (#1 fail-closed + §2),
+3 RazorpayX ✅ (audited; config-only, §3), 4 Fast2SMS ✅ (§4), 5 DLT ✅ (readiness: contract
+in code, workflow §5), 6 Firebase ✅ (§6), 7 maps keys ✅ (#3+#4+§7 — Mappls, per decision),
+8 secret audit ✅ (§8), 9 placeholders ✅ (#3 removal + §9 sweep), 10 seed guard ✅ (#5),
+11 founder admin ✅ (#5), 12 env separation ✅ (verified; §12).
