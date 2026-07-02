@@ -596,6 +596,9 @@ model Order {
   // Batch fan-out: batch→orders relation loads and releaseOrderAssignment's
   // live-order count both filter on batchId.
   @@index([batchId])
+  // Search sort=rating aggregates AVG(rating) GROUP BY shop_id (P1-13) — this
+  // lets the grouped aggregate scan the index instead of the orders table.
+  @@index([shopId, rating])
   @@map("orders")
 }
 

@@ -48,9 +48,12 @@ const keys = {
   categoryImages: ()           => `catalog:catimages`,
   aliasExpand:    (q: string)  => `search:aliases:expanded:${q.toLowerCase().trim()}`,
   suggest:        (q: string)  => `search:suggest:${q.toLowerCase().trim()}`,
+  // Count cache key covers everything that changes the match set (NOT sort).
+  searchCount:    (q: string, f: string) => `search:count:${q.toLowerCase().trim()}:${f}`,
 };
 
 const SUGGEST_CACHE_TTL = 60; // hot autocomplete terms — short so new stock shows up
+const SEARCH_COUNT_CACHE_TTL = 300; // "Showing X results" label only — list is never stale (P1-13)
 
 // Collapse search rows so a product carried by N shops shows once (Catalog Engine
 // Phase 4 — the aggregated illusion in search too). Keeps the FIRST occurrence per
@@ -382,6 +385,20 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
       default:          orderExpr = Prisma.sql`score DESC`;
     }
 
+    // P1-13: shopRating exists ONLY to serve ORDER BY for sort=rating, but the
+    // old query computed a correlated AVG(o.rating) subquery over the orders
+    // table PER CANDIDATE ROW on EVERY search. Now: no rating work at all
+    // unless sort=rating, and then ONE grouped aggregate joined in (backed by
+    // the orders(shop_id, rating) index) instead of per-row subqueries.
+    const needsRating = sort === 'rating';
+    const ratingJoin = needsRating
+      ? Prisma.sql`LEFT JOIN (
+            SELECT shop_id, AVG(rating) AS avg_rating
+            FROM orders WHERE rating IS NOT NULL GROUP BY shop_id
+          ) sr ON sr.shop_id = p.shop_id`
+      : Prisma.empty;
+    const ratingExpr = needsRating ? Prisma.sql`COALESCE(sr.avg_rating, 0)` : Prisma.sql`0`;
+
     type ProductRow = {
       id: string; name: string; pricePaise: number | bigint;
       shopId: string; shopName: string; imageUrl: string | null; inStock: boolean;
@@ -393,7 +410,27 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
     };
     type CountRow = { count: number | bigint };
 
-    const [productRows, shopRows, countRows] = await Promise.all([
+    // P1-13: the full-match count re-ran the entire trigram WHERE on every
+    // search, purely for the "Showing X results" label. Cache it 5 min per
+    // (query, filters) — the label may lag stock changes slightly; the result
+    // list itself never does.
+    const countFilterKey = [opts.shopId ?? '', opts.category ?? '', opts.minPrice ?? '', opts.maxPrice ?? ''].join('|');
+    const countCacheKey = keys.searchCount(q, countFilterKey);
+    const countMatches = async (): Promise<number> => {
+      const cached = await redis.get(countCacheKey).catch(() => null);
+      if (cached != null) return Number(cached);
+      const rows = await prisma.$queryRaw<CountRow[]>`
+        SELECT COUNT(DISTINCT COALESCE(p.master_id::text, p.id::text))::int AS count
+        FROM products p
+        ${joins}
+        WHERE ${whereBody}
+      `;
+      const count = Number(rows[0]?.count ?? 0);
+      await redis.setex(countCacheKey, SEARCH_COUNT_CACHE_TTL, String(count)).catch(() => {});
+      return count;
+    };
+
+    const [productRows, shopRows, total] = await Promise.all([
       prisma.$queryRaw<ProductRow[]>`
         SELECT id, name, "pricePaise", "shopId", "shopName", "imageUrl", "inStock", "masterId"
         FROM (
@@ -407,12 +444,10 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
             (p.stock_status = 'available') AS "inStock",
             p.master_id::text  AS "masterId",
             ${scoreExpr}       AS score,
-            COALESCE((
-              SELECT AVG(o.rating) FROM orders o
-              WHERE o.shop_id = p.shop_id AND o.rating IS NOT NULL
-            ), 0)              AS "shopRating"
+            ${ratingExpr}      AS "shopRating"
           FROM products p
           ${joins}
+          ${ratingJoin}
           LEFT JOIN LATERAL (
             SELECT url FROM product_images
             WHERE product_id = p.id
@@ -446,14 +481,9 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
         LIMIT 5
       `,
 
-      // Full match count for the "Showing X results" label — DISTINCT by master so
-      // it matches the deduped list (a product across N shops counts once).
-      prisma.$queryRaw<CountRow[]>`
-        SELECT COUNT(DISTINCT COALESCE(p.master_id::text, p.id::text))::int AS count
-        FROM products p
-        ${joins}
-        WHERE ${whereBody}
-      `,
+      // Full match count for the "Showing X results" label — DISTINCT by master
+      // so it matches the deduped list; Redis-cached 5 min (P1-13).
+      countMatches(),
     ]);
 
     // Dedupe by master so the same product carried by several shops shows once,
@@ -462,7 +492,7 @@ export function createCatalogService(prisma: PrismaClient, redis: Redis) {
 
     return {
       query: q,
-      total: Number(countRows[0]?.count ?? 0),
+      total,
       products: dedupedRows.map((p) => ({
         id:         p.id,
         name:       p.name,
