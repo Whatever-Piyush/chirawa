@@ -236,3 +236,31 @@ the commit messages.
 | 2 | `perf(delivery)` | P1-11 — 2 queries PER online rider in BOTH assignment paths (audit cited one; the loop was duplicated). One shared loadRiderCandidates: findMany + groupBy = 2 queries at any rider count. | tests assert the query-count invariant (2 queries for 100 riders) |
 | 3 | `perf(search)` | P1-13 — every search paid a per-candidate-row correlated AVG(rating) subquery (only used by sort=rating) + re-ran the trigram WHERE for the count label. Rating now zero-cost unless sort=rating (then one grouped join backed by a new orders(shop_id, rating) index); count Redis-cached 5 min. | exercised live against local PG+Redis: both sorts correct, count cache key observed; additive migration applied |
 | 4 | `feat(worker)` | P1-9 — money-moving worker was console.log-only, no liveness signal. pino structured logs (43 calls converted), WORKER_HEARTBEAT_URL dead-man's switch (warns at prod boot when unset), Sentry alert setup documented (DEPLOYMENT.md §8). | 447/447 tests; compiled worker booted — structured logs + heartbeat ping observed |
+
+## 10. Production Operations pass — observability & runbook (implemented)
+
+The "Phase 4 — Production Operations" spec (observability & operations, 8 items). Most of it
+had already landed in earlier passes — this pass closed the remainder and consolidated the
+operational documentation. Committed separately on `eng/p0-hardening`.
+
+Spec item → where it lives:
+
+| Spec item | Status | Where |
+|---|---|---|
+| 1. Structured logging | ✅ this pass completed it | API request logging was already Fastify/pino (§6); non-request services now share one pino config (`shared/observability/logger.ts`) with per-service `svc` bindings |
+| 2. Worker logging | ✅ already done (§9, P1-9) | `worker/logger.ts`, now a child of the shared base |
+| 3. Remove console.log from production paths | ✅ this pass | 25 calls across 9 files converted (event-bus, payments, razorpay, otp, sms, fcm, orders, distance, off-source, off-live). `config/env.ts` keeps console deliberately — it runs before any logger can exist |
+| 4. Sentry (backend/worker/alerts) | ✅ already done (§6/§8/§9) | init + error-handler capture in both processes; alert rules documented in RUNBOOK.md §2 (was DEPLOYMENT.md §8) |
+| 5. Health endpoints | ✅ already done (Phase 2) | `/health` liveness + `/ready` DB/Redis readiness, both with monitor-friendly rate-limit carve-outs |
+| 6. Uptime monitoring readiness | ✅ this pass (docs) | RUNBOOK.md §2 — exact monitors to create (health, ready, worker heartbeat) |
+| 7. Log rotation | ✅ this pass | `scripts/logrotate/chirawa` (daily/100 MB, 14 kept, copytruncate; deploy-history excluded) + one-time install (DEPLOYMENT.md §9) |
+| 8. Operational runbook | ✅ this pass | `docs/RUNBOOK.md` — topology, monitoring, restarts, deploy/rollback pointers, payments ops, worker recovery, incident response, ops calendar, log cheat-sheet |
+
+| # | Commit | Concern | Verification |
+|---|---|---|---|
+| 1 | `feat(observability)` | Console sweep: one shared pino config for every non-request log line; 9 files converted to structured logs with `svc` + correlation fields (orderId/status/code). Worker logger rebased onto the shared base. | typecheck clean; 447/447 tests; worker booted live — structured logs observed end-to-end |
+| 2 | `feat(ops)` | Log rotation for PM2-captured logs (`/var/log/chirawa` grew unbounded). Also fixes DEPLOYMENT.md §4's pnpm pin (said 11.3.0; the repo pins 9.15.9 — newer pnpm crashes on Node 20, §7). **One-time server step: install the logrotate config (DEPLOYMENT.md §9).** | real `logrotate -d` dry run (dockerized Alpine): config parses, all 4 logs matched, policy as specced |
+| 3 | `docs(ops)` | RUNBOOK.md — the single entry point for production operations; cross-linked from DEPLOYMENT.md. | commands cross-checked against ecosystem.config.js, scheduler.ts cadences, package.json scripts |
+
+Operational docs are now complete as a set: DEPLOYMENT.md (how code ships) → ROLLBACK_DRILL.md
+(how to un-ship it) → DISASTER_RECOVERY.md (database) → RUNBOOK.md (everything day-2).
