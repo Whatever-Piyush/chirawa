@@ -329,3 +329,23 @@ Notable validated behaviors beyond the happy paths: COD amount tampering ignored
 (server-derived), forged webhook = zero side effects, refund claim atomicity, per-phone
 OTP abuse caps, real-FCM send failure not breaking order flow, non-admin 403 on admin
 surfaces. With §6–§13, all seven hardening phases are implemented and evidenced.
+
+## 14. Final Production Readiness Audit (2026-07-03)
+
+Complete read-only repository audit before launch — full report:
+`docs/FINAL_PRODUCTION_AUDIT.md`. Reviewed all 25 requested dimensions fresh
+against the code (prior-phase claims re-verified, not assumed).
+
+**Score 88/100 · Recommendation: GO, conditional on the pre-launch operational gate.**
+
+No remaining code-level blocker; every Go-gating item is finite operational/console
+work already documented (Maps key rotation, real creds + `env:check`, the
+`LAUNCH_VALIDATION.md` §5 production sign-off). New finding surfaced by this pass:
+**M1 — the app-tier rate limiter uses the default in-memory store, so under PM2 ×4
+each worker counts independently and every limit (incl. per-user payment throttles)
+is ~4× weaker than configured**; fix is passing `app.redis` to `@fastify/rate-limit`.
+Standing known items reaffirmed: search scalability cliff (M2, `PERFORMANCE_REPORT.md`
+§5), connection-pool defaults (M3), promo over-redeem race (M4), runtime dependency
+CVEs (M5), and the committed-Maps-key exposure (S1). Fast-follow plan in the report §7.
+
+This is the final audit of the seven-phase hardening effort (§6–§13 implement; §14 certifies).
