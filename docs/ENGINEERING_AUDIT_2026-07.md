@@ -290,3 +290,22 @@ Spec-item → status: 1 Razorpay ✅ (#1+checklist §1), 2 webhooks ✅ (#1 fail
 in code, workflow §5), 6 Firebase ✅ (§6), 7 maps keys ✅ (#3+#4+§7 — Mappls, per decision),
 8 secret audit ✅ (§8), 9 placeholders ✅ (#3 removal + §9 sweep), 10 seed guard ✅ (#5),
 11 founder admin ✅ (#5), 12 env separation ✅ (verified; §12).
+
+## 12. Production Hardening Phase 6 — Performance Validation (implemented)
+
+The "Phase 6 — Performance & Scalability" spec: load-test suite, six scenario
+measurements (P50/P95/P99 + CPU/memory/DB/Redis/worker), bottleneck analysis,
+recommendations. **Deliverable: `docs/PERFORMANCE_REPORT.md`** with raw evidence in
+`docs/perf/` and a rerunnable suite in `scripts/loadtest/`. Committed as "Perf 1–4".
+
+| # | Commit | Concern | Verification |
+|---|---|---|---|
+| 1 | `feat(api)` | Non-production test enablers: LOG_LEVEL/LOG_PRETTY (prod-shaped logs from a dev-mode process), RATE_LIMIT_DISABLED, OPERATING_HOURS_DISABLED — the latter two impossible in production (2 tests pin it). | 474/474 |
+| 2 | `feat(loadtest)` | Closed-loop generator + 1s resource sampler + orchestrator that boots dist API+worker, provisions identities through real flows, drives browse/search/checkout/orders/assignment/sockets, emits JSON evidence. | full run: zero errors across all scenarios |
+| 3 | `docs(perf)` | The report. Headline numbers (dev-host best-case): browse 1,179 rps, checkout 1,073 rps, ~100 COD orders/s at P95 136 ms, assignment pipeline overhead ~0.2–0.5 s beyond the batch window, 300/300 sockets at P99 27 ms. **Launch-relevant finding: search trigram scoring is unindexed** — measured collapse 347 rps/78 ms → 8 rps/5.7 s when the catalog was inflated 285 → 14,250 products; GIN + operator-form fix validated live (158 → 18 ms). Categories endpoint shares the O(catalog) pathology; Prisma pool defaults bound DB paths (22 active backends = ceiling). | evidence JSON committed; EXPLAIN plans + paired timings in report §5 |
+| 4 | `docs(audit)` | This section. | — |
+
+Top recommendations (report §6): R1 GIN trgm + operator rewrite BEFORE the catalog
+passes ~1–2k products; R2 SQL-side counts + cache for /catalog/categories; R3 explicit
+Prisma connection_limit in the production DATABASE_URL; R6 re-run the suite on the CX32
+pre-launch to replace the derated estimate with a measurement.
