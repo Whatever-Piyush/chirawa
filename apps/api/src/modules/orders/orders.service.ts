@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import type { PlaceOrderInput } from './orders.schema';
 import { calculateDeliveryFee, getActiveFeeRuleVersion } from '../pricing/pricing.service';
@@ -48,9 +48,14 @@ interface StockTx {
  * Must be called inside the checkout $transaction so a reject rolls everything back.
  */
 export async function decrementStockOrThrow(
-  tx: StockTx,
+  // Accepts the real transaction client OR the minimal test fake. The union +
+  // internal cast is needed because Prisma's concrete method signatures aren't
+  // structurally assignable to the `(args: unknown)` slices under strict
+  // variance — behaviour is identical.
+  txClient: StockTx | Prisma.TransactionClient,
   items: Array<{ productId: string; quantity: number }>,
 ): Promise<void> {
+  const tx = txClient as StockTx;
   for (const item of items) {
     const dec = await tx.product.updateMany({
       where: { id: item.productId, stockQty: { gte: item.quantity } },
@@ -110,10 +115,13 @@ interface ReleasePrisma {
  * makes the order disappear from the rider's /delivery/active.
  */
 export async function releaseOrderAssignment(
-  prisma: ReleasePrisma,
+  // Real client or minimal test fake — see decrementStockOrThrow for why the
+  // union + cast is required under strict structural variance.
+  client: ReleasePrisma | PrismaClient,
   orderId: string,
   batchId: string | null,
 ): Promise<void> {
+  const prisma = client as ReleasePrisma;
   await prisma.$transaction(async (tx) => {
     await tx.deliveryAssignment.updateMany({
       where: { orderId, isActive: true },

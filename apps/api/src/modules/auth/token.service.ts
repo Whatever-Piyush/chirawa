@@ -40,9 +40,11 @@ function getPublicKey(): string {
 // ── Access Token ──────────────────────────────────────────────────────────────
 
 export function signAccessToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
+  // @types/jsonwebtoken ≥9.0.7 narrows expiresIn to ms.StringValue; our env var
+  // is a free-form string ("15m") validated by convention, so cast at this edge.
   return jwt.sign(payload, getPrivateKey(), {
     algorithm: 'RS256',
-    expiresIn: env.JWT_ACCESS_EXPIRES_IN,
+    expiresIn: env.JWT_ACCESS_EXPIRES_IN as NonNullable<jwt.SignOptions['expiresIn']>,
     issuer: 'chirawa-api',
   });
 }

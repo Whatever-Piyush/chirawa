@@ -79,46 +79,50 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
   // ── Seller actions ────────────────────────────────────────────────────────
 
   // POST /api/v1/orders/:id/accept
-  app.post('/:id/accept',
+  // Route generics (<{ Params }> on the method) instead of annotating the request
+  // param — an annotated handler alongside an inline options object pins the route
+  // generic to RouteGenericInterface and fails the exactOptionalPropertyTypes
+  // baseline (Fastify v4 TypeScript docs, "Using Generics").
+  app.post<{ Params: { id: string } }>('/:id/accept',
     { preHandler: [requireRole('seller')] },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    async (request, reply) => {
       const result = await ordersService.sellerAcceptOrder(request.params.id, request.auth!.userId);
       return reply.send(result);
     },
   );
 
   // POST /api/v1/orders/:id/reject
-  app.post('/:id/reject',
+  app.post<{ Params: { id: string }; Body: { reason?: string } }>('/:id/reject',
     { preHandler: [requireRole('seller')] },
-    async (request: FastifyRequest<{ Params: { id: string }; Body: { reason: string } }>, reply) => {
-      const { reason } = request.body as { reason: string };
+    async (request, reply) => {
+      const { reason } = request.body ?? {};
       const result = await ordersService.sellerRejectOrder(request.params.id, request.auth!.userId, reason ?? 'Seller ne reject kiya');
       return reply.send(result);
     },
   );
 
   // POST /api/v1/orders/:id/preparing
-  app.post('/:id/preparing',
+  app.post<{ Params: { id: string } }>('/:id/preparing',
     { preHandler: [requireRole('seller')] },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    async (request, reply) => {
       const result = await ordersService.sellerMarkPreparing(request.params.id, request.auth!.userId);
       return reply.send(result);
     },
   );
 
   // POST /api/v1/orders/:id/ready
-  app.post('/:id/ready',
+  app.post<{ Params: { id: string } }>('/:id/ready',
     { preHandler: [requireRole('seller')] },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    async (request, reply) => {
       const result = await ordersService.sellerMarkReady(request.params.id, request.auth!.userId);
       return reply.send(result);
     },
   );
 
   // POST /api/v1/orders/:id/cod-collected
-  app.post('/:id/cod-collected',
+  app.post<{ Params: { id: string } }>('/:id/cod-collected',
     { preHandler: [requireRole('rider')] },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    async (request, reply) => {
       const parsed = codCollectedSchema.safeParse(request.body ?? {});
       if (!parsed.success) throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid input');
       const result = await ordersService.codCollected(request.params.id, request.auth!.profileId, parsed.data.amountPaise, request.auth!.userId);
@@ -128,9 +132,9 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
 
   // POST /api/v1/orders/:id/delivered — rider marks a non-COD (prepaid) order
   // delivered. COD orders use /cod-collected instead (records the cash).
-  app.post('/:id/delivered',
+  app.post<{ Params: { id: string } }>('/:id/delivered',
     { preHandler: [requireRole('rider')] },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    async (request, reply) => {
       const result = await ordersService.markDelivered(request.params.id, request.auth!.profileId, request.auth!.userId);
       return reply.send(result);
     },
@@ -139,9 +143,9 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
   // ── Customer post-delivery rating ─────────────────────────────────────────
 
   // POST /api/v1/orders/:id/rating
-  app.post('/:id/rating',
+  app.post<{ Params: { id: string }; Body: RateOrderInput }>('/:id/rating',
     { preHandler: [requireRole('customer')] },
-    async (request: FastifyRequest<{ Params: { id: string }; Body: RateOrderInput }>, reply) => {
+    async (request, reply) => {
       const parsed = rateOrderSchema.safeParse(request.body);
       if (!parsed.success) {
         throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid rating');
@@ -159,9 +163,9 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
   // ── Customer: change delivery address (before pickup) ─────────────────────
 
   // PATCH /api/v1/orders/:id/delivery-address  { addressId }
-  app.patch('/:id/delivery-address',
+  app.patch<{ Params: { id: string }; Body: { addressId?: unknown } }>('/:id/delivery-address',
     { preHandler: [requireRole('customer')] },
-    async (request: FastifyRequest<{ Params: { id: string }; Body: { addressId?: unknown } }>, reply) => {
+    async (request, reply) => {
       const { addressId } = request.body;
       if (typeof addressId !== 'string' || !addressId) {
         throw new ValidationError('addressId is required');
@@ -174,9 +178,9 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
   // ── Customer: update receiver contact (before pickup) ─────────────────────
 
   // PATCH /api/v1/orders/:id/receiver  { name, phone }
-  app.patch('/:id/receiver',
+  app.patch<{ Params: { id: string }; Body: { name?: unknown; phone?: unknown } }>('/:id/receiver',
     { preHandler: [requireRole('customer')] },
-    async (request: FastifyRequest<{ Params: { id: string }; Body: { name?: unknown; phone?: unknown } }>, reply) => {
+    async (request, reply) => {
       const { name, phone } = request.body;
       if (typeof name !== 'string' || typeof phone !== 'string') {
         throw new ValidationError('name and phone are required');

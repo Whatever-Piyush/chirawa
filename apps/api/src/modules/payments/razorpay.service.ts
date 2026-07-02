@@ -94,10 +94,15 @@ export async function fetchPaymentsByOrderId(
 ): Promise<Array<{ id: string; status: string; method: string; amount: number }>> {
   const result = await getClient().orders.fetchPayments(razorpayOrderId);
   const items = result.items ?? [];
-  return items.map((p: Record<string, unknown>) => ({
-    id: String(p['id']), status: String(p['status']),
-    method: String(p['method'] ?? 'unknown'), amount: Number(p['amount']),
-  }));
+  // The SDK's item type varies across @types revisions — normalize through a
+  // Record view instead of annotating the callback parameter.
+  return items.map((item) => {
+    const p = item as unknown as Record<string, unknown>;
+    return {
+      id: String(p['id']), status: String(p['status']),
+      method: String(p['method'] ?? 'unknown'), amount: Number(p['amount']),
+    };
+  });
 }
 
 // ── RazorpayX Payouts (seller settlements — 0.3) ──────────────────────────────

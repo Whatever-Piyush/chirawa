@@ -120,7 +120,13 @@ export async function sendPushMulti(
 
   await Promise.allSettled(
     tokens.map((token) =>
-      sendPush({ token, title, body, data, channel }),
+      // Spread optional fields conditionally — exactOptionalPropertyTypes rejects
+      // an explicit `undefined` for FcmPayload's optional properties.
+      sendPush({
+        token, title, body,
+        ...(data ? { data } : {}),
+        ...(channel ? { channel } : {}),
+      }),
     ),
   );
 }

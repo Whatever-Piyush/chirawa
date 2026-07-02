@@ -40,7 +40,9 @@ async function notificationsPlugin(app: FastifyInstance): Promise<void> {
     body?: string,
   ): Promise<void> {
     await app.prisma.notification.create({
-      data: { userId, channel, eventType, title, body },
+      // Coalesce to null — Prisma's optional columns are `string | null`, and
+      // exactOptionalPropertyTypes rejects passing an explicit `undefined`.
+      data: { userId, channel, eventType, title: title ?? null, body: body ?? null },
     }).catch(() => {}); // Non-blocking
   }
 

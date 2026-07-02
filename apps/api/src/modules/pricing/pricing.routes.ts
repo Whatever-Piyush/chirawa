@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { authenticate } from '../../shared/middleware/auth.middleware';
 import { pricingPreviewSchema, type PricingPreviewInput } from './pricing.schema';
 import { calculateDeliveryFee, getActiveFeeRuleVersion } from './pricing.service';
@@ -9,10 +9,13 @@ export default async function pricingRoutes(app: FastifyInstance): Promise<void>
 
   // POST /api/v1/pricing/preview
   // Called when customer selects/changes address at checkout
-  app.post(
+  // Route generics (<{ Body }>) instead of an annotated request param — an
+  // annotated handler alongside an inline options object pins the route generic
+  // and fails the exactOptionalPropertyTypes baseline (Fastify v4 TS docs).
+  app.post<{ Body: PricingPreviewInput }>(
     '/preview',
     { preHandler: [authenticate] },
-    async (request: FastifyRequest<{ Body: PricingPreviewInput }>, reply) => {
+    async (request, reply) => {
       const parsed = pricingPreviewSchema.safeParse(request.body);
       if (!parsed.success) {
         throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid input');

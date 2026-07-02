@@ -19,13 +19,13 @@ export default async function paymentsRoutes(app: FastifyInstance): Promise<void
 
   // ── POST /api/v1/payments/orders/:orderId ─────────────────────────────────
   // Create Razorpay payment order for a placed order
-  app.post(
+  // Route generics (<{ Params/Body }>) instead of annotated request/reply params —
+  // a fully-annotated handler pins the route generic to RouteGenericInterface and
+  // fails the exactOptionalPropertyTypes baseline (Fastify v4 TS docs).
+  app.post<{ Params: { orderId: string } }>(
     '/orders/:orderId',
     { ...perUserRateLimit(30, '1 minute'), preHandler: [authenticate] },
-    async (
-      request: FastifyRequest<{ Params: { orderId: string } }>,
-      reply: FastifyReply,
-    ) => {
+    async (request, reply) => {
       const result = await paymentsService.createPaymentOrder(
         request.params.orderId,
         request.auth!.userId,
@@ -36,16 +36,13 @@ export default async function paymentsRoutes(app: FastifyInstance): Promise<void
 
   // ── POST /api/v1/payments/verify/:orderId ──────────────────────────────────
   // Client calls this after Razorpay checkout completes
-  app.post(
+  app.post<{
+    Params: { orderId: string };
+    Body: z.infer<typeof verifyPaymentSchema>;
+  }>(
     '/verify/:orderId',
     { ...perUserRateLimit(30, '1 minute'), preHandler: [authenticate] },
-    async (
-      request: FastifyRequest<{
-        Params: { orderId: string };
-        Body: z.infer<typeof verifyPaymentSchema>;
-      }>,
-      reply: FastifyReply,
-    ) => {
+    async (request, reply) => {
       const parsed = verifyPaymentSchema.safeParse(request.body);
       if (!parsed.success) {
         throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid input');
@@ -64,16 +61,13 @@ export default async function paymentsRoutes(app: FastifyInstance): Promise<void
 
   // ── POST /api/v1/payments/refund/:orderId ──────────────────────────────────
   // Admin-only: initiate refund for an order
-  app.post(
+  app.post<{
+    Params: { orderId: string };
+    Body: { reason: string };
+  }>(
     '/refund/:orderId',
     { preHandler: [authenticate, requireRole('admin')] },
-    async (
-      request: FastifyRequest<{
-        Params: { orderId: string };
-        Body: { reason: string };
-      }>,
-      reply: FastifyReply,
-    ) => {
+    async (request, reply) => {
       const { reason } = request.body as { reason: string };
       if (!reason?.trim()) throw new ValidationError('Refund reason required');
 

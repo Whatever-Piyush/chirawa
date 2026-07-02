@@ -100,7 +100,9 @@ export function createAuthService(prisma: PrismaClient, redis: Redis) {
         customerProfile: { select: { id: true } },
         sellerProfile:   { select: { id: true, pinHash: true } },
         riderProfile:    { select: { id: true, pinHash: true } },
-        adminProfile:    { select: { id: true } },
+        // pinHash must be selected — requiresPin below reads it; without it an
+        // admin was always told to set a PIN (undefined ⇒ requiresPin=true).
+        adminProfile:    { select: { id: true, pinHash: true } },
       },
     });
 

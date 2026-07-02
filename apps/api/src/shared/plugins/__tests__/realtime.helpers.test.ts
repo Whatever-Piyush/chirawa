@@ -63,10 +63,17 @@ describe('isAuthorizedForOrderRoom — order:subscribe IDOR guard', () => {
 });
 
 describe('emitToOrderAndUser — single union emit (duplicate-emission fix)', () => {
+  // Explicit interface breaks the circular return-type inference that
+  // `vi.fn((): typeof chain => chain)` produced (TS2577 under tsc --noEmit).
+  interface EmitChain {
+    to: ReturnType<typeof vi.fn>;
+    emit: ReturnType<typeof vi.fn>;
+  }
   function mockIo() {
     const emit = vi.fn();
-    const chain = { to: vi.fn((): typeof chain => chain), emit };
-    const io = { to: vi.fn((): typeof chain => chain) };
+    const chain: EmitChain = { to: vi.fn(), emit };
+    chain.to.mockReturnValue(chain);
+    const io = { to: vi.fn(() => chain) };
     return { io, chain, emit };
   }
 

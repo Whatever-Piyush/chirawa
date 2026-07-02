@@ -129,16 +129,14 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
   });
 
   // PATCH /api/v1/catalog/products/:id/stock — seller only
-  app.patch(
+  // Route generics instead of an annotated request param — see writeGuard note.
+  app.patch<{
+    Params: { id: string };
+    Body:   { stockStatus: 'available' | 'out_of_stock' | 'hidden' };
+  }>(
     '/products/:id/stock',
     { preHandler: [authenticate, requireRole('seller', 'admin')] },
-    async (
-      request: FastifyRequest<{
-        Params: { id: string };
-        Body:   { stockStatus: 'available' | 'out_of_stock' | 'hidden' };
-      }>,
-      reply,
-    ) => {
+    async (request, reply) => {
       const { stockStatus } = request.body as { stockStatus: 'available' | 'out_of_stock' | 'hidden' };
       if (!['available', 'out_of_stock', 'hidden'].includes(stockStatus)) {
         throw new ValidationError('Invalid stock status');
