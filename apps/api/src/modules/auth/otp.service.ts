@@ -160,7 +160,9 @@ export function createOtpService(redis: Redis, prisma: PrismaClient) {
       return;
     }
 
-    // Production — Fast2SMS
+    // Production — Fast2SMS. Route 'otp' rides Fast2SMS's OWN DLT-approved
+    // template ("Your OTP: {#var#}"), so OTP login needs no DLT registration
+    // of ours (Phase 5 §5) — unlike sms.service's transactional templates.
     try {
       const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
         method: 'POST',

@@ -10,6 +10,19 @@ function isSmsConfigured(): boolean {
 // ── Send transactional SMS ────────────────────────────────────────────────────
 // Used ONLY for critical events: delivery confirmed, refund issued
 // Routine notifications use FCM (free) — SMS costs ₹0.20 each
+//
+// DLT readiness (Phase 5): route 'q' (quick) below is the PRE-DLT route — fine
+// for testing, not TRAI-compliant for production transactional traffic. Once
+// DLT registration completes (entity → sender-ID header → content templates,
+// then upload to Fast2SMS "DLT Manager" for message IDs — see
+// docs/PRODUCTION_READINESS_CHECKLIST.md §5), swap this call per the verified
+// Fast2SMS bulkV2 contract (docs.fast2sms.com/reference/dlt-sms):
+//   route: 'dlt', sender_id: '<approved 3-6 letter header>',
+//   message: '<approved Message ID>', variables_values: 'a|b|c' (pipe-sep)
+// The SmsTemplates below must be registered VERBATIM (variables as {#var#});
+// each then sends its template ID + variables instead of rendered text.
+// OTP login is unaffected: otp.service uses route 'otp', which rides
+// Fast2SMS's own DLT-approved template — no customer registration needed.
 
 export async function sendSms(phone: string, message: string): Promise<void> {
   if (!isSmsConfigured()) {
