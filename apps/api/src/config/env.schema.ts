@@ -87,13 +87,12 @@ export const envSchema = z
     RAZORPAYX_ACCOUNT_NUMBER: z.string().default('placeholder'),
     FCM_SERVICE_ACCOUNT_JSON: z.string().default('{}'),
     FAST2SMS_API_KEY: z.string().default('placeholder'),
-    // Google Maps key — now only used by the customer app's Android map render
-    // (set in app.json), NOT the backend geo proxy. Kept for reference/back-compat.
-    GOOGLE_MAPS_API_KEY: z.string().default('placeholder'),
-    // Mappls (MapmyIndia) — backend geo proxy: place search + reverse geocoding.
-    // client_id/secret mint a 24h OAuth token used for Autosuggest; the REST key
-    // is used for the rev_geocode endpoint. Any placeholder ⇒ the matching /geo/*
-    // endpoint returns empty/none and the app falls back to its on-device geocoder.
+    // Mappls (MapmyIndia) — the ONLY maps provider server-side (Phase 5, founder
+    // decision: never Google). client_id/secret mint a 24h OAuth token used for
+    // Autosuggest; the REST key drives rev_geocode AND the distance matrix
+    // (pricing/distance.service). Any placeholder ⇒ the matching /geo/* endpoint
+    // returns empty/none (app falls back to its on-device geocoder) and road
+    // distance falls back to haversine×1.4.
     MAPPLS_CLIENT_ID: z.string().default('placeholder'),
     MAPPLS_CLIENT_SECRET: z.string().default('placeholder'),
     MAPPLS_REST_KEY: z.string().default('placeholder'),
