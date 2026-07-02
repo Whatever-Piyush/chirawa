@@ -19,8 +19,25 @@ import { env } from '../../config/env';
  *
  * To fix that, every emit is ALSO published to a Redis pub/sub channel. Each
  * process that cares (the API) subscribes via `startEventBusBridge()` and
- * re-emits remote events onto its local bus. Messages are tagged with the
- * emitting process's id so a process never re-handles its own event twice.
+ * re-emits remote events onto its local bus.
+ *
+ * ── Exactly-once across instances (P0-1) ────────────────────────────────────
+ * PM2 runs SEVERAL API instances, and pub/sub delivers every message to EVERY
+ * subscriber. The old design (emit locally + every OTHER instance re-emits)
+ * therefore ran every side-effectful listener once per instance: N duplicate
+ * FCM pushes, N duplicate socket emits (each reaches all clients via the
+ * Socket.IO Redis adapter), N racing dispatch/batching runs.
+ *
+ * Now each message carries a unique eventId, and every subscriber — including
+ * the emitting process — races a Redis `SET evt:claim:{eventId} NX` for it.
+ * Exactly one instance wins and runs the local listeners; the rest drop the
+ * message. Processes WITHOUT the bridge (the worker, unit tests) keep the old
+ * synchronous local emit, so a bridge-less process still delivers to its own
+ * listeners.
+ *
+ * Failure bias: if Redis errors during publish or claim, we emit locally
+ * anyway — a duplicate notification is recoverable; a lost ORDER_STATUS_CHANGED
+ * (order never dispatched to a rider) is not.
  */
 export const eventBus = new EventEmitter();
 eventBus.setMaxListeners(20);
@@ -34,9 +51,18 @@ const EVENT_CHANNEL = 'chirawa:events:v1';
 
 interface BridgeMessage {
   origin:  string;
+  // Unique per dispatch — the cross-instance claim key. Optional so a message
+  // from an old-version process (rolling reload window) still parses; those
+  // fall back to the legacy skip-own-origin behaviour.
+  eventId?: string;
   event:   string;
   payload: unknown;
 }
+
+// Claim TTL only needs to outlive the pub/sub fan-out window (ms in practice);
+// 5 minutes is generous without accumulating keys.
+const EVENT_CLAIM_TTL_SECONDS = 300;
+const claimKey = (eventId: string): string => `evt:claim:${eventId}`;
 
 // Lazy publisher connection (created on first emit, in whichever process emits).
 let publisher: Redis | null = null;
@@ -54,19 +80,32 @@ function getPublisher(): Redis {
 let subscriber: Redis | null = null;
 
 /**
- * Emit locally AND publish to Redis so other processes' bridges receive it.
- * The Redis publish is fire-and-forget: a pub/sub hiccup must never block or
- * fail the request/job path that triggered the event.
+ * Publish the event to Redis; exactly one bridge-running process (possibly this
+ * one) claims and handles it. Publishing is fire-and-forget: a pub/sub hiccup
+ * must never block or fail the request/job path that triggered the event —
+ * but if the bridge is active here and the publish FAILS, we fall back to a
+ * local emit so the event is never silently lost.
+ *
+ * A process without the bridge (worker, unit tests, one-off scripts) keeps the
+ * legacy synchronous local emit so its own listeners still fire.
  */
 function dispatch(event: string, payload: unknown): void {
-  // 1. Local, synchronous delivery — unchanged behaviour for same-process listeners.
-  eventBus.emit(event, payload);
+  const message: BridgeMessage = { origin: PROCESS_ID, eventId: randomUUID(), event, payload };
+  const bridged = subscriber !== null;
 
-  // 2. Cross-process fan-out via Redis.
-  const message: BridgeMessage = { origin: PROCESS_ID, event, payload };
+  // Bridge-less process: local, synchronous delivery (legacy behaviour).
+  if (!bridged) {
+    eventBus.emit(event, payload);
+  }
+
   getPublisher()
     .publish(EVENT_CHANNEL, JSON.stringify(message))
-    .catch((err) => console.error(`event-bus publish failed (${event}):`, err.message));
+    .catch((err) => {
+      console.error(`event-bus publish failed (${event}):`, (err as Error).message);
+      // Bridged process would otherwise lose the event entirely — deliver
+      // locally. Other instances may miss it, but the side effects still run.
+      if (bridged) eventBus.emit(event, payload);
+    });
 }
 
 /**
@@ -84,17 +123,57 @@ export async function startEventBusBridge(): Promise<void> {
 
   subscriber.on('message', (channel, raw) => {
     if (channel !== EVENT_CHANNEL) return;
-    try {
-      const msg = JSON.parse(raw) as BridgeMessage;
-      // Skip our own echo — those listeners already fired in dispatch().
-      if (msg.origin === PROCESS_ID) return;
-      eventBus.emit(msg.event, msg.payload);
-    } catch (err) {
-      console.error('event-bus bridge: bad message', (err as Error).message);
-    }
+    void handleBridgeMessage(raw, tryClaimEvent, (event, payload) => eventBus.emit(event, payload), PROCESS_ID);
   });
 
   await subscriber.subscribe(EVENT_CHANNEL);
+}
+
+// Race the cross-instance claim for one event id. 'OK' ⇒ this process won and
+// must run the listeners. The subscriber connection is in subscriber mode
+// (SUBSCRIBE-only per ioredis), so the claim runs on the publisher connection.
+async function tryClaimEvent(eventId: string): Promise<boolean> {
+  const res = await getPublisher().set(claimKey(eventId), PROCESS_ID, 'EX', EVENT_CLAIM_TTL_SECONDS, 'NX');
+  return res === 'OK';
+}
+
+/**
+ * Handle one raw bridge message. Exported for unit tests (pure over its
+ * injected claim/emit functions).
+ *
+ *  - Message WITH eventId → claim it; only the winner emits (exactly-once
+ *    across all bridge-running instances, including the origin).
+ *  - Claim ERROR (Redis hiccup) → emit anyway: prefer a duplicate side effect
+ *    over a lost order event.
+ *  - Message WITHOUT eventId (old-version process during a rolling reload) →
+ *    legacy behaviour: skip our own echo, emit the rest.
+ */
+export async function handleBridgeMessage(
+  raw: string,
+  claim: (eventId: string) => Promise<boolean>,
+  emit: (event: string, payload: unknown) => void,
+  selfId: string,
+): Promise<void> {
+  let msg: BridgeMessage;
+  try {
+    msg = JSON.parse(raw) as BridgeMessage;
+  } catch (err) {
+    console.error('event-bus bridge: bad message', (err as Error).message);
+    return;
+  }
+
+  if (!msg.eventId) {
+    // Legacy message (mixed-version reload window): origin already emitted locally.
+    if (msg.origin !== selfId) emit(msg.event, msg.payload);
+    return;
+  }
+
+  try {
+    if (await claim(msg.eventId)) emit(msg.event, msg.payload);
+  } catch (err) {
+    console.error(`event-bus claim failed (${msg.event}) — emitting locally:`, (err as Error).message);
+    emit(msg.event, msg.payload);
+  }
 }
 
 /** Tear down Redis connections on shutdown. */
