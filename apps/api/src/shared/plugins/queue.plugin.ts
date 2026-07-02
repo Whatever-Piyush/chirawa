@@ -11,7 +11,6 @@ declare module 'fastify' {
       settlement:     Queue;
       reconciliation: Queue;
       cleanup:        Queue;
-      referral:       Queue;
       notification:   Queue;
       assignment:     Queue;
       sellerAccept:   Queue;
@@ -33,7 +32,6 @@ async function queuePlugin(app: FastifyInstance): Promise<void> {
     settlement:     new Queue(QueueNames.SETTLEMENT, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
     reconciliation: new Queue(QueueNames.RECONCILIATION, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
     cleanup:        new Queue(QueueNames.CLEANUP, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
-    referral:       new Queue(QueueNames.REFERRAL, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
     notification:   new Queue(QueueNames.NOTIFICATION, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
     assignment:     new Queue(QueueNames.ORDER_ASSIGNMENT, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),
     sellerAccept:   new Queue(QueueNames.SELLER_ACCEPT, { connection, defaultJobOptions: DEFAULT_JOB_OPTIONS }),

@@ -25,7 +25,6 @@ export const QueueNames = {
   SETTLEMENT:      'chirawa-settlement',
   RECONCILIATION:  'chirawa-reconciliation',
   CLEANUP:         'chirawa-cleanup',
-  REFERRAL:        'chirawa-referral',
   NOTIFICATION:    'chirawa-notification',
   ORDER_ASSIGNMENT: 'chirawa-order-assignment',
   SELLER_ACCEPT:    'chirawa-seller-accept',
@@ -43,7 +42,6 @@ export const JobNames = {
   OTP_CLEANUP:           'otp-cleanup',
   CART_CLEANUP:          'cart-cleanup',
   TOKEN_CLEANUP:         'token-cleanup',
-  UNLOCK_REFERRAL:       'unlock-referral',
   SEND_PUSH:             'send-push',
   SEND_SMS:              'send-sms',
   CATALOG_ENRICH:        'catalog-enrich',
@@ -71,11 +69,6 @@ export interface SingleSellerSettlePayload {
   sellerProfileId: string;
   shopId:          string;
   periodDate:      string;
-}
-
-export interface UnlockReferralPayload {
-  orderId:        string;
-  referredUserId: string;
 }
 
 export interface SendPushPayload {

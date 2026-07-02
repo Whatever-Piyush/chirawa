@@ -9,7 +9,6 @@ import { setupSchedules } from './scheduler';
 import { runDailySettlement, processSingleSellerSettle, runPayoutReconciliation } from './jobs/settlement.job';
 import { runPaymentReconciliation } from './jobs/reconciliation.job';
 import { runLocationCleanup, runOtpCleanup, runTokenCleanup, runCartCleanup } from './jobs/cleanup.job';
-import { processUnlockReferral } from './jobs/referral.job';
 import { processAssignBatch } from './jobs/assignment.job';
 import { runCatalogEnrichment } from './jobs/enrichment.job';
 import { createOffDumpSource } from '../services/off-source';
@@ -33,7 +32,6 @@ const prisma = new PrismaClient();
 const settlementQueue     = new Queue(QueueNames.SETTLEMENT, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
 const reconciliationQueue = new Queue(QueueNames.RECONCILIATION, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
 const cleanupQueue        = new Queue(QueueNames.CLEANUP, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
-const referralQueue       = new Queue(QueueNames.REFERRAL, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
 const assignmentQueue     = new Queue(QueueNames.ORDER_ASSIGNMENT, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
 // Reconciliation (worker) enqueues seller auto-accept here; the API-tier worker
 // in seller-timeout.plugin consumes it (0.4).
@@ -74,13 +72,6 @@ const cleanupWorker = new Worker(
   { connection: redisConnection, concurrency: 2 },
 );
 
-const referralWorker = new Worker(
-  QueueNames.REFERRAL,
-  async (job) => {
-    if (job.name === JobNames.UNLOCK_REFERRAL) await processUnlockReferral(job, prisma);
-  },
-  { connection: redisConnection, concurrency: 5 },
-);
 
 const assignmentWorker = new Worker(
   QueueNames.ORDER_ASSIGNMENT,
@@ -101,7 +92,7 @@ const enrichmentWorker = new Worker(
   { connection: redisConnection, concurrency: 1 },
 );
 
-const workers = [settlementWorker, reconciliationWorker, cleanupWorker, referralWorker, assignmentWorker, enrichmentWorker];
+const workers = [settlementWorker, reconciliationWorker, cleanupWorker, assignmentWorker, enrichmentWorker];
 
 workers.forEach((worker) => {
   worker.on('completed', (job) => console.log(`✅ Job completed: ${job.name}`));
@@ -128,7 +119,6 @@ async function start(): Promise<void> {
   console.log('   Settlement worker  : ready');
   console.log('   Reconciliation     : ready');
   console.log('   Cleanup worker     : ready');
-  console.log('   Referral worker    : ready');
   console.log('   Assignment worker  : ready');
   console.log('   Enrichment worker  : ready');
 
@@ -149,7 +139,7 @@ async function shutdown(): Promise<void> {
   try {
     await Promise.all(workers.map((w) => w.close()));
     await Promise.all([
-      settlementQueue, reconciliationQueue, cleanupQueue, referralQueue, assignmentQueue, sellerAcceptQueue, enrichmentQueue,
+      settlementQueue, reconciliationQueue, cleanupQueue, assignmentQueue, sellerAcceptQueue, enrichmentQueue,
     ].map((q) => q.close()));
     await closeEventBus();
     await flushSentry();

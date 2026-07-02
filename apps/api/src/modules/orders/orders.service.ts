@@ -918,15 +918,11 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   };
 }
 
-export async function enqueueReferralUnlock(
-  prisma: PrismaClient,
-  redis: Redis,
-  orderId: string,
-  customerId: string,
-): Promise<void> {
-  const redemption = await prisma.referralRedemption.findUnique({
-    where: { referredUserId: customerId },
-  });
-  if (!redemption || redemption.refereeCreditStatus === 'credited') return;
-  console.log(`[Referral] Unlock queued for order ${orderId}`);
-}
+// Referral unlock scaffolding removed (P2-8 / Phase 3 7/7): v1 launches with
+// growth loops HIDDEN (customer-app FEATURES.growthLoops=false — rewards are
+// not funded). The old enqueueReferralUnlock was a stub that logged "Unlock
+// queued" while queueing nothing, and no delivered-path ever called it.
+// Signup still generates codes and records redemptions (data continuity), so
+// rewards can be honored retroactively when the feature is funded — rebuild
+// the unlock worker from git history (worker/jobs/referral.job.ts) and wire
+// it on the 'delivered' transition, atomically and idempotently per side.
