@@ -54,3 +54,32 @@ export function emitToOrderAndUser(
 ): void {
   io.to(`order:${orderId}`).to(`user:${customerId}`).emit(event, body);
 }
+
+// ── rider:location payload validation (audit P0-5) ───────────────────────────
+
+export interface RiderLocationPayload {
+  orderId:   string;
+  lat:       number;
+  lng:       number;
+  timestamp: number;
+}
+
+/**
+ * Validate an untrusted `rider:location` socket payload. Returns the parsed
+ * payload or null to drop the event. Bounds lat/lng to real coordinates
+ * (lat 0 / lng 0 are valid — the old `!data.lat` check rejected them) and
+ * falls back to server time when the client timestamp is missing/garbage.
+ */
+export function parseRiderLocation(data: unknown): RiderLocationPayload | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const d = data as Record<string, unknown>;
+  const { orderId, lat, lng } = d;
+  if (typeof orderId !== 'string' || orderId.length === 0 || orderId.length > 64) return null;
+  if (typeof lat !== 'number' || !Number.isFinite(lat) || lat < -90 || lat > 90) return null;
+  if (typeof lng !== 'number' || !Number.isFinite(lng) || lng < -180 || lng > 180) return null;
+  const timestamp =
+    typeof d['timestamp'] === 'number' && Number.isFinite(d['timestamp'])
+      ? (d['timestamp'] as number)
+      : Date.now();
+  return { orderId, lat, lng, timestamp };
+}
