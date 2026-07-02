@@ -326,14 +326,13 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       const plan = plans.find((p) => p.shopId === o.shopId)!;
       if (o.sellerUserId) {
         emitNewOrderForSeller({
-          orderId: o.orderId, shopId: o.shopId, sellerId: o.sellerUserId,
+          orderId: o.orderId, shopId: o.shopId, sellerUserId: o.sellerUserId,
           items: plan.items.map((i) => ({ productName: i.productName, quantity: i.quantity, unitPrice: i.unitPrice })),
           totalAmount: o.total, paymentMethod: input.paymentMethod, deliveryLocality: address.locality,
         });
       }
       emitOrderStatusChanged({
-        orderId: o.orderId, status: initStatus, shopId: o.shopId,
-        sellerId: o.sellerUserId ?? '', riderId: null, customerId: userId,
+        orderId: o.orderId, status: initStatus, shopId: o.shopId, customerId: userId,
       });
       // Initial ETA at placement (ETA MVP Phase 1) — post-commit, best-effort.
       await computeAndPersistEta(prisma, o.orderId);
@@ -516,8 +515,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     await computeAndPersistEta(prisma, orderId);
 
     emitOrderStatusChanged({
-      orderId, status: newStatus, shopId: order.shopId,
-      sellerId: '', riderId: order.riderId, customerId: order.customerId,
+      orderId, status: newStatus, shopId: order.shopId, customerId: order.customerId,
       ...(refundedPaise != null ? { refundedPaise } : {}),
     });
   }
@@ -644,8 +642,8 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     // Notify the seller in real time (service → event bus → socket plugin)
     emitOrderCancelledForSeller({
       orderId,
-      sellerId: order.shop.seller.userId,
-      reason:   reason ?? '',
+      sellerUserId: order.shop.seller.userId,
+      reason:       reason ?? '',
     });
 
     // Free the rider/batch AFTER the cancel emit so the rider still gets the
@@ -700,7 +698,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     if (credited) {
       emitOrderStatusChanged({
         orderId, status: 'delivered',
-        shopId: order.shopId, sellerId: '', riderId: riderProfileId, customerId: order.customerId,
+        shopId: order.shopId, customerId: order.customerId,
       });
     }
     return { message: 'Cash collection confirm ho gaya' };
@@ -731,7 +729,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     if (delivered) {
       emitOrderStatusChanged({
         orderId, status: 'delivered',
-        shopId: order.shopId, sellerId: '', riderId: riderProfileId, customerId: order.customerId,
+        shopId: order.shopId, customerId: order.customerId,
       });
     }
     return { message: 'Order delivered confirm ho gaya' };

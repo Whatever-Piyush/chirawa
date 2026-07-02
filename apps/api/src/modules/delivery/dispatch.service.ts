@@ -122,7 +122,7 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
     const shop = await prisma.shop.findUnique({ where: { id: order.shopId }, select: { name: true } });
     emitOrderAssignedToRider({
       orderId,
-      riderId:          best.userId,           // user id — notification token lookup
+      riderUserId:      best.userId,
       shopName:         shop?.name ?? 'Dukaan',
       shopAddress:      '',
       deliveryLocality: order.deliveryLocality,
@@ -217,8 +217,7 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
       await computeAndPersistEta(prisma, orderId);
 
       emitOrderStatusChanged({
-        orderId, status: newStatus, shopId: order.shopId,
-        sellerId: '', riderId: rider.id, customerId: order.customerId,
+        orderId, status: newStatus, shopId: order.shopId, customerId: order.customerId,
       });
     }
     return { status: newStatus };

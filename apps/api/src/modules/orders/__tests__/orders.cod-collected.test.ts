@@ -71,7 +71,8 @@ describe('codCollected (rider COD path) — BUG-001', () => {
       }),
     );
     expect(emitOrderStatusChanged).toHaveBeenCalledWith(
-      expect.objectContaining({ orderId: 'order_1', status: 'delivered', riderId: RIDER_PROFILE }),
+      // P1-3: no rider/seller ids in the payload anymore (consumers resolve USER ids).
+      expect.objectContaining({ orderId: 'order_1', status: 'delivered', customerId: 'cust_1' }),
     );
     expect(result.message).toBeTruthy();
   });

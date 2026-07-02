@@ -60,7 +60,9 @@ describe('markDelivered (0.1 — rider delivered path for non-COD)', () => {
       }),
     );
     expect(emitOrderStatusChanged).toHaveBeenCalledWith(
-      expect.objectContaining({ orderId: 'order_1', status: 'delivered', riderId: RIDER_PROFILE, customerId: 'cust_1' }),
+      // P1-3: the payload no longer carries rider/seller ids — consumers resolve
+      // USER ids from the order (party-ids.ts); profile ids must never appear here.
+      expect.objectContaining({ orderId: 'order_1', status: 'delivered', customerId: 'cust_1' }),
     );
     expect(result.message).toBeTruthy();
   });

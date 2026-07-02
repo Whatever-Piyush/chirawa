@@ -264,7 +264,7 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
   eventBus.on(Events.NEW_ORDER_FOR_SELLER, (payload: NewOrderForSellerPayload) => {
     // Full-screen modal trigger for seller app
     // The seller app shows an audible alarm until Accept/Reject is tapped
-    io.to(`seller:${payload.sellerId}`).emit('order:new', {
+    io.to(`seller:${payload.sellerUserId}`).emit('order:new', {
       orderId:          payload.orderId,
       items:            payload.items,
       totalAmount:      payload.totalAmount,
@@ -273,23 +273,23 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
       timestamp:        new Date().toISOString(),
     });
 
-    app.log.debug(`🔔 New order alert sent to seller: ${payload.sellerId}`);
+    app.log.debug(`🔔 New order alert sent to seller: ${payload.sellerUserId}`);
   });
 
   eventBus.on(Events.ORDER_CANCELLED_FOR_SELLER, (payload: OrderCancelledForSellerPayload) => {
     // Customer cancelled — tell the seller so their queue updates + alarm closes
-    io.to(`seller:${payload.sellerId}`).emit('order:cancelled', {
+    io.to(`seller:${payload.sellerUserId}`).emit('order:cancelled', {
       orderId:   payload.orderId,
       reason:    payload.reason,
       timestamp: new Date().toISOString(),
     });
 
-    app.log.debug(`❌ Order ${payload.orderId} cancelled → seller ${payload.sellerId}`);
+    app.log.debug(`❌ Order ${payload.orderId} cancelled → seller ${payload.sellerUserId}`);
   });
 
   eventBus.on(Events.ORDER_ASSIGNED_TO_RIDER, (payload: OrderAssignedToRiderPayload) => {
     // 60-second accept window starts on client when this arrives
-    io.to(`rider:${payload.riderId}`).emit('order:assigned', {
+    io.to(`rider:${payload.riderUserId}`).emit('order:assigned', {
       orderId:          payload.orderId,
       shopName:         payload.shopName,
       shopAddress:      payload.shopAddress,
@@ -299,7 +299,7 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
       timestamp:        new Date().toISOString(),
     });
 
-    app.log.debug(`🚴 Order assigned to rider: ${payload.riderId}`);
+    app.log.debug(`🚴 Order assigned to rider: ${payload.riderUserId}`);
   });
 
   eventBus.on(Events.ORDER_ITEM_UNAVAILABLE, (payload: OrderItemUnavailablePayload) => {

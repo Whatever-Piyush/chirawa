@@ -255,7 +255,7 @@ export function createPaymentsService(prisma: PrismaClient) {
 
     emitOrderStatusChanged({
       orderId, status: 'cancelled',
-      shopId: order.shopId, sellerId: '', riderId: order.riderId, customerId: order.customerId,
+      shopId: order.shopId, customerId: order.customerId,
     });
 
     return { message: 'Refund initiated. 1-3 days mein wapas aa jayega.' };
@@ -419,15 +419,14 @@ export async function markOrderPaid(
   // Notify customer
   emitOrderStatusChanged({
     orderId, status: 'paid',
-    shopId: order.shopId, sellerId: order.shop.seller.userId,
-    riderId: null, customerId: order.customerId,
+    shopId: order.shopId, customerId: order.customerId,
   });
 
   // Trigger seller new order alert after payment confirmed
   const items = await prisma.orderItem.findMany({ where: { orderId } });
   emitNewOrderForSeller({
     orderId, shopId: order.shopId,
-    sellerId:         order.shop.seller.userId,
+    sellerUserId:     order.shop.seller.userId,
     items:            items.map((i) => ({ productName: i.productName, quantity: i.quantity, unitPrice: i.unitPrice })),
     totalAmount:      order.totalAmount,
     paymentMethod:    order.paymentMethod,

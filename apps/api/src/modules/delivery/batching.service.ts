@@ -136,7 +136,7 @@ export function createBatchingService(prisma: PrismaClient, redis: Redis) {
     const totalAmount = batch.orders.reduce((s, o) => s + o.totalAmount, 0);
     emitOrderAssignedToRider({
       orderId:          anchor.id,
-      riderId:          rider.userId,
+      riderUserId:      rider.userId,
       shopName:         batch.orders.length > 1 ? `${shop?.name ?? 'Dukaan'} +${batch.orders.length - 1}` : (shop?.name ?? 'Dukaan'),
       shopAddress:      '',
       deliveryLocality: anchor.deliveryLocality,

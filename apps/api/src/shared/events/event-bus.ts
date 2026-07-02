@@ -198,13 +198,19 @@ export const Events = {
 } as const;
 
 // ── Event payload types ───────────────────────────────────────────────────────
+// ID DISCIPLINE (P1-3): every party id in an event payload is a **User.id** and
+// is named `*UserId`. Profile ids (SellerProfile.id / RiderProfile.id — e.g.
+// Order.riderId) must NEVER enter a payload: FCM tokens and socket rooms are
+// keyed by User.id, so a profile id silently drops the notification.
 export interface OrderStatusChangedPayload {
   orderId:  string;
   status:   string;
   shopId:   string;
-  sellerId: string;
-  riderId:  string | null;
-  customerId: string;
+  customerId: string; // User.id (customers have no separate profile-id keying)
+  // NOTE: deliberately NO seller/rider ids here. Half the emit sites used to
+  // pass '' or a RiderProfile.id, silently killing seller/rider pushes (P1-3).
+  // Consumers that need them resolve User.ids from the order via
+  // resolveOrderPartyUserIds (notifications module) — one authoritative path.
   // Set on a 'cancelled' transition when a prepaid payment was auto-refunded,
   // so the notification layer can tell the customer the exact amount (Chunk 3.5).
   refundedPaise?: number;
@@ -213,7 +219,7 @@ export interface OrderStatusChangedPayload {
 export interface NewOrderForSellerPayload {
   orderId:   string;
   shopId:    string;
-  sellerId:  string;
+  sellerUserId: string; // seller's User.id — NOT SellerProfile.id
   items:     Array<{ productName: string; quantity: number; unitPrice: number }>;
   totalAmount: number;
   paymentMethod: string;
@@ -222,13 +228,13 @@ export interface NewOrderForSellerPayload {
 
 export interface OrderCancelledForSellerPayload {
   orderId:  string;
-  sellerId: string;
+  sellerUserId: string; // seller's User.id — NOT SellerProfile.id
   reason:   string;
 }
 
 export interface OrderAssignedToRiderPayload {
   orderId:  string;
-  riderId:  string;
+  riderUserId: string; // rider's User.id — NOT RiderProfile.id (Order.riderId!)
   shopName: string;
   shopAddress: string;
   deliveryLocality: string;
