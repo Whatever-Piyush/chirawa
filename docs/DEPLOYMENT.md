@@ -3,6 +3,7 @@
 **Scope:** the API + worker on the Hetzner VPS (PM2). The three Expo apps ship through
 EAS/store builds and are not covered here. Decisions and trade-offs behind this pipeline:
 `docs/adr/004-deploy-pipeline.md`. Rollback runbook: `docs/ROLLBACK_DRILL.md`.
+Day-2 operations (restarts, incidents, payments ops, monitoring): `docs/RUNBOOK.md`.
 
 **The one rule:** a push to `main` IS a production deploy. Nothing reaches `main` without
 passing CI, and nothing reaches the server except the exact SHA that CI tested.
