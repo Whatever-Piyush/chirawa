@@ -309,3 +309,23 @@ Top recommendations (report §6): R1 GIN trgm + operator rewrite BEFORE the cata
 passes ~1–2k products; R2 SQL-side counts + cache for /catalog/categories; R3 explicit
 Prisma connection_limit in the production DATABASE_URL; R6 re-run the suite on the CX32
 pre-launch to replace the derated estimate with a measurement.
+
+## 13. Production Hardening Phase 7 — End-to-End Launch Validation (implemented)
+
+The "Phase 7 — Launch Validation" spec: complete smoke of every customer/seller/rider/admin
+journey plus notifications, payments, retries, logging, monitoring, and DB integrity —
+"no assumptions, every validation reproducible." **Deliverable: `docs/LAUNCH_VALIDATION.md`**
+(signed checklist) over `docs/validation/smoke-2026-07-03.json` (26/26, sha256-pinned),
+produced by the rerunnable suite `scripts/smoke/run.mjs`. Committed as "Validate 1–4".
+
+| # | Commit | Concern | Verification |
+|---|---|---|---|
+| 1 | `fix(observability)` | shared logger ignored LOG_LEVEL/LOG_PRETTY (only app.ts honored them, Perf 1/4) — service logs stayed pretty where Fastify's went JSON. Found BY the smoke suite's logging validation. | 474/474; smoke V4 pins every stdout line as JSON with correlation fields |
+| 2 | `feat(smoke)` | Assertion-based E2E suite: boots dist API+worker twice (launch config, then PAYMENTS_ONLINE_ENABLED=true), drives all 26 validations through real HTTP/WebSocket incl. full COD lifecycle, dev-mock online payment→refund, forged webhook, poisoned-job retry exhaustion, heartbeat listener, 7 SQL integrity invariants. Preflight refuses to run beside foreign event-bus subscribers (a live dev API steals exactly-once claims — root cause of the one flake seen). | 26/26; suite exits non-zero on any failure |
+| 3 | `docs(validation)` | LAUNCH_VALIDATION.md — spec-item → validation-ID → proof matrix, reproduce commands, what a dev run deliberately cannot prove, the production sign-off gate (§5), and the sign-off table (automated row signed; human rows after the prod gate). | evidence JSON committed + hashed |
+| 4 | `docs(audit)` | This section. | — |
+
+Notable validated behaviors beyond the happy paths: COD amount tampering ignored
+(server-derived), forged webhook = zero side effects, refund claim atomicity, per-phone
+OTP abuse caps, real-FCM send failure not breaking order flow, non-admin 403 on admin
+surfaces. With §6–§13, all seven hardening phases are implemented and evidenced.
