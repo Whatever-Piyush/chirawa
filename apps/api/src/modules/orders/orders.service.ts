@@ -8,6 +8,7 @@ import { refundCapturedOrderPayment, refundOrderLine } from '../payments/payment
 import { createCatalogService } from '../catalog/catalog.service';
 import { computeAndPersistEta, etaResponse } from './eta.service';
 import { ORDER_TRANSITIONS, assertTransition, transitionOrderStatus } from './order-status';
+import { serviceLogger } from '../../shared/observability/logger';
 import {
   NotFoundError, ForbiddenError,
   ValidationError, BusinessRuleError, AppError,
@@ -19,6 +20,8 @@ import {
   emitOrderCancelledForSeller,
   emitOrderItemUnavailable,
 } from '../../shared/events/event-bus';
+
+const log = serviceLogger('orders');
 
 interface CartData {
   cartId: string; shopId: string; shopName: string; subtotal: number;
@@ -676,7 +679,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     // client-supplied amountPaise is advisory only and is never written.
     const amountDue = order.totalAmount;
     if (amountPaise != null && amountPaise !== amountDue) {
-      console.warn(`COD amount mismatch (ignored) order=${orderId} sent=${amountPaise} due=${amountDue}`);
+      log.warn({ orderId, sentPaise: amountPaise, duePaise: amountDue }, 'COD amount mismatch (ignored)');
     }
 
     // Single enforcement point (transitionOrderStatus): assertTransition + atomic

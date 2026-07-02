@@ -9,7 +9,10 @@ import {
   ValidationError, BusinessRuleError, PaymentError,
 } from '../../shared/errors/app-errors';
 import { emitOrderStatusChanged, emitNewOrderForSeller } from '../../shared/events/event-bus';
+import { serviceLogger } from '../../shared/observability/logger';
 import { assertTransition, transitionOrderStatus } from '../orders/order-status';
+
+const log = serviceLogger('payments');
 
 export function createPaymentsService(prisma: PrismaClient) {
 
@@ -278,7 +281,7 @@ export function createPaymentsService(prisma: PrismaClient) {
         const captured    = rzpPayments.find((p) => p.status === 'captured');
         if (captured) { await markOrderPaid(prisma, order.id, captured.id, captured.method); reconciled++; }
       } catch (err) {
-        console.error(`Reconciliation failed for order ${order.id}:`, err);
+        log.error({ err, orderId: order.id }, 'Reconciliation failed');
       }
     }
     return reconciled;
@@ -433,5 +436,5 @@ export async function markOrderPaid(
     deliveryLocality: order.deliveryLocality,
   });
 
-  console.log(`✅ Order ${orderId} marked as paid`);
+  log.info({ orderId }, 'Order marked as paid');
 }

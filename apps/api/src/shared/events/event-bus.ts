@@ -2,6 +2,9 @@ import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import Redis from 'ioredis';
 import { env } from '../../config/env';
+import { serviceLogger } from '../observability/logger';
+
+const log = serviceLogger('event-bus');
 
 /**
  * Internal event bus — decouples business logic from real-time transport.
@@ -72,7 +75,7 @@ function getPublisher(): Redis {
       maxRetriesPerRequest: null,
       retryStrategy: (times) => Math.min(times * 100, 3000),
     });
-    publisher.on('error', (err) => console.error('event-bus publisher error:', err.message));
+    publisher.on('error', (err) => log.error({ err }, 'publisher connection error'));
   }
   return publisher;
 }
@@ -101,7 +104,7 @@ function dispatch(event: string, payload: unknown): void {
   getPublisher()
     .publish(EVENT_CHANNEL, JSON.stringify(message))
     .catch((err) => {
-      console.error(`event-bus publish failed (${event}):`, (err as Error).message);
+      log.error({ err, event }, 'publish failed');
       // Bridged process would otherwise lose the event entirely — deliver
       // locally. Other instances may miss it, but the side effects still run.
       if (bridged) eventBus.emit(event, payload);
@@ -119,7 +122,7 @@ export async function startEventBusBridge(): Promise<void> {
     maxRetriesPerRequest: null,
     retryStrategy: (times) => Math.min(times * 100, 3000),
   });
-  subscriber.on('error', (err) => console.error('event-bus subscriber error:', err.message));
+  subscriber.on('error', (err) => log.error({ err }, 'subscriber connection error'));
 
   subscriber.on('message', (channel, raw) => {
     if (channel !== EVENT_CHANNEL) return;
@@ -158,7 +161,7 @@ export async function handleBridgeMessage(
   try {
     msg = JSON.parse(raw) as BridgeMessage;
   } catch (err) {
-    console.error('event-bus bridge: bad message', (err as Error).message);
+    log.error({ err }, 'bridge received unparseable message');
     return;
   }
 
@@ -171,7 +174,7 @@ export async function handleBridgeMessage(
   try {
     if (await claim(msg.eventId)) emit(msg.event, msg.payload);
   } catch (err) {
-    console.error(`event-bus claim failed (${msg.event}) — emitting locally:`, (err as Error).message);
+    log.error({ err, event: msg.event }, 'claim failed — emitting locally');
     emit(msg.event, msg.payload);
   }
 }

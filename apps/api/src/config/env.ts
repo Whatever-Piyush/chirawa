@@ -2,6 +2,8 @@ import { envSchema, collectProductionWarnings, type Env } from './env.schema';
 
 export type { Env };
 
+// console (not pino) on purpose: this runs while env is still being parsed and
+// every logger (shared/observability/logger.ts) imports the parsed env.
 function validateEnv(): Env {
   const result = envSchema.safeParse(process.env);
 

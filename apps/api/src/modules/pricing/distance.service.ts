@@ -1,5 +1,8 @@
 import type Redis from 'ioredis';
 import { env } from '../../config/env';
+import { serviceLogger } from '../../shared/observability/logger';
+
+const log = serviceLogger('distance');
 
 const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days — roads don't change weekly
 
@@ -90,7 +93,7 @@ export async function getRoadDistance(
       await redis.setex(cacheKey, CACHE_TTL_SECONDS, String(metres));
       return { metres, source: 'google_maps' };
     } catch (err) {
-      console.warn('Google Maps distance failed, using haversine fallback:', err);
+      log.warn({ err }, 'Google Maps distance failed, using haversine fallback');
     }
   }
 

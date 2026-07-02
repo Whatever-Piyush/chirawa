@@ -1,4 +1,7 @@
 import { env } from '../../config/env';
+import { serviceLogger } from '../../shared/observability/logger';
+
+const log = serviceLogger('sms');
 
 function isSmsConfigured(): boolean {
   return env.FAST2SMS_API_KEY !== 'placeholder';
@@ -10,8 +13,7 @@ function isSmsConfigured(): boolean {
 
 export async function sendSms(phone: string, message: string): Promise<void> {
   if (!isSmsConfigured()) {
-    console.log(`\n📨 [DEV SMS] → ${phone}`);
-    console.log(`   Message: ${message}`);
+    log.info({ phone, message }, '[DEV SMS] not sent — Fast2SMS unconfigured');
     return;
   }
 
@@ -32,11 +34,11 @@ export async function sendSms(phone: string, message: string): Promise<void> {
     });
 
     if (!response.ok) {
-      console.error('Fast2SMS error:', await response.text());
+      log.error({ status: response.status, body: await response.text() }, 'Fast2SMS error');
     }
   } catch (err) {
     // SMS failure is NEVER fatal — FCM is the primary channel
-    console.error('SMS send failed (non-fatal):', err);
+    log.error({ err }, 'SMS send failed (non-fatal)');
   }
 }
 

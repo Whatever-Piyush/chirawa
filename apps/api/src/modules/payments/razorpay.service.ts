@@ -1,6 +1,9 @@
 import crypto from 'crypto';
 import Razorpay from 'razorpay';
 import { env } from '../../config/env';
+import { serviceLogger } from '../../shared/observability/logger';
+
+const log = serviceLogger('razorpay');
 
 let _client: Razorpay | null = null;
 
@@ -63,7 +66,7 @@ export function verifyPaymentSignature(
 export function verifyWebhookSignature(rawBody: string, signature: string): boolean {
   // Skip verification in dev if secret contains 'placeholder'
   if (env.RAZORPAY_WEBHOOK_SECRET.includes('placeholder')) {
-    console.warn('⚠️  Webhook signature skipped (dev mode)');
+    log.warn('Webhook signature skipped (dev mode)');
     return true;
   }
   const expected = crypto

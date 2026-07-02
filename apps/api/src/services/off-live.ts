@@ -1,5 +1,8 @@
 import { env } from '../config/env';
+import { serviceLogger } from '../shared/observability/logger';
 import { offProductFromRow, type OffLookup, type OffProduct } from './off-source';
+
+const log = serviceLogger('off-live');
 
 // ─── Live Open Food Facts API (single-item, Phase 3 seller scan) ──────────────
 // When a scanned barcode isn't in our MasterCatalog, we fall back to ONE live OFF
@@ -36,7 +39,7 @@ export function createOffLiveSource(deps: OffLiveDeps = {}): OffLookup {
     const t = now();
     while (recentCalls.length > 0 && t - recentCalls[0]! > RATE_WINDOW_MS) recentCalls.shift();
     if (recentCalls.length >= RATE_LIMIT) {
-      console.warn(`⚠️  OFF live rate limit (${RATE_LIMIT}/min) reached; skipping ${barcode}`);
+      log.warn({ barcode, ratePerMin: RATE_LIMIT }, 'OFF live rate limit reached; skipping');
       return null;
     }
     recentCalls.push(t);
