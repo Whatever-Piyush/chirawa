@@ -63,9 +63,26 @@ export function verifyPaymentSignature(
   } catch { return false; }
 }
 
+// Pure decision (exported for unit tests): a placeholder webhook secret means
+// "skip verification" ONLY outside production. In production it means the
+// webhook cannot be trusted at all, so verification FAILS CLOSED — this became
+// reachable in Phase 5, where a COD-only launch (PAYMENTS_ONLINE_ENABLED=false)
+// downgrades placeholder RAZORPAY_* creds from boot hard-fail to boot warning.
+export function webhookSecretDecision(
+  secret: string,
+  nodeEnv: string,
+): 'verify' | 'skip-dev' | 'reject' {
+  if (!secret.includes('placeholder')) return 'verify';
+  return nodeEnv === 'production' ? 'reject' : 'skip-dev';
+}
+
 export function verifyWebhookSignature(rawBody: string, signature: string): boolean {
-  // Skip verification in dev if secret contains 'placeholder'
-  if (env.RAZORPAY_WEBHOOK_SECRET.includes('placeholder')) {
+  const decision = webhookSecretDecision(env.RAZORPAY_WEBHOOK_SECRET, env.NODE_ENV);
+  if (decision === 'reject') {
+    log.error('Webhook rejected: RAZORPAY_WEBHOOK_SECRET is a placeholder in production (fail closed)');
+    return false;
+  }
+  if (decision === 'skip-dev') {
     log.warn('Webhook signature skipped (dev mode)');
     return true;
   }

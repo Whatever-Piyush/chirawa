@@ -70,6 +70,13 @@ export const envSchema = z
     JWT_REFRESH_EXPIRES_IN_DAYS: z.coerce.number().int().default(7),
 
     // ── External Services ─────────────────────────────────────────────────────
+    // COD-only launch flag (Phase 5, founder decision). 'false' (default) =
+    // customers can only place COD orders: placeOrder rejects non-COD, payment-
+    // order creation refuses, and placeholder RAZORPAY_* creds are a boot
+    // WARNING instead of a hard-fail (webhooks stay fail-closed regardless —
+    // razorpay.service never skips signature verification in production).
+    // 'true' = online payments live: Razorpay creds must be real in production.
+    PAYMENTS_ONLINE_ENABLED: z.enum(['true', 'false']).default('false'),
     // Optional in dev — real values needed before going live
     RAZORPAY_KEY_ID: z.string().default('rzp_test_placeholder'),
     RAZORPAY_KEY_SECRET: z.string().default('placeholder'),
@@ -135,13 +142,18 @@ export const envSchema = z
   //   • JWT keys must not be the .env.example template value
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== 'production') return;
-    for (const key of RAZORPAY_SECRET_KEYS) {
-      if (looksLikePlaceholder(env[key])) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: [key],
-          message: `${key} is still a placeholder — set the real Razorpay credential before running in production`,
-        });
+    // Razorpay creds only hard-fail when customers can actually pay online
+    // (COD-only launch, Phase 5). While the flag is off they degrade to a boot
+    // warning — see collectProductionWarnings — and webhooks reject fail-closed.
+    if (env.PAYMENTS_ONLINE_ENABLED === 'true') {
+      for (const key of RAZORPAY_SECRET_KEYS) {
+        if (looksLikePlaceholder(env[key])) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: `${key} is still a placeholder — set the real Razorpay credential before enabling online payments in production`,
+          });
+        }
       }
     }
     for (const key of PROD_REQUIRED_SERVICE_KEYS) {
@@ -180,6 +192,12 @@ export type Env = z.infer<typeof envSchema>;
 // boot instead of blocking it. Fatal problems belong in the superRefine above.
 export function collectProductionWarnings(env: Env): string[] {
   const warnings: string[] = [];
+  if (env.PAYMENTS_ONLINE_ENABLED !== 'true') {
+    warnings.push('PAYMENTS_ONLINE_ENABLED=false — COD-only launch: customers cannot pay online (Phase 5 decision)');
+    if (RAZORPAY_SECRET_KEYS.some((key) => looksLikePlaceholder(env[key]))) {
+      warnings.push('RAZORPAY_* placeholder(s) present — acceptable while online payments are OFF (webhooks reject fail-closed; RazorpayX payouts stay pending)');
+    }
+  }
   if (env.FCM_SERVICE_ACCOUNT_JSON === '{}') {
     warnings.push('FCM_SERVICE_ACCOUNT_JSON is unset — push notifications are DISABLED');
   }

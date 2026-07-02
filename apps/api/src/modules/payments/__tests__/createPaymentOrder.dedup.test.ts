@@ -5,6 +5,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // markOrderPaid writes one razorpayPaymentId across ALL pending rows of an order and
 // Payment.razorpayPaymentId is @unique → a 2nd row caused a unique-violation 500.
 
+// Phase 5: these tests exercise the ONLINE payment flow — run them with the
+// COD-only launch flag flipped on (the guard's own tests: cod-only.guard.test.ts).
+vi.mock('../../../config/features', () => ({
+  onlinePaymentsEnabled: () => true,
+}));
 vi.mock('../razorpay.service', () => ({
   isRazorpayConfigured:   vi.fn(() => false),                       // dev-mock by default
   createRazorpayOrder:    vi.fn(async (_amt: number, oid: string) => ({ id: `rzp_created_${oid}` })),

@@ -10,13 +10,25 @@ import {
 } from '../../shared/errors/app-errors';
 import { emitOrderStatusChanged, emitNewOrderForSeller } from '../../shared/events/event-bus';
 import { serviceLogger } from '../../shared/observability/logger';
+import { onlinePaymentsEnabled } from '../../config/features';
 import { assertTransition, transitionOrderStatus } from '../orders/order-status';
 
 const log = serviceLogger('payments');
 
+// COD-only launch (Phase 5): creating NEW Razorpay payment orders is blocked
+// while online payments are off. Deliberately NOT applied to verify / webhook /
+// refund / reconciliation — those settle money already in flight, and must keep
+// working across a flag flip (e.g. an order paid moments before a rollback).
+function assertOnlinePaymentsAvailable(): void {
+  if (!onlinePaymentsEnabled()) {
+    throw new BusinessRuleError('Online payment jald aa rahi hai — abhi Cash on Delivery available hai');
+  }
+}
+
 export function createPaymentsService(prisma: PrismaClient) {
 
   async function createPaymentOrder(orderId: string, userId: string) {
+    assertOnlinePaymentsAvailable();
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundError('Order');
     if (order.customerId !== userId) throw new ForbiddenError('Not your order');
@@ -65,6 +77,7 @@ export function createPaymentsService(prisma: PrismaClient) {
    * razorpayOrderId. Verification/webhook then settle every linked order.
    */
   async function createCartPaymentOrder(orderIds: string[], userId: string) {
+    assertOnlinePaymentsAvailable();
     const orders = await prisma.order.findMany({ where: { id: { in: orderIds }, customerId: userId } });
     if (orders.length === 0) throw new NotFoundError('Order');
     const payable = orders.filter((o) => o.status === 'pending_payment');

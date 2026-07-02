@@ -27,13 +27,18 @@ const realProd = {
   FRONTEND_URLS: 'https://chirawa.in',
 };
 
-describe('envSchema — Razorpay placeholder hard-fail in production (0.2)', () => {
+// Razorpay hard-fails apply when online payments are ENABLED (0.2). With the
+// Phase 5 COD-only flag off (the default), placeholders degrade to warnings —
+// covered by the dedicated describe below.
+const onlineProd = { ...realProd, PAYMENTS_ONLINE_ENABLED: 'true' };
+
+describe('envSchema — Razorpay placeholder hard-fail when online payments enabled (0.2 + Phase 5)', () => {
   it('accepts production when all Razorpay secrets are real', () => {
-    expect(envSchema.safeParse(realProd).success).toBe(true);
+    expect(envSchema.safeParse(onlineProd).success).toBe(true);
   });
 
   it.each(RAZORPAY_SECRET_KEYS)('rejects production when %s contains "placeholder"', (key) => {
-    const result = envSchema.safeParse({ ...realProd, [key]: 'placeholder' });
+    const result = envSchema.safeParse({ ...onlineProd, [key]: 'placeholder' });
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.flatten().fieldErrors[key]).toBeTruthy();
@@ -41,7 +46,7 @@ describe('envSchema — Razorpay placeholder hard-fail in production (0.2)', () 
   });
 
   it('rejects production when RAZORPAY_KEY_ID falls back to its placeholder default', () => {
-    const { RAZORPAY_KEY_ID: _omit, ...withoutKeyId } = realProd;
+    const { RAZORPAY_KEY_ID: _omit, ...withoutKeyId } = onlineProd;
     const result = envSchema.safeParse(withoutKeyId); // default = 'rzp_test_placeholder'
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -51,7 +56,7 @@ describe('envSchema — Razorpay placeholder hard-fail in production (0.2)', () 
 
   it('reports every placeholder secret at once, not just the first', () => {
     const result = envSchema.safeParse({
-      ...realProd,
+      ...onlineProd,
       RAZORPAY_KEY_SECRET: 'placeholder',
       RAZORPAY_WEBHOOK_SECRET: 'rzp_placeholder_value',
     });
@@ -61,6 +66,49 @@ describe('envSchema — Razorpay placeholder hard-fail in production (0.2)', () 
       expect(fields.RAZORPAY_KEY_SECRET).toBeTruthy();
       expect(fields.RAZORPAY_WEBHOOK_SECRET).toBeTruthy();
     }
+  });
+});
+
+describe('envSchema — COD-only launch flag (Phase 5)', () => {
+  it('defaults PAYMENTS_ONLINE_ENABLED to false', () => {
+    const result = envSchema.safeParse(realProd);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.PAYMENTS_ONLINE_ENABLED).toBe('false');
+  });
+
+  it('accepts production with placeholder Razorpay creds while the flag is off', () => {
+    const result = envSchema.safeParse({
+      ...realProd,
+      RAZORPAY_KEY_ID: 'rzp_test_placeholder',
+      RAZORPAY_KEY_SECRET: 'placeholder',
+      RAZORPAY_WEBHOOK_SECRET: 'placeholder',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects values other than true/false', () => {
+    expect(envSchema.safeParse({ ...realProd, PAYMENTS_ONLINE_ENABLED: 'yes' }).success).toBe(false);
+  });
+
+  it('warns about COD-only mode at production boot, and about placeholder Razorpay creds only when they are placeholders', () => {
+    const withPlaceholders = envSchema.parse({
+      ...realProd,
+      RAZORPAY_KEY_SECRET: 'placeholder',
+    }) as Env;
+    const w1 = collectProductionWarnings(withPlaceholders);
+    expect(w1.some((w) => w.includes('COD-only'))).toBe(true);
+    expect(w1.some((w) => w.includes('RAZORPAY_*'))).toBe(true);
+
+    const withRealCreds = envSchema.parse(realProd) as Env;
+    const w2 = collectProductionWarnings(withRealCreds);
+    expect(w2.some((w) => w.includes('COD-only'))).toBe(true);
+    expect(w2.some((w) => w.includes('RAZORPAY_*'))).toBe(false);
+  });
+
+  it('emits no COD-only warnings once online payments are enabled with real creds', () => {
+    const parsed = envSchema.parse(onlineProd) as Env;
+    const warnings = collectProductionWarnings(parsed);
+    expect(warnings.some((w) => w.includes('COD-only'))).toBe(false);
   });
 
   it('allows placeholders outside production (development on defaults)', () => {
@@ -169,12 +217,14 @@ describe('collectProductionWarnings — designed degradations warn, not fail', (
     expect(warnings.join('\n')).toMatch(/payouts/i);
     expect(warnings.join('\n')).toMatch(/Sentry/);
     expect(warnings.join('\n')).toMatch(/worker process dies/i);
-    expect(warnings).toHaveLength(5);
+    expect(warnings.join('\n')).toMatch(/COD-only/); // Phase 5 flag defaults to off
+    expect(warnings).toHaveLength(6);
   });
 
-  it('is silent when every optional service is configured', () => {
+  it('is silent when every optional service is configured and online payments are on', () => {
     const warnings = collectProductionWarnings(
       parse({
+        PAYMENTS_ONLINE_ENABLED: 'true',
         FCM_SERVICE_ACCOUNT_JSON: '{"project_id":"real"}',
         MAPPLS_CLIENT_ID: 'realId',
         MAPPLS_CLIENT_SECRET: 'realSecret',

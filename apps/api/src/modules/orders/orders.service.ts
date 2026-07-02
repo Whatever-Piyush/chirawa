@@ -9,6 +9,7 @@ import { createCatalogService } from '../catalog/catalog.service';
 import { computeAndPersistEta, etaResponse } from './eta.service';
 import { ORDER_TRANSITIONS, assertTransition, transitionOrderStatus } from './order-status';
 import { serviceLogger } from '../../shared/observability/logger';
+import { onlinePaymentsEnabled } from '../../config/features';
 import {
   NotFoundError, ForbiddenError,
   ValidationError, BusinessRuleError, AppError,
@@ -146,6 +147,14 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   const resolver = createResolverService(prisma);
 
   async function placeOrder(userId: string, input: PlaceOrderInput) {
+    // COD-only launch (Phase 5): non-COD methods are rejected server-side while
+    // PAYMENTS_ONLINE_ENABLED is off. First check on purpose — a config-level
+    // rejection that depends on nothing else (the app shows the option as
+    // "coming soon"; this is the boundary that actually enforces it).
+    if (input.paymentMethod !== 'cod' && !onlinePaymentsEnabled()) {
+      throw new BusinessRuleError('Online payment jald aa rahi hai — abhi Cash on Delivery se order karein');
+    }
+
     // Operating-hours gate — Bringly delivers 9 AM – 8 PM IST.
     if (!isWithinOperatingHours()) {
       throw new AppError(
