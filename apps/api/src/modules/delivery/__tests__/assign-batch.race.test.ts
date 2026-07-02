@@ -39,8 +39,8 @@ function makePrisma(opts: { orders?: typeof ORDERS; status?: string; casResults?
     deliveryZone:       { findMany: vi.fn().mockResolvedValue([]) },
     riderAvailability:  { findMany: vi.fn().mockResolvedValue([{ riderId: 'rider_profile_1' }]) },
     riderZone:          { findMany: vi.fn().mockResolvedValue([]) },
-    riderProfile:       { findUnique: vi.fn().mockResolvedValue({ userId: 'rider_user_1' }) },
-    deliveryAssignment: { count: vi.fn().mockResolvedValue(0), createMany: assignmentCreateMany },
+    riderProfile:       { findMany: vi.fn().mockResolvedValue([{ id: 'rider_profile_1', userId: 'rider_user_1' }]) },
+    deliveryAssignment: { groupBy: vi.fn().mockResolvedValue([]), createMany: assignmentCreateMany },
     order:              { updateMany: orderUpdateMany },
     shop:               { findUnique: vi.fn().mockResolvedValue({ name: 'Dukaan X' }) },
     $transaction: (fn: (tx: unknown) => Promise<unknown>) => fn({

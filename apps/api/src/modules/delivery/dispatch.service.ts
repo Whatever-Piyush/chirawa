@@ -36,6 +36,36 @@ export function pickBestRider(candidates: RiderCandidate[]): RiderCandidate | nu
   return [...candidates].sort((a, b) => a.activeCount - b.activeCount)[0]!;
 }
 
+// Batch-load assignment candidates in exactly TWO queries (P1-11). The old
+// loop ran riderProfile.findUnique + deliveryAssignment.count PER online rider
+// — 100 riders ≈ 200 queries per assignment, on the hot path of every batch
+// close and every single-order dispatch. Riders with a dangling profile id are
+// skipped (same behaviour as the old `if (profile)` guard); riders with no
+// active assignments count 0. Preserves riderIds order for pickBestRider's
+// stable tie-break.
+export async function loadRiderCandidates(
+  prisma: PrismaClient,
+  riderIds: string[],
+): Promise<RiderCandidate[]> {
+  if (riderIds.length === 0) return [];
+  const [profiles, activeRows] = await Promise.all([
+    prisma.riderProfile.findMany({
+      where:  { id: { in: riderIds } },
+      select: { id: true, userId: true },
+    }),
+    prisma.deliveryAssignment.groupBy({
+      by: ['riderId'], where: { riderId: { in: riderIds }, isActive: true }, _count: { _all: true },
+    }),
+  ]);
+  const userIdByProfile = new Map(profiles.map((p) => [p.id, p.userId]));
+  const activeByProfile = new Map(activeRows.map((r) => [r.riderId, r._count._all]));
+  return riderIds.flatMap((rid) => {
+    const userId = userIdByProfile.get(rid);
+    if (!userId) return [];
+    return [{ riderProfileId: rid, userId, activeCount: activeByProfile.get(rid) ?? 0 }];
+  });
+}
+
 // ── Service ───────────────────────────────────────────────────────────────────
 
 export function createDispatchService(prisma: PrismaClient, redis: Redis) {
@@ -102,14 +132,7 @@ export function createDispatchService(prisma: PrismaClient, redis: Redis) {
     }
     if (riderIds.length === 0) riderIds = [...onlineIds];
 
-    const candidates: RiderCandidate[] = [];
-    for (const rid of riderIds) {
-      const [profile, activeCount] = await Promise.all([
-        prisma.riderProfile.findUnique({ where: { id: rid }, select: { userId: true } }),
-        prisma.deliveryAssignment.count({ where: { riderId: rid, isActive: true } }),
-      ]);
-      if (profile) candidates.push({ riderProfileId: rid, userId: profile.userId, activeCount });
-    }
+    const candidates = await loadRiderCandidates(prisma, riderIds); // 2 queries, not 2×N (P1-11)
 
     const best = pickBestRider(candidates);
     if (!best) return { assigned: false as const, reason: 'no_candidate' };

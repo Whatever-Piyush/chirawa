@@ -2,7 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import { NotFoundError } from '../../shared/errors/app-errors';
 import { haversineMeters, type LatLng } from '../../shared/utils/geo';
-import { pickZone, pickBestRider, type ZoneLite, type RiderCandidate } from './dispatch.service';
+import { pickZone, pickBestRider, loadRiderCandidates, type ZoneLite, type RiderCandidate } from './dispatch.service';
 import { emitOrderAssignedToRider } from '../../shared/events/event-bus';
 
 // Orders within this radius of the batch anchor may join the same batch (Task 5.4).
@@ -94,15 +94,7 @@ export function createBatchingService(prisma: PrismaClient, redis: Redis) {
     }
     if (riderIds.length === 0) riderIds = [...onlineIds];
 
-    const candidates: RiderCandidate[] = [];
-    for (const rid of riderIds) {
-      const [profile, activeCount] = await Promise.all([
-        prisma.riderProfile.findUnique({ where: { id: rid }, select: { userId: true } }),
-        prisma.deliveryAssignment.count({ where: { riderId: rid, isActive: true } }),
-      ]);
-      if (profile) candidates.push({ riderProfileId: rid, userId: profile.userId, activeCount });
-    }
-    return pickBestRider(candidates);
+    return pickBestRider(await loadRiderCandidates(prisma, riderIds)); // 2 queries, not 2×N (P1-11)
   }
 
   // Close an open batch and assign all its orders to one rider (Task 5.4).
