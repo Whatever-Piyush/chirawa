@@ -203,3 +203,23 @@ docs/DEPLOYMENT.md §4 before the first deploy.**
 | 2 | `feat(runtime)` | PM2 runs compiled `dist/` (P1-6: no more tsx-on-source in prod); Dockerfile compiles TS, prunes dev deps, non-root + HEALTHCHECK (1.23 GB → 540 MB); `packageManager` pinned pnpm\@9.15.9 (latest pnpm crashes on Node 20 — corepack was unpinned). | compiled API + worker booted locally (health 200, PG+Redis connect, clean shutdown); image booted: /health 200, HEALTHCHECK healthy, non-root, 0 dev deps |
 | 3 | `feat(deploy)` | Deploy gated on the real CI workflow (`workflow_call` + `needs`); exact-SHA checkout instead of `git pull`; single `scripts/server-release.sh` (install → generate → build → env:check → guarded migrate → reload → health → history); one-click `rollback.yml` + one-command `scripts/rollback.sh` (migrations skipped); dead ghcr push removed; `deploy.sh` placeholder-host Docker script replaced. | workflows YAML-validated; scripts `bash -n`; rollback target resolution tested against fixture histories |
 | 4 | `docs(deploy)` | DEPLOYMENT.md (flow + gates + one-time server migration + validation checklist), ROLLBACK_DRILL.md (runbook + quarterly drill), ADR 004, github-secrets.md updated. | — |
+
+## 8. Production Hardening Phase 3 — critical runtime bugs (implemented)
+
+Closes **P1-3, P1-4, P1-5, P1-7, P1-8, P1-12** plus **P2-8** and **P2-10**. Committed
+separately on `eng/p0-hardening` (same review-then-merge-deliberately rule). Each commit
+message carries the full root-cause / solution / regression-prevention narrative.
+
+| # | Commit | Concern | Verification |
+|---|---|---|---|
+| 1 | `fix(notifications)` | P1-3 — seller/rider pushes silently dropped (payloads carried '' / RiderProfile.id where User.id was needed). Status-changed payload no longer carries party ids; consumers resolve USER ids via one helper; remaining fields renamed `*UserId`. | 4 resolver tests; excess-property checks flushed all 10 emit sites; 2 tests that canonized the bug corrected |
+| 2 | `fix(catalog)` | P1-4 — shop open/closed badge used server-local time against IST shop hours. `currentISTTimeHHMM()` in operating-hours.ts; computeIsOpen exported + injectable now. | 8 tests, run under local TZ and TZ=UTC |
+| 3 | `fix(nginx)` | P1-5 + P2-10 — 1 MB body cap 413'd 5 MB uploads; api zone 0.5 r/s 503'd CGNAT users; no HSTS; webhook zone defined but never applied. 6m body, 300r/m api, 60r/m auth, webhook zone wired, HSTS 1y. | real `nginx -t` (dockerized) passes; **manual copy to server + reload required** |
+| 4 | `fix(auth)` | P1-7 — refresh rotation was check-then-act; concurrent refreshes double-minted sessions past reuse detection. Conditional updateMany claim; count=0 ⇒ revoke session family. | 6 tests incl. exactly-one-mints concurrency + alarm-over-expired precedence |
+| 5 | `fix(delivery)` | P1-12 — assignBatch could dispatch two riders to one batch. CAS claim (status='open') inside the assignment transaction, ordered before any write. | 6 tests incl. zero-writes-on-lost-claim + exactly-one-assignment |
+| 6 | `fix(worker)` | P1-8 — attempts:1 everywhere, removeOnFail:true destroyed evidence, Sentry fired per attempt. One DEFAULT_JOB_OPTIONS on all 14 queues (5 attempts, exp backoff, 7d failure retention); retry-vs-final logging; auto-accept keeps removeOnComplete:true so its deterministic jobId re-arms. | 4 policy-invariant tests; compiled worker boots clean |
+| 7 | `chore(referral)` | P2-8 — unlock path was dead scaffolding behind a stub that logged "queued" while queueing nothing (and the processor had non-atomic money bugs). Removed runtime scaffolding; kept schema + signup recording; features.ts documents the rebuild path. | typecheck + full suite; worker boots with 5 workers |
+
+Still open from P1 after this pass: P1-1 (rate-limit key trusts unverified JWT), P1-9
+(worker observability/pino/heartbeat), P1-11 (rider-picker N+1), P1-13 (search hot-path
+SQL), P1-14 (closed by Phase 2's env work — NODE_ENV is now required, no default).
