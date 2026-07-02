@@ -116,6 +116,10 @@ export const envSchema = z
     // need it. Set both in production for error tracking with release tagging (4.1).
     SENTRY_DSN:     z.string().default(''),
     SENTRY_RELEASE: z.string().default(''),
+    // Dead-man's-switch ping URL for the worker process (P1-9) — healthchecks.io
+    // style: the worker GETs it every 60s; if pings stop, the monitor alerts.
+    // Empty = disabled (fine in dev; warns at production boot).
+    WORKER_HEARTBEAT_URL: z.string().default(''),
 
     // ── App Config ────────────────────────────────────────────────────────────
     APP_NAME: z.string().default('Chirawa'),
@@ -189,6 +193,9 @@ export function collectProductionWarnings(env: Env): string[] {
   }
   if (env.SENTRY_DSN === '') {
     warnings.push('SENTRY_DSN is empty — Sentry error tracking is DISABLED');
+  }
+  if (env.WORKER_HEARTBEAT_URL === '') {
+    warnings.push('WORKER_HEARTBEAT_URL is empty — nobody is alerted if the worker process dies (P1-9)');
   }
   return warnings;
 }

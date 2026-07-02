@@ -120,7 +120,26 @@ The image compiles TS, prunes dev dependencies, runs as non-root with a `HEALTHC
 and includes the prisma CLI so a containerized `migrate deploy` is possible. If the VPS
 dies and must be rebuilt fast, `docker build` + `docker run --env-file` is the escape hatch.
 
-## 8. Validation checklist
+## 8. Worker observability (P1-9)
+
+The worker logs structured JSON via pino (same shape as the API) to
+`/var/log/chirawa/worker-*.log`. Three alerting layers, two need one-time setup:
+
+1. **Process liveness (dead-man's switch):** create a check at healthchecks.io
+   (or any ping monitor) with a ~3 min grace period and set its ping URL as
+   `WORKER_HEARTBEAT_URL` in the server `.env`. The worker pings it every 60 s;
+   pings stop ⇒ you get paged. Production boot WARNS while this is unset.
+2. **Job failures:** BullMQ retries 5× with exponential backoff; the FINAL
+   failure is sent to Sentry (`captureError` with jobName/jobId tags). In
+   Sentry create an alert rule: *When an event is seen with tag
+   `jobName` (any value) → notify* — this is what pages when a settlement or
+   reconciliation run has exhausted its retries.
+3. **Failure forensics:** failed jobs are retained in Redis for 7 days
+   (`DEFAULT_JOB_OPTIONS.removeOnFail`) — inspect with any BullMQ UI or
+   `redis-cli`, and grep the structured logs by `jobName`/`settlementId`/
+   `batchId`/`orderId` fields.
+
+## 9. Validation checklist
 
 Before merging to main:
 - [ ] CI green on the PR (typecheck, tests, image build)

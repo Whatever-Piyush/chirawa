@@ -1,5 +1,6 @@
 import type { Queue } from 'bullmq';
 import { QueueNames, JobNames } from './queues';
+import { logger } from './logger';
 
 /**
  * Sets up all recurring job schedules.
@@ -11,7 +12,7 @@ export async function setupSchedules(queues: {
   cleanup:        Queue;
   enrichment:     Queue;
 }): Promise<void> {
-  console.log('⏰ Setting up job schedules...');
+  logger.info('⏰ Setting up job schedules...');
 
   // ── Daily settlement — 11:00 AM IST (05:30 UTC) ────────────────────────────
   await queues.settlement.add(
@@ -107,5 +108,5 @@ export async function setupSchedules(queues: {
     },
   );
 
-  console.log('✅ All job schedules configured');
+  logger.info('✅ All job schedules configured');
 }

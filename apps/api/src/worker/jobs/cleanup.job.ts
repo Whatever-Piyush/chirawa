@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
+import { logger } from '../logger';
 
 /**
  * Maintenance cleanup jobs — run nightly.
@@ -17,7 +18,7 @@ export async function runLocationCleanup(prisma: PrismaClient): Promise<void> {
     where: { recordedAt: { lt: sevenDaysAgo } },
   });
 
-  console.log(`🗑️  Location cleanup: deleted ${result.count} old records`);
+  logger.info({ deleted: result.count }, '🗑️  Location cleanup done');
 }
 
 export async function runOtpCleanup(prisma: PrismaClient): Promise<void> {
@@ -27,7 +28,7 @@ export async function runOtpCleanup(prisma: PrismaClient): Promise<void> {
     where: { attemptedAt: { lt: oneDayAgo } },
   });
 
-  console.log(`🗑️  OTP cleanup: deleted ${result.count} old attempts`);
+  logger.info({ deleted: result.count }, '🗑️  OTP cleanup done');
 }
 
 export async function runTokenCleanup(prisma: PrismaClient): Promise<void> {
@@ -46,7 +47,7 @@ export async function runTokenCleanup(prisma: PrismaClient): Promise<void> {
     },
   });
 
-  console.log(`🗑️  Token cleanup: deleted ${result.count} expired tokens`);
+  logger.info({ deleted: result.count }, '🗑️  Token cleanup done');
 }
 
 export async function runCartCleanup(prisma: PrismaClient, redis: Redis): Promise<void> {
@@ -68,5 +69,5 @@ export async function runCartCleanup(prisma: PrismaClient, redis: Redis): Promis
     where: { expiresAt: { lt: oneDayAgo } },
   });
 
-  console.log(`🗑️  Cart cleanup: deleted ${result.count} expired carts`);
+  logger.info({ deleted: result.count }, '🗑️  Cart cleanup done');
 }

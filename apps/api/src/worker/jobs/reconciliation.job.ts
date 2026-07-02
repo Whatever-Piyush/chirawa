@@ -4,6 +4,7 @@ import type Redis from 'ioredis';
 import { sendPush } from '../../modules/notifications/fcm.service';
 import { SellerNotifications } from '../../modules/notifications/notification.templates';
 import { JobNames, SELLER_ACCEPT_MS, autoAcceptJobId, type AutoAcceptPayload } from '../queues';
+import { logger } from '../logger';
 
 /**
  * Payment reconciliation — runs every 15 minutes.
@@ -39,7 +40,7 @@ export async function runPaymentReconciliation(
 
   if (!staleOrders.length) return;
 
-  console.log(`🔍 Reconciling ${staleOrders.length} stale orders...`);
+  logger.info({ staleCount: staleOrders.length }, `🔍 Reconciling ${staleOrders.length} stale orders...`);
 
   // Import here to avoid circular deps
   const { isRazorpayConfigured, fetchPaymentsByOrderId } =
@@ -55,7 +56,7 @@ export async function runPaymentReconciliation(
 
     try {
       if (!isRazorpayConfigured()) {
-        console.log(`[DEV] Skip reconciliation for order ${order.id} — Razorpay not configured`);
+        logger.debug({ orderId: order.id }, '[DEV] Skip reconciliation — Razorpay not configured');
         continue;
       }
 
@@ -66,15 +67,15 @@ export async function runPaymentReconciliation(
         await markOrderPaid(prisma, order.id, captured.id, captured.method);
         await progressReconciledOrder(prisma, redis, sellerAcceptQueue, order.id);
         reconciled++;
-        console.log(`✅ Reconciled order ${order.id}`);
+        logger.info({ orderId: order.id }, `✅ Reconciled order ${order.id}`);
       }
     } catch (err) {
-      console.error(`Reconciliation error for order ${order.id}:`, err);
+      logger.error({ err, orderId: order.id }, `Reconciliation error for order ${order.id}`);
     }
   }
 
   if (reconciled > 0) {
-    console.log(`💰 Reconciled ${reconciled} payments`);
+    logger.info({ reconciled }, `💰 Reconciled ${reconciled} payments`);
   }
 }
 
@@ -114,7 +115,7 @@ async function progressReconciledOrder(
     // removeOnComplete: true frees the deterministic jobId for re-arming;
     // failures are KEPT via DEFAULT_JOB_OPTIONS retention (P1-8).
     { delay: SELLER_ACCEPT_MS, jobId: autoAcceptJobId(orderId), removeOnComplete: true },
-  ).catch((err) => console.error(`Failed to schedule auto-accept for ${orderId}:`, err));
+  ).catch((err) => logger.error({ err, orderId }, 'Failed to schedule auto-accept'));
 
   // 2. Direct seller FCM (mirrors notifications.plugin's NEW_ORDER_FOR_SELLER).
   const token = await redis.get(`fcm:token:${sellerUserId}`);

@@ -4,6 +4,7 @@ import type { SingleSellerSettlePayload } from '../queues';
 import {
   isPayoutConfigured, ensureSellerFundAccount, createPayout, fetchPayout,
 } from '../../modules/payments/razorpay.service';
+import { logger } from '../logger';
 
 /**
  * Daily seller settlement — runs at 11 AM every day.
@@ -54,7 +55,7 @@ export async function runDailySettlement(prisma: PrismaClient): Promise<void> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  console.log(`💰 Running daily settlement for ${yesterday.toDateString()}`);
+  logger.info({ day: yesterday.toDateString() }, `💰 Running daily settlement for ${yesterday.toDateString()}`);
 
   // Get all shops with delivered orders yesterday
   const shops = await prisma.shop.findMany({
@@ -118,11 +119,11 @@ export async function runDailySettlement(prisma: PrismaClient): Promise<void> {
       settled++;
 
     } catch (err) {
-      console.error(`Settlement failed for shop ${shop.id}:`, err);
+      logger.error({ err, shopId: shop.id }, `Settlement failed for shop ${shop.id}`);
     }
   }
 
-  console.log(`✅ Settlement done — settled: ${settled}, skipped: ${skipped}`);
+  logger.info({ settled, skipped }, `✅ Settlement done — settled: ${settled}, skipped: ${skipped}`);
 }
 
 // Exported for unit testing the payout state machine (the money-critical path).
@@ -140,7 +141,7 @@ export async function initiatePayout(
   });
   if (!current) return;
   if (current.status === 'paid' || current.status === 'processing' || current.payoutId) {
-    console.log(`↩️  Settlement ${settlementId} already ${current.status} — skipping payout`);
+    logger.info({ settlementId, status: current.status }, `↩️  Settlement ${settlementId} already ${current.status} — skipping payout`);
     return;
   }
 
@@ -150,7 +151,7 @@ export async function initiatePayout(
       where: { id: settlementId },
       data:  { status: 'pending', needsAttention: true, failureReason: 'No UPI ID on seller profile' },
     });
-    console.warn(`⚠️  Seller ${seller.id} has no UPI — settlement ${settlementId} pending admin action`);
+    logger.warn({ settlementId, sellerId: seller.id }, `⚠️  Seller has no UPI — settlement ${settlementId} pending admin action`);
     return;
   }
 
@@ -161,7 +162,7 @@ export async function initiatePayout(
       where: { id: settlementId },
       data:  { failureReason: 'RazorpayX not configured — payout skipped (non-production)' },
     });
-    console.log(`🧪 Payout skipped (unconfigured): settlement ${settlementId}, ₹${amountPaise / 100}`);
+    logger.info({ settlementId, amountPaise }, `🧪 Payout skipped (unconfigured): settlement ${settlementId}, ₹${amountPaise / 100}`);
     return;
   }
 
@@ -210,7 +211,7 @@ export async function initiatePayout(
           },
         }),
       ]);
-      console.log(`✅ Payout processed: settlement ${settlementId} → ${seller.upiId}`);
+      logger.info({ settlementId }, `✅ Payout processed: settlement ${settlementId}`);
     } else if (PAYOUT_IN_FLIGHT.has(payout.status)) {
       // Accepted but not settled yet — record the payout id WITHOUT marking paid
       // or writing the ledger. A payout webhook / reconcile sweep finishes this
@@ -219,7 +220,7 @@ export async function initiatePayout(
         where: { id: settlementId },
         data:  { status: 'processing', payoutId: payout.payoutId, failureReason: null },
       });
-      console.log(`⏳ Payout ${payout.status}: settlement ${settlementId} (payout ${payout.payoutId})`);
+      logger.info({ settlementId, payoutId: payout.payoutId, status: payout.status }, `⏳ Payout ${payout.status}: settlement ${settlementId}`);
     } else {
       // rejected / cancelled / reversed / failed — flag for an admin, no ledger.
       await prisma.settlement.update({
@@ -229,7 +230,7 @@ export async function initiatePayout(
           needsAttention: true, failureReason: `Payout ${payout.status}`,
         },
       });
-      console.error(`❌ Payout ${payout.status}: settlement ${settlementId} flagged for admin`);
+      logger.error({ settlementId, status: payout.status }, `❌ Payout ${payout.status}: settlement ${settlementId} flagged for admin`);
     }
   } catch (err) {
     // API/network failure — failed + flagged. No ledger, not paid. Safe to retry:
@@ -239,7 +240,7 @@ export async function initiatePayout(
       where: { id: settlementId },
       data:  { status: 'failed', needsAttention: true, failureReason: reason.slice(0, 255) },
     });
-    console.error(`❌ Payout error for settlement ${settlementId}:`, reason);
+    logger.error({ err: reason, settlementId }, `❌ Payout error for settlement ${settlementId}`);
   }
 }
 
@@ -282,17 +283,17 @@ export async function runPayoutReconciliation(prisma: PrismaClient): Promise<voi
             },
           })]),
         ]);
-        console.log(`✅ Payout reconciled → paid: settlement ${s.id}`);
+        logger.info({ settlementId: s.id }, `✅ Payout reconciled → paid: settlement ${s.id}`);
       } else if (!PAYOUT_IN_FLIGHT.has(payout.status)) {
         await prisma.settlement.update({
           where: { id: s.id },
           data:  { status: 'failed', needsAttention: true, failureReason: `Payout ${payout.status}` },
         });
-        console.error(`❌ Payout reconciled → failed: settlement ${s.id} (${payout.status})`);
+        logger.error({ settlementId: s.id, status: payout.status }, `❌ Payout reconciled → failed: settlement ${s.id}`);
       }
       // else still in flight → leave for the next sweep
     } catch (err) {
-      console.error(`Payout reconcile error for settlement ${s.id}:`, err);
+      logger.error({ err, settlementId: s.id }, `Payout reconcile error for settlement ${s.id}`);
     }
   }
 }

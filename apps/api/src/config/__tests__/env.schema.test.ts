@@ -168,7 +168,8 @@ describe('collectProductionWarnings — designed degradations warn, not fail', (
     expect(warnings.join('\n')).toMatch(/MAPPLS/);
     expect(warnings.join('\n')).toMatch(/payouts/i);
     expect(warnings.join('\n')).toMatch(/Sentry/);
-    expect(warnings).toHaveLength(4);
+    expect(warnings.join('\n')).toMatch(/worker process dies/i);
+    expect(warnings).toHaveLength(5);
   });
 
   it('is silent when every optional service is configured', () => {
@@ -180,6 +181,7 @@ describe('collectProductionWarnings — designed degradations warn, not fail', (
         MAPPLS_REST_KEY: 'realKey',
         RAZORPAYX_ACCOUNT_NUMBER: '2323230000000000',
         SENTRY_DSN: 'https://x@o0.ingest.sentry.io/0',
+        WORKER_HEARTBEAT_URL: 'https://hc-ping.com/uuid',
       }),
     );
     expect(warnings).toHaveLength(0);

@@ -1,6 +1,7 @@
 import type { PrismaClient, Prisma } from '@prisma/client';
 import { processImage as defaultProcessImage } from '../../services/image-pipeline';
 import type { OffLookup } from '../../services/off-source';
+import { logger } from '../logger';
 
 // ─── Bulk catalog enrichment (Catalog Engine Phase 2, BullMQ v5, ₹0) ──────────
 // For each MasterCatalog row that still has no image, resolve its barcode against
@@ -104,6 +105,6 @@ export async function runCatalogEnrichment(prisma: PrismaClient, deps: Enrichmen
     }
   }
 
-  console.log(`🧩 Catalog enrichment: scanned ${result.scanned}, enriched ${result.enriched}, needs_manual ${result.needsManual}, errors ${result.errors}`);
+  logger.info({ ...result }, `🧩 Catalog enrichment: scanned ${result.scanned}, enriched ${result.enriched}, needs_manual ${result.needsManual}, errors ${result.errors}`);
   return result;
 }
