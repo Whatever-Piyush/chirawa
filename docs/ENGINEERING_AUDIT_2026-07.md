@@ -223,3 +223,16 @@ message carries the full root-cause / solution / regression-prevention narrative
 Still open from P1 after this pass: P1-1 (rate-limit key trusts unverified JWT), P1-9
 (worker observability/pino/heartbeat), P1-11 (rider-picker N+1), P1-13 (search hot-path
 SQL), P1-14 (closed by Phase 2's env work — NODE_ENV is now required, no default).
+
+## 9. Production Hardening Phase 4 — remaining P1s (implemented)
+
+Closes **P1-1, P1-9, P1-11, P1-13** — with §7 (Phase 2) and §8 (Phase 3), **every P1 finding
+in this audit is now closed.** Committed separately on `eng/p0-hardening`; full narratives in
+the commit messages.
+
+| # | Commit | Concern | Verification |
+|---|---|---|---|
+| 1 | `fix(security)` | P1-1 — rate-limit bucket key trusted an UNVERIFIED JWT (fabricated `sub` = fresh bucket per request). Key fn now runs the same verifyAccessToken as auth; unverifiable tokens share the per-IP bucket. | 5 tests incl. forged-sub fallback + same-bucket property |
+| 2 | `perf(delivery)` | P1-11 — 2 queries PER online rider in BOTH assignment paths (audit cited one; the loop was duplicated). One shared loadRiderCandidates: findMany + groupBy = 2 queries at any rider count. | tests assert the query-count invariant (2 queries for 100 riders) |
+| 3 | `perf(search)` | P1-13 — every search paid a per-candidate-row correlated AVG(rating) subquery (only used by sort=rating) + re-ran the trigram WHERE for the count label. Rating now zero-cost unless sort=rating (then one grouped join backed by a new orders(shop_id, rating) index); count Redis-cached 5 min. | exercised live against local PG+Redis: both sorts correct, count cache key observed; additive migration applied |
+| 4 | `feat(worker)` | P1-9 — money-moving worker was console.log-only, no liveness signal. pino structured logs (43 calls converted), WORKER_HEARTBEAT_URL dead-man's switch (warns at prod boot when unset), Sentry alert setup documented (DEPLOYMENT.md §8). | 447/447 tests; compiled worker booted — structured logs + heartbeat ping observed |
