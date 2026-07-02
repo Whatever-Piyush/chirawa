@@ -23,6 +23,11 @@ export function currentISTHour(date: Date = new Date()): number {
 
 /** True if the given moment is within delivery hours (09:00–19:59 IST). */
 export function isWithinOperatingHours(date: Date = new Date()): boolean {
+  // Load-test harness override (scripts/loadtest) so checkout scenarios can run
+  // at any wall-clock hour — IMPOSSIBLE in production, like the OTP dev bypass.
+  if (process.env.NODE_ENV !== 'production' && process.env.OPERATING_HOURS_DISABLED === 'true') {
+    return true;
+  }
   const hour = currentISTHour(date);
   return hour >= OPERATING_HOURS.openHour && hour < OPERATING_HOURS.closeHour;
 }

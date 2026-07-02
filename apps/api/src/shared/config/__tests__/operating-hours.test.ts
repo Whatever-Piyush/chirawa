@@ -58,3 +58,36 @@ describe('existing IST helpers stay consistent (sanity)', () => {
     expect(isWithinOperatingHours(utc(14, 30))).toBe(false);
   });
 });
+
+describe('OPERATING_HOURS_DISABLED override (load-test harness, Phase 6)', () => {
+  const closedMoment = () => {
+    // 14:30 UTC = 20:00 IST — normally not orderable.
+    const d = new Date();
+    d.setUTCHours(14, 30, 0, 0);
+    return d;
+  };
+
+  it('opens the window outside production when set', () => {
+    const prevEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'test';
+    process.env.OPERATING_HOURS_DISABLED = 'true';
+    try {
+      expect(isWithinOperatingHours(closedMoment())).toBe(true);
+    } finally {
+      delete process.env.OPERATING_HOURS_DISABLED;
+      process.env.NODE_ENV = prevEnv;
+    }
+  });
+
+  it('is IGNORED in production — the gate cannot be disabled there', () => {
+    const prevEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    process.env.OPERATING_HOURS_DISABLED = 'true';
+    try {
+      expect(isWithinOperatingHours(closedMoment())).toBe(false);
+    } finally {
+      delete process.env.OPERATING_HOURS_DISABLED;
+      process.env.NODE_ENV = prevEnv;
+    }
+  });
+});
