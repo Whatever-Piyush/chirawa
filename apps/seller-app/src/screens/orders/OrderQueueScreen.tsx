@@ -46,6 +46,7 @@ export default function OrderQueueScreen() {
   const [orders,     setOrders]     = useState<ActiveOrder[]>([]);
   const [newOrder,   setNewOrder]   = useState<IncomingOrder | null>(null);
   const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState(false);
   const [actionLoad, setActionLoad] = useState(false);
   const [rejectingOrderId, setRejectingOrderId] = useState<string | null>(null);
   const socketRef   = useRef<Socket | null>(null);
@@ -58,17 +59,22 @@ export default function OrderQueueScreen() {
   // ── Load existing orders ──────────────────────────────────────────────────
   const loadOrders = useCallback(async () => {
     if (!state.token) return;
+    setError(false);
     try {
       const data = await SellerApi.getOrders(state.token) as ActiveOrder[];
       setOrders(data.filter((o) => !['delivered', 'cancelled'].includes(o.status)));
-    } catch (e) {
-      console.error('Load orders failed:', e);
+    } catch {
+      // Never silently show "no orders" when the fetch failed — surface a
+      // retryable error instead (Seller Sprint 0 P0-3).
+      setError(true);
     } finally {
       setLoading(false);
     }
   }, [state.token]);
 
   useEffect(() => { void loadOrders(); }, [loadOrders]);
+
+  const retry = useCallback(() => { setLoading(true); void loadOrders(); }, [loadOrders]);
 
   // ── Notification-tap deep link ───────────────────────────────────────────
   // NotificationsBootstrap navigates here with route.params.orderId when the
@@ -181,14 +187,17 @@ export default function OrderQueueScreen() {
   // ── Accept order ──────────────────────────────────────────────────────────
   async function handleAccept(orderId: string) {
     if (!state.token) return;
+    // Silence the alarm the instant the seller engages — BEFORE the network
+    // call, so a failed Accept can never leave vibration/sound looping forever
+    // (Seller Sprint 0 P0-4). The modal stays open on failure so they can retry.
+    await stopAlarm();
     setActionLoad(true);
     try {
       await SellerApi.acceptOrder(orderId, state.token);
-      await stopAlarm();
       setNewOrder((cur) => (cur?.orderId === orderId ? null : cur));
       await loadOrders();
     } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Accept nahi hua');
+      Alert.alert('Accept fail hua ❌', e instanceof Error ? e.message : 'Accept nahi hua. Dobara koshish karein.');
     } finally {
       setActionLoad(false);
     }
@@ -197,15 +206,17 @@ export default function OrderQueueScreen() {
   // ── Reject order ──────────────────────────────────────────────────────────
   async function handleReject(orderId: string, reason: string) {
     if (!state.token) return;
+    // Same alarm-safety fix as Accept — stop before the call so a failed Reject
+    // never leaves the alarm running (Seller Sprint 0 P0-4).
+    await stopAlarm();
     setActionLoad(true);
     try {
       await SellerApi.rejectOrder(orderId, reason, state.token);
-      await stopAlarm();
       setNewOrder((cur) => (cur?.orderId === orderId ? null : cur));
       setRejectingOrderId(null);
       await loadOrders();
     } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Reject nahi hua');
+      Alert.alert('Reject fail hua ❌', e instanceof Error ? e.message : 'Reject nahi hua. Dobara koshish karein.');
     } finally {
       setActionLoad(false);
     }
@@ -243,12 +254,22 @@ export default function OrderQueueScreen() {
         <View style={styles.liveDot} />
       </View>
 
-      {/* Active orders */}
+      {/* Active orders — error+retry takes precedence over the empty state so a
+          failed fetch never masquerades as "no orders" (Seller Sprint 0 P0-3). */}
       {orders.length === 0
-        ? <View style={styles.empty}>
-            <Text style={styles.emptyEmoji}>😴</Text>
-            <Text style={styles.emptyText}>Abhi koi order nahi</Text>
-          </View>
+        ? (error
+            ? <View style={styles.empty}>
+                <Text style={styles.emptyEmoji}>📡</Text>
+                <Text style={styles.emptyText}>Order load nahi hue</Text>
+                <Text style={styles.errorSub}>Internet check karein aur dobara koshish karein</Text>
+                <TouchableOpacity style={styles.retryBtn} onPress={retry}>
+                  <Text style={styles.retryBtnText}>🔄 Retry</Text>
+                </TouchableOpacity>
+              </View>
+            : <View style={styles.empty}>
+                <Text style={styles.emptyEmoji}>😴</Text>
+                <Text style={styles.emptyText}>Abhi koi order nahi</Text>
+              </View>)
         : <FlatList
             data={orders}
             keyExtractor={(o) => o.id}
@@ -378,6 +399,9 @@ const styles = StyleSheet.create({
   empty:     { flex: 1, justifyContent: 'center', alignItems: 'center', gap: Spacing.lg },
   emptyEmoji: { fontSize: 64 },
   emptyText:  { fontSize: FontSize.lg, color: Colors.textMuted },
+  errorSub:   { fontSize: FontSize.sm, color: Colors.textMuted, textAlign: 'center', marginTop: -Spacing.sm, paddingHorizontal: Spacing.xl },
+  retryBtn:   { backgroundColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md },
+  retryBtnText: { color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
   orderCard: {
     backgroundColor: Colors.card, borderRadius: Radius.lg,
     padding: Spacing.lg, gap: Spacing.sm, ...Shadow.card,

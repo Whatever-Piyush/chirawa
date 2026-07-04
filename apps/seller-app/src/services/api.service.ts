@@ -112,6 +112,16 @@ export const SellerApi = {
   setPin: (pin: string, token: string) =>
     request('POST', '/auth/set-pin', { pin, confirmPin: pin }, token),
 
+  // The seller's own shop — authoritative identity + open state (Seller Sprint 0).
+  // Resolves from the seller profile, so a new seller with zero orders still gets
+  // their shop (fixes the inventory dead-end that inferred shopId from orders[0]).
+  getMyShop: (token: string) =>
+    request<MyShop>('GET', '/sellers/me/shop', undefined, token),
+
+  // Seller opens / closes their store (flips Shop.isOpen).
+  setShopOpen: (isOpen: boolean, token: string) =>
+    request<MyShop>('PATCH', '/sellers/me/shop/open', { isOpen }, token),
+
   getOrders: (token: string) =>
     request<unknown[]>('GET', '/orders', undefined, token),
 
@@ -189,6 +199,10 @@ export const SellerApi = {
   getSettlements: (token: string) =>
     request<SettlementsResponse>('GET', '/sellers/me/settlements', undefined, token),
 };
+
+export interface MyShop {
+  id: string; name: string; isOpen: boolean; openTime: string; closeTime: string;
+}
 
 export interface ProductInput {
   shopId:      string;

@@ -220,9 +220,13 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     for (const sid of shopIds) {
       const shop = await prisma.shop.findUnique({
         where:  { id: sid },
-        select: { isActive: true, name: true, sellerId: true, isFeatured: true },
+        select: { isActive: true, isOpen: true, name: true, sellerId: true, isFeatured: true },
       });
-      if (!shop || !shop.isActive) throw new BusinessRuleError('Yeh dukaan abhi available nahi hai');
+      // Direct/pinned (Chirawa Special) lines bypass the aggregation resolver —
+      // which is the only place isOpen is enforced for aggregated items — so a
+      // paused shop (isOpen=false) must be rejected HERE too, else a pinned order
+      // to a closed shop slips through.
+      if (!shop || !shop.isActive || !shop.isOpen) throw new BusinessRuleError('Yeh dukaan abhi available nahi hai');
 
       const shopItems = lineItems.filter((i) => (i.shopId ?? cart.shopId) === sid);
       const subtotal  = shopItems.reduce((s, i) => s + i.subtotal, 0);

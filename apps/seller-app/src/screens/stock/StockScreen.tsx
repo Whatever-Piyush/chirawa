@@ -32,6 +32,7 @@ export default function StockScreen() {
   const { state }               = useAuth();
   const [shop, setShop]         = useState<ShopData | null>(null);
   const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState(false);
   const [updating, setUpdating] = useState<string | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -44,19 +45,25 @@ export default function StockScreen() {
   const [lookingUp, setLookingUp]     = useState(false);
 
   const loadShop = useCallback(async () => {
-    if (!state.token || !state.userId) return;
+    if (!state.token) return;
+    setError(false);
     try {
-      const orders = await SellerApi.getOrders(state.token) as Array<{ shopId: string }>;
-      const shopId = orders[0]?.shopId;
-      if (!shopId) { setLoading(false); return; }
-      const data = await SellerApi.getShopProducts(shopId, state.token) as ShopData;
+      // Resolve the shop from the seller's profile — NOT from the first order.
+      // A newly provisioned seller (zero orders) still gets their shop, so
+      // adding products works immediately (Seller Sprint 0 P0-1).
+      const myShop = await SellerApi.getMyShop(state.token);
+      const data = await SellerApi.getShopProducts(myShop.id, state.token) as ShopData;
       setShop(data);
-    } catch (e) {
-      console.error('Load shop failed:', e);
+    } catch {
+      // Never silently fall through to "no shop" on a network failure —
+      // surface an error the seller can retry (Seller Sprint 0 P0-3).
+      setError(true);
     } finally {
       setLoading(false);
     }
-  }, [state.token, state.userId]);
+  }, [state.token]);
+
+  const retry = useCallback(() => { setLoading(true); void loadShop(); }, [loadShop]);
 
   useEffect(() => { void loadShop(); }, [loadShop]);
 
@@ -262,8 +269,15 @@ export default function StockScreen() {
         )}
       </View>
 
-      {!shop
-        ? <View style={styles.center}><Text style={styles.noShop}>Koi shop nahi mili</Text></View>
+      {error || !shop
+        ? <View style={styles.center}>
+            <Text style={styles.errorEmoji}>📡</Text>
+            <Text style={styles.errorText}>Shop load nahi hui</Text>
+            <Text style={styles.errorSub}>Internet check karein aur dobara koshish karein</Text>
+            <Pressable style={styles.retryBtn} onPress={retry}>
+              <Text style={styles.retryBtnText}>🔄 Retry</Text>
+            </Pressable>
+          </View>
         : <FlatList
             data={allProducts}
             keyExtractor={(p) => p.id}
@@ -380,8 +394,12 @@ const styles = StyleSheet.create({
   importBtnText: { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
   scanBtn:     { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.md, minWidth: 72, alignItems: 'center' },
   scanBtnText: { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
-  noShop:      { fontSize: FontSize.lg, color: Colors.textMuted },
   empty:       { textAlign: 'center', color: Colors.textMuted, marginTop: Spacing.xl, fontSize: FontSize.md },
+  errorEmoji:  { fontSize: 56 },
+  errorText:   { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text, marginTop: Spacing.md },
+  errorSub:    { fontSize: FontSize.sm, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.xs, paddingHorizontal: Spacing.xl },
+  retryBtn:    { backgroundColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, marginTop: Spacing.lg },
+  retryBtnText:{ color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
   productRow: {
     backgroundColor: Colors.card, borderRadius: Radius.md,
     padding: Spacing.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
