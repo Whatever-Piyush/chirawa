@@ -46,6 +46,9 @@ export default function StockScreen() {
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState(false);
   const [updating, setUpdating] = useState<string | null>(null);
+  // Inventory search (Sprint 2). Own state — loadShop() never touches it, so the
+  // query survives a refresh / stock toggle / offline-sync reload untouched.
+  const [query, setQuery]       = useState('');
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -345,6 +348,18 @@ export default function StockScreen() {
     c.products.map((p) => ({ ...p, categoryId: c.id })),
   ) ?? [];
 
+  // Client-side inventory search (Sprint 2): case-insensitive, whitespace-trimmed,
+  // matches product name OR unit. Filters the SAME product objects, so every row
+  // action (toggle / edit / long-press / image flow) works unchanged on results.
+  const normalizedQuery = query.trim().toLowerCase();
+  const isSearching     = normalizedQuery !== '';
+  const filteredProducts = isSearching
+    ? allProducts.filter((p) =>
+        p.name.toLowerCase().includes(normalizedQuery) ||
+        (p.unit ?? '').toLowerCase().includes(normalizedQuery),
+      )
+    : allProducts;
+
   const photoPreview = form.localUri ?? form.imageUrl; // on-device file first, else the uploaded URL
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.accent} size="large" /></View>;
@@ -382,36 +397,79 @@ export default function StockScreen() {
               <Text style={styles.retryBtnText}>🔄 Retry</Text>
             </Pressable>
           </View>
-        : <FlatList
-            data={allProducts}
-            keyExtractor={(p) => p.id}
-            contentContainerStyle={{ padding: Spacing.lg, gap: Spacing.sm }}
-            ListEmptyComponent={<Text style={styles.empty}>Abhi koi product nahi. "+ Add" dabayein.</Text>}
-            renderItem={({ item }) => (
-              <Pressable style={styles.productRow} onPress={() => openEdit(item)} onLongPress={() => productActions(item)}>
-                {item.imageUrl
-                  ? <Image source={{ uri: item.imageUrl }} style={styles.rowThumb} accessibilityLabel={`${item.name} ki photo`} />
-                  : <View style={[styles.rowThumb, styles.rowThumbPlaceholder]}><Text style={styles.rowThumbIcon}>📦</Text></View>}
-                <View style={styles.productInfo}>
-                  <Text style={styles.productName}>{item.name}</Text>
-                  <Text style={styles.productPrice}>
-                    ₹{Math.round(item.price / 100)}
-                    {item.mrpPaise ? <Text style={styles.mrp}>  ₹{Math.round(item.mrpPaise / 100)}</Text> : null}
-                    {item.unit ? ` / ${item.unit}` : ''}
-                  </Text>
+        : <View style={styles.body}>
+            {/* Persistent inventory search — client-side, matches name + unit (Sprint 2).
+                Shown while there is anything to search, or while a query is active so
+                the seller can always clear it. */}
+            {(allProducts.length > 0 || isSearching) && (
+              <View style={styles.searchWrap}>
+                <View style={styles.searchBar}>
+                  <Text style={styles.searchIcon}>🔍</Text>
+                  <TextInput
+                    style={styles.searchInput}
+                    value={query}
+                    onChangeText={setQuery}
+                    placeholder="Product ya unit dhundein…"
+                    placeholderTextColor={Colors.textMuted}
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                    returnKeyType="search"
+                    clearButtonMode="never"
+                  />
+                  {query.length > 0 && (
+                    <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Search saaf karein">
+                      <Text style={styles.searchClear}>✕</Text>
+                    </Pressable>
+                  )}
                 </View>
-                {updating === item.id
-                  ? <ActivityIndicator color={Colors.accent} />
-                  : <Switch
-                      value={item.stockStatus === 'available'}
-                      onValueChange={() => void toggleStock(item.id, item.stockStatus)}
-                      trackColor={{ false: Colors.border, true: Colors.success }}
-                      thumbColor={Colors.white}
-                    />
-                }
-              </Pressable>
+                {isSearching && (
+                  <Text style={styles.resultCount}>
+                    {filteredProducts.length} {filteredProducts.length === 1 ? 'result' : 'results'}
+                  </Text>
+                )}
+              </View>
             )}
-          />
+            <FlatList
+              style={styles.list}
+              data={filteredProducts}
+              keyExtractor={(p) => p.id}
+              contentContainerStyle={{ padding: Spacing.lg, gap: Spacing.sm }}
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={
+                isSearching
+                  ? <View style={styles.noResults}>
+                      <Text style={styles.noResultsEmoji}>🔍</Text>
+                      <Text style={styles.noResultsText}>Kuch nahi mila</Text>
+                      <Text style={styles.noResultsSub}>"{query.trim()}" se koi product match nahi hua</Text>
+                    </View>
+                  : <Text style={styles.empty}>Abhi koi product nahi. "+ Add" dabayein.</Text>
+              }
+              renderItem={({ item }) => (
+                <Pressable style={styles.productRow} onPress={() => openEdit(item)} onLongPress={() => productActions(item)}>
+                  {item.imageUrl
+                    ? <Image source={{ uri: item.imageUrl }} style={styles.rowThumb} accessibilityLabel={`${item.name} ki photo`} />
+                    : <View style={[styles.rowThumb, styles.rowThumbPlaceholder]}><Text style={styles.rowThumbIcon}>📦</Text></View>}
+                  <View style={styles.productInfo}>
+                    <Text style={styles.productName}>{item.name}</Text>
+                    <Text style={styles.productPrice}>
+                      ₹{Math.round(item.price / 100)}
+                      {item.mrpPaise ? <Text style={styles.mrp}>  ₹{Math.round(item.mrpPaise / 100)}</Text> : null}
+                      {item.unit ? ` / ${item.unit}` : ''}
+                    </Text>
+                  </View>
+                  {updating === item.id
+                    ? <ActivityIndicator color={Colors.accent} />
+                    : <Switch
+                        value={item.stockStatus === 'available'}
+                        onValueChange={() => void toggleStock(item.id, item.stockStatus)}
+                        trackColor={{ false: Colors.border, true: Colors.success }}
+                        thumbColor={Colors.white}
+                      />
+                  }
+                </Pressable>
+              )}
+            />
+          </View>
       }
 
       {/* ── Add / Edit product modal ───────────────────────────────────────── */}
@@ -548,6 +606,19 @@ const styles = StyleSheet.create({
   scanBtn:     { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.md, minWidth: 72, alignItems: 'center' },
   scanBtnText: { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
   empty:       { textAlign: 'center', color: Colors.textMuted, marginTop: Spacing.xl, fontSize: FontSize.md },
+  // inventory search (Sprint 2)
+  body:        { flex: 1 },
+  list:        { flex: 1 },
+  searchWrap:  { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md },
+  searchBar:   { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, backgroundColor: Colors.card, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: Spacing.md },
+  searchIcon:  { fontSize: FontSize.md, color: Colors.textMuted },
+  searchInput: { flex: 1, paddingVertical: Spacing.sm, fontSize: FontSize.md, color: Colors.text },
+  searchClear: { fontSize: FontSize.md, color: Colors.textMuted, fontWeight: '800', paddingHorizontal: Spacing.xs },
+  resultCount: { fontSize: FontSize.sm, color: Colors.textMuted, marginTop: Spacing.sm, marginLeft: Spacing.xs },
+  noResults:      { alignItems: 'center', marginTop: Spacing.xl, paddingHorizontal: Spacing.xl },
+  noResultsEmoji: { fontSize: 48 },
+  noResultsText:  { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text, marginTop: Spacing.sm },
+  noResultsSub:   { fontSize: FontSize.sm, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.xs },
   errorEmoji:  { fontSize: 56 },
   errorText:   { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text, marginTop: Spacing.md },
   errorSub:    { fontSize: FontSize.sm, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.xs, paddingHorizontal: Spacing.xl },
