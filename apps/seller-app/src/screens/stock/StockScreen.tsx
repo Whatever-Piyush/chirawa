@@ -1,19 +1,22 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, Switch, StyleSheet, ActivityIndicator, Alert,
-  Modal, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform,
+  Modal, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Image, Linking,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
-import { SellerApi, type ProductInput, type StockThisInput } from '../../services/api.service';
+import { SellerApi, UploadError, type ProductInput, type StockThisInput } from '../../services/api.service';
 import { saveStockThis, flushQueue } from '../../services/offline-queue';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { useAuth } from '../../context/AuthContext';
 
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // mirrors the API's 5 MB upload cap
+
 interface Product {
   id: string; name: string; stockStatus: string;
   price: number; mrpPaise: number | null; unit: string | null;
-  categoryId?: string | null;
+  categoryId?: string | null; imageUrl?: string | null;
 }
 interface Category { id: string; name: string; products: Product[] }
 interface ShopData  { id: string; name: string; categories: Category[] }
@@ -25,8 +28,17 @@ interface FormState {
   // Set when the add originated from a barcode scan → save() routes to the
   // idempotent stock-this upsert (offline-tolerant) instead of plain create.
   barcode: string | null; masterId: string | null;
+  // Photo (Seller Sprint 1). imageUrl = the RESOLVED, uploaded URL (or null when
+  // cleared). localUri = the on-device file shown as an instant preview and kept
+  // for retry. imageTouched marks the field as changed, so save() sends the URL /
+  // null only on edit when the seller actually touched the photo (else omit).
+  imageUrl: string | null; localUri: string | null;
+  uploading: boolean; uploadFailed: boolean; imageTouched: boolean;
 }
-const EMPTY_FORM: FormState = { name: '', priceRupees: '', mrpRupees: '', unit: '', stockQty: '', categoryId: null, barcode: null, masterId: null };
+const EMPTY_FORM: FormState = {
+  name: '', priceRupees: '', mrpRupees: '', unit: '', stockQty: '', categoryId: null, barcode: null, masterId: null,
+  imageUrl: null, localUri: null, uploading: false, uploadFailed: false, imageTouched: false,
+};
 
 export default function StockScreen() {
   const { state }               = useAuth();
@@ -43,6 +55,7 @@ export default function StockScreen() {
   const [importing, setImporting] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [lookingUp, setLookingUp]     = useState(false);
+  const uploadAbortRef = useRef<AbortController | null>(null);
 
   const loadShop = useCallback(async () => {
     if (!state.token) return;
@@ -84,14 +97,12 @@ export default function StockScreen() {
       const m = res.master;
       setEditingId(null);
       setForm({
-        name:        m?.name ?? '',
-        priceRupees: '',
-        mrpRupees:   m?.mrpPaise != null ? String(Math.round(m.mrpPaise / 100)) : '',
-        unit:        m?.unit ?? '',
-        stockQty:    '',
-        categoryId:  null,
+        ...EMPTY_FORM,
+        name:     m?.name ?? '',
+        mrpRupees: m?.mrpPaise != null ? String(Math.round(m.mrpPaise / 100)) : '',
+        unit:     m?.unit ?? '',
         barcode,
-        masterId:    m?.id ?? null,
+        masterId: m?.id ?? null,
       });
       setNewCategory('');
       setModalOpen(true);
@@ -104,6 +115,89 @@ export default function StockScreen() {
       setLookingUp(false);
     }
   }
+
+  // ── Product photo (Seller Sprint 1) ────────────────────────────────────────
+  // Upload happens ON PICK, not on Save: the seller sees progress + can cancel/
+  // retry immediately, and save() only sends the already-resolved URL.
+  function choosePhoto() {
+    Alert.alert('Product ki photo', 'Photo kahan se lein?', [
+      { text: '📷 Camera',  onPress: () => void pickFrom('camera') },
+      { text: '🖼️ Gallery', onPress: () => void pickFrom('gallery') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
+  async function pickFrom(source: 'camera' | 'gallery') {
+    const perm = source === 'camera'
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!perm.granted) {
+      // Message + Open Settings (only when the OS won't re-ask) + fallback to the
+      // other source (§9 permission-denied).
+      const other: 'camera' | 'gallery' = source === 'camera' ? 'gallery' : 'camera';
+      const buttons: Array<{ text: string; style?: 'cancel'; onPress?: () => void }> = [];
+      if (!perm.canAskAgain) buttons.push({ text: 'Settings kholein', onPress: () => void Linking.openSettings() });
+      buttons.push({ text: other === 'camera' ? '📷 Camera try karein' : '🖼️ Gallery try karein', onPress: () => void pickFrom(other) });
+      buttons.push({ text: 'Cancel', style: 'cancel' });
+      Alert.alert(
+        source === 'camera' ? 'Camera permission chahiye' : 'Gallery permission chahiye',
+        source === 'camera' ? 'Photo lene ke liye camera ki permission dein.' : 'Photo chunne ke liye gallery ki permission dein.',
+        buttons,
+      );
+      return;
+    }
+
+    const result = source === 'camera'
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.6 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.6 });
+    if (result.canceled || !result.assets?.[0]) return; // seller backed out
+    const asset = result.assets[0];
+
+    // Reject oversize BEFORE the round trip (quality 0.6 + crop usually keeps it
+    // small; the picker doesn't always report fileSize, so the server 400 is the
+    // backstop — see startUpload).
+    if (asset.fileSize != null && asset.fileSize > MAX_IMAGE_BYTES) {
+      Alert.alert('Photo bahut badi hai', 'Photo bahut badi hai — chhoti photo chunein');
+      return;
+    }
+    await startUpload(asset.uri);
+  }
+
+  async function startUpload(uri: string) {
+    if (!state.token) return;
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
+    // Show the local file instantly as the preview; keep it for retry.
+    setForm((f) => ({ ...f, localUri: uri, uploading: true, uploadFailed: false }));
+    try {
+      const { url } = await SellerApi.uploadProductImage(uri, state.token, controller.signal);
+      setForm((f) => ({ ...f, imageUrl: url, localUri: uri, uploading: false, uploadFailed: false, imageTouched: true }));
+    } catch (e: unknown) {
+      if (controller.signal.aborted) { // seller cancelled — not a failure
+        setForm((f) => ({ ...f, uploading: false, uploadFailed: false, localUri: null }));
+        return;
+      }
+      if (e instanceof UploadError && e.status === 400) { // oversize / bad type — re-pick, no retry
+        setForm((f) => ({ ...f, uploading: false, uploadFailed: false, localUri: null }));
+        Alert.alert('Photo bahut badi hai', 'Photo bahut badi hai — chhoti photo chunein');
+        return;
+      }
+      // Network failure — keep localUri so Retry can re-send the same file.
+      setForm((f) => ({ ...f, uploading: false, uploadFailed: true }));
+    } finally {
+      if (uploadAbortRef.current === controller) uploadAbortRef.current = null;
+    }
+  }
+
+  function cancelUpload() { uploadAbortRef.current?.abort(); }
+  function retryUpload()  { if (form.localUri) void startUpload(form.localUri); }
+  function removePhoto() {
+    uploadAbortRef.current?.abort();
+    setForm((f) => ({ ...f, imageUrl: null, localUri: null, uploading: false, uploadFailed: false, imageTouched: true }));
+  }
+
+  function closeSheet() { uploadAbortRef.current?.abort(); setModalOpen(false); }
 
   async function toggleStock(productId: string, currentStatus: string) {
     if (!state.token) return;
@@ -149,14 +243,13 @@ export default function StockScreen() {
   function openEdit(p: Product) {
     setEditingId(p.id);
     setForm({
+      ...EMPTY_FORM,
       name: p.name,
       priceRupees: String(Math.round(p.price / 100)),
       mrpRupees:   p.mrpPaise != null ? String(Math.round(p.mrpPaise / 100)) : '',
       unit:        p.unit ?? '',
-      stockQty:    '',
       categoryId:  p.categoryId ?? null,
-      barcode:     null,  // editing an existing row → normal update path
-      masterId:    null,
+      imageUrl:    p.imageUrl ?? null, // existing photo — untouched until changed
     });
     setNewCategory(''); setModalOpen(true);
   }
@@ -172,6 +265,7 @@ export default function StockScreen() {
       Alert.alert('Galti', 'MRP price se kam nahi ho sakta'); return;
     }
     const qty = form.stockQty.trim() === '' ? undefined : Number(form.stockQty);
+    if (form.uploading) { Alert.alert('Ruko', 'Photo upload hone dein, phir save karein'); return; }
 
     setSaving(true);
     try {
@@ -190,7 +284,10 @@ export default function StockScreen() {
         ...(qty !== undefined ? { stockQty: qty } : {}),
       };
       if (editingId) {
-        await SellerApi.updateProduct(editingId, base, state.token);
+        // Photo: send the resolved URL / null (clear) only if the seller touched
+        // it; otherwise omit so the existing image is left as-is (Seller Sprint 1).
+        const updatePayload = { ...base, ...(form.imageTouched ? { imageUrl: form.imageUrl } : {}) };
+        await SellerApi.updateProduct(editingId, updatePayload, state.token);
       } else if (form.barcode) {
         // Scanned add → idempotent stock-this upsert, queued if offline.
         const stockInput: StockThisInput = {
@@ -199,6 +296,7 @@ export default function StockScreen() {
           ...(form.unit.trim() ? { unit: form.unit.trim() } : {}),
           ...(categoryId ? { categoryId } : {}),
           ...(qty !== undefined ? { stockQty: qty } : {}),
+          ...(form.imageUrl ? { imageUrl: form.imageUrl } : {}),
           ...(form.masterId ? { masterId: form.masterId } : {}),
         };
         const result = await saveStockThis(stockInput, state.token);
@@ -206,7 +304,11 @@ export default function StockScreen() {
           Alert.alert('Offline — queue mein daala 📥', 'Internet aane par apne aap sync ho jayega.');
         }
       } else {
-        await SellerApi.createProduct({ shopId: shop.id, ...base } as ProductInput, state.token);
+        // New product: include the photo URL only when one was set (never null).
+        await SellerApi.createProduct(
+          { shopId: shop.id, ...base, ...(form.imageUrl ? { imageUrl: form.imageUrl } : {}) } as ProductInput,
+          state.token,
+        );
       }
       setModalOpen(false);
       await loadShop();
@@ -242,6 +344,8 @@ export default function StockScreen() {
   const allProducts = shop?.categories.flatMap((c) =>
     c.products.map((p) => ({ ...p, categoryId: c.id })),
   ) ?? [];
+
+  const photoPreview = form.localUri ?? form.imageUrl; // on-device file first, else the uploaded URL
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.accent} size="large" /></View>;
 
@@ -285,6 +389,9 @@ export default function StockScreen() {
             ListEmptyComponent={<Text style={styles.empty}>Abhi koi product nahi. "+ Add" dabayein.</Text>}
             renderItem={({ item }) => (
               <Pressable style={styles.productRow} onPress={() => openEdit(item)} onLongPress={() => productActions(item)}>
+                {item.imageUrl
+                  ? <Image source={{ uri: item.imageUrl }} style={styles.rowThumb} accessibilityLabel={`${item.name} ki photo`} />
+                  : <View style={[styles.rowThumb, styles.rowThumbPlaceholder]}><Text style={styles.rowThumbIcon}>📦</Text></View>}
                 <View style={styles.productInfo}>
                   <Text style={styles.productName}>{item.name}</Text>
                   <Text style={styles.productPrice}>
@@ -308,12 +415,58 @@ export default function StockScreen() {
       }
 
       {/* ── Add / Edit product modal ───────────────────────────────────────── */}
-      <Modal visible={modalOpen} animationType="slide" transparent onRequestClose={() => setModalOpen(false)}>
+      <Modal visible={modalOpen} animationType="slide" transparent onRequestClose={closeSheet}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalRoot}>
           <View style={styles.sheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>{editingId ? 'Product Edit' : 'Naya Product'}</Text>
             <ScrollView keyboardShouldPersistTaps="handled">
+              {/* Photo — upload-on-pick with preview / progress / cancel / retry / remove */}
+              <Text style={styles.fieldLabel}>Photo</Text>
+              <View style={styles.photoRow}>
+                {photoPreview
+                  ? <Image source={{ uri: photoPreview }} style={styles.photoPreview} accessibilityLabel="Product ki photo preview" />
+                  : <View style={[styles.photoPreview, styles.photoPlaceholder]}><Text style={styles.photoPlaceholderIcon}>📷</Text></View>}
+                <View style={styles.photoActions}>
+                  {form.uploading ? (
+                    <>
+                      <View style={styles.photoStatusRow}>
+                        <ActivityIndicator color={Colors.accent} />
+                        <Text style={styles.photoStatus}>Upload ho rahi hai…</Text>
+                      </View>
+                      <Pressable style={styles.photoBtnGhost} onPress={cancelUpload}>
+                        <Text style={styles.photoBtnGhostText}>Cancel</Text>
+                      </Pressable>
+                    </>
+                  ) : form.uploadFailed ? (
+                    <>
+                      <Text style={styles.photoError}>Upload fail hui</Text>
+                      <View style={styles.photoBtnRow}>
+                        <Pressable style={styles.photoBtn} onPress={retryUpload}>
+                          <Text style={styles.photoBtnText}>🔄 Retry</Text>
+                        </Pressable>
+                        <Pressable style={styles.photoBtnGhost} onPress={removePhoto}>
+                          <Text style={styles.photoBtnGhostText}>Hatayein</Text>
+                        </Pressable>
+                      </View>
+                    </>
+                  ) : photoPreview ? (
+                    <View style={styles.photoBtnRow}>
+                      <Pressable style={styles.photoBtn} onPress={choosePhoto}>
+                        <Text style={styles.photoBtnText}>Photo badlein</Text>
+                      </Pressable>
+                      <Pressable style={styles.photoBtnGhost} onPress={removePhoto}>
+                        <Text style={styles.photoBtnGhostText}>Hatayein</Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Pressable style={styles.photoBtn} onPress={choosePhoto}>
+                      <Text style={styles.photoBtnText}>📷 Photo add karein</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+
               <Field label="Naam *" value={form.name} onChangeText={(name) => setForm((f) => ({ ...f, name }))} placeholder="e.g. Aashirvaad Atta" />
               <View style={styles.row}>
                 <View style={styles.flex1}><Field label="Price ₹ *" value={form.priceRupees} onChangeText={(priceRupees) => setForm((f) => ({ ...f, priceRupees }))} keyboardType="numeric" placeholder="285" /></View>
@@ -338,7 +491,7 @@ export default function StockScreen() {
             </ScrollView>
 
             <View style={styles.sheetActions}>
-              <Pressable style={[styles.btn, styles.btnGhost]} onPress={() => setModalOpen(false)} disabled={saving}>
+              <Pressable style={[styles.btn, styles.btnGhost]} onPress={closeSheet} disabled={saving}>
                 <Text style={styles.btnGhostText}>Cancel</Text>
               </Pressable>
               <Pressable style={[styles.btn, styles.btnPrimary]} onPress={() => void save()} disabled={saving}>
@@ -409,6 +562,24 @@ const styles = StyleSheet.create({
   productName:  { fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
   productPrice: { fontSize: FontSize.sm, color: Colors.textMuted },
   mrp:          { textDecorationLine: 'line-through', color: Colors.textMuted },
+  // row thumbnail
+  rowThumb:            { width: 44, height: 44, borderRadius: Radius.sm, marginRight: Spacing.md, backgroundColor: Colors.background },
+  rowThumbPlaceholder: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.border },
+  rowThumbIcon:        { fontSize: 20 },
+  // photo control (add/edit sheet)
+  photoRow:          { flexDirection: 'row', gap: Spacing.md, alignItems: 'center', marginBottom: Spacing.md },
+  photoPreview:      { width: 72, height: 72, borderRadius: Radius.md, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border },
+  photoPlaceholder:  { alignItems: 'center', justifyContent: 'center' },
+  photoPlaceholderIcon: { fontSize: 28 },
+  photoActions:      { flex: 1, gap: Spacing.sm },
+  photoStatusRow:    { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  photoStatus:       { fontSize: FontSize.sm, color: Colors.textMuted },
+  photoError:        { fontSize: FontSize.sm, color: Colors.error, fontWeight: '600' },
+  photoBtnRow:       { flexDirection: 'row', gap: Spacing.sm },
+  photoBtn:          { backgroundColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, alignItems: 'center' },
+  photoBtnText:      { color: Colors.white, fontWeight: '800', fontSize: FontSize.sm },
+  photoBtnGhost:     { backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, alignItems: 'center' },
+  photoBtnGhostText: { color: Colors.text, fontWeight: '700', fontSize: FontSize.sm },
   // modal
   modalRoot:  { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet:      { backgroundColor: Colors.background, borderTopLeftRadius: Radius.lg, borderTopRightRadius: Radius.lg, padding: Spacing.lg, maxHeight: '88%' },

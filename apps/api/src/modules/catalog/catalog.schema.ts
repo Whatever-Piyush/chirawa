@@ -60,7 +60,9 @@ export const updateProductSchema = z
     categoryId:  uuid.nullable().optional(),
     description: z.string().trim().max(2000).nullable().optional(),
     stockQty:    z.number().int().min(0).max(1_000_000).optional(),
-    imageUrl:    z.string().url().max(500).optional(),
+    // Nullable so an edit can CLEAR the photo (null) — distinct from omitting the
+    // field (leave as-is). A URL replaces the primary image (Seller Sprint 1).
+    imageUrl:    z.string().url().max(500).nullable().optional(),
   })
   .refine((d) => Object.keys(d).length > 0, { message: 'No fields to update' });
 

@@ -162,7 +162,10 @@ export const SellerApi = {
   createProduct: (input: ProductInput, token: string) =>
     request<{ id: string }>('POST', '/catalog/products', input, token),
 
-  updateProduct: (productId: string, input: Partial<Omit<ProductInput, 'shopId'>>, token: string) =>
+  // imageUrl accepts null on update ONLY — a URL sets the photo, null clears it,
+  // omitting it leaves the photo unchanged (Seller Sprint 1). imageUrl is omitted
+  // from the base pick so the nullable override isn't narrowed back to string.
+  updateProduct: (productId: string, input: Partial<Omit<ProductInput, 'shopId' | 'imageUrl'>> & { imageUrl?: string | null }, token: string) =>
     request<{ id: string }>('PATCH', `/catalog/products/${productId}`, input, token),
 
   deleteProduct: (productId: string, token: string) =>
@@ -189,6 +192,29 @@ export const SellerApi = {
     return data as unknown as ImportReport;
   },
 
+  // Product image upload (Seller Sprint 1). Multipart like importProductsCsv —
+  // sends the local file URI to the existing /catalog/upload-image route, which
+  // normalizes it (square WebP, EXIF-stripped, re-hosted) and returns { url }.
+  // `signal` lets the caller abort an in-flight upload (AbortController).
+  uploadProductImage: async (fileUri: string, token: string, signal?: AbortSignal): Promise<{ url: string }> => {
+    const name = fileUri.split('/').pop() || 'photo.jpg';
+    const ext  = name.split('.').pop()?.toLowerCase();
+    const type = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    const form = new FormData();
+    form.append('file', { uri: fileUri, name, type } as unknown as Blob);
+    const res = await fetch(`${BASE_URL}/catalog/upload-image`, {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${token}` }, // no Content-Type — RN sets the multipart boundary
+      body:    form,
+      signal,
+    });
+    const data = await res.json() as Record<string, unknown>;
+    // Carry the HTTP status so the screen can branch: a 400 is oversize/bad-type
+    // (re-pick, no retry) vs a network failure (retry the same file).
+    if (!res.ok) throw new UploadError((data['message'] as string) ?? 'Photo upload fail hua', res.status);
+    return data as { url: string };
+  },
+
   registerDeviceToken: (fcmToken: string, token: string) =>
     request('POST', '/notifications/register-token', { token: fcmToken, platform: 'android' }, token),
 
@@ -199,6 +225,17 @@ export const SellerApi = {
   getSettlements: (token: string) =>
     request<SettlementsResponse>('GET', '/sellers/me/settlements', undefined, token),
 };
+
+// HTTP error from an image upload — `status` lets the UI distinguish an oversize/
+// bad-type 400 (re-pick, no retry) from a network failure (retry the same file).
+export class UploadError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'UploadError';
+    this.status = status;
+  }
+}
 
 export interface MyShop {
   id: string; name: string; isOpen: boolean; openTime: string; closeTime: string;
@@ -212,6 +249,7 @@ export interface ProductInput {
   unit?:       string;
   categoryId?: string;
   stockQty?:   number;
+  imageUrl?:   string;   // create sets a URL; clearing (null) is update-only
 }
 
 // Scan flow (Phase 3).

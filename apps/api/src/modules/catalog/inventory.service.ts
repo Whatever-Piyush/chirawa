@@ -164,7 +164,16 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
       if (input.categoryId) data.category = { connect: { id: input.categoryId } };
       if (input.stockQty != null) { data.stockQty = input.stockQty; data.stockStatus = statusForQty(input.stockQty); }
       await prisma.product.update({ where: { id: existing.id }, data });
-      if (input.imageUrl) await prisma.productImage.create({ data: { productId: existing.id, url: input.imageUrl, sortOrder: 0 } });
+      // Replace the primary image transactionally — identical to updateProduct —
+      // so a re-scan with a new photo REPLACES rather than appends (which used to
+      // leave duplicate sortOrder-0 rows). No imageUrl → images left untouched.
+      if (input.imageUrl) {
+        const url = input.imageUrl;
+        await prisma.$transaction(async (tx) => {
+          await tx.productImage.deleteMany({ where: { productId: existing.id, sortOrder: 0 } });
+          await tx.productImage.create({ data: { productId: existing.id, url, sortOrder: 0 } });
+        });
+      }
       productId = existing.id;
     } else {
       const data: Prisma.ProductUncheckedCreateInput = {
@@ -204,8 +213,17 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
     if (effMrp != null && effMrp < effPrice) throw new ValidationError('MRP must be greater than or equal to price');
 
     const updated = await prisma.product.update({ where: { id: productId }, data });
-    if (input.imageUrl) {
-      await prisma.productImage.create({ data: { productId, url: input.imageUrl, sortOrder: 0 } });
+    // Deterministic primary image (sortOrder 0). A URL REPLACES the primary in
+    // place — clear the sortOrder-0 slot first, then insert one — so an edit never
+    // appends a second sortOrder-0 row (which made the customer-facing image
+    // non-deterministic). `null` CLEARS it; an omitted field leaves images as-is.
+    if (input.imageUrl !== undefined) {
+      await prisma.$transaction(async (tx) => {
+        await tx.productImage.deleteMany({ where: { productId, sortOrder: 0 } });
+        if (input.imageUrl) {
+          await tx.productImage.create({ data: { productId, url: input.imageUrl, sortOrder: 0 } });
+        }
+      });
     }
     await invalidate(existing.shopId);
     return updated;

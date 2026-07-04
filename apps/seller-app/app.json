@@ -40,6 +40,13 @@
         {
           "cameraPermission": "Bringly ko product barcode scan karne ke liye camera chahiye."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Bringly ko product ki photo lagane ke liye gallery chahiye.",
+          "cameraPermission": "Bringly ko product ki photo lene ke liye camera chahiye."
+        }
       ]
     ],
     "extra": {

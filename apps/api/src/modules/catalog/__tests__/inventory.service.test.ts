@@ -17,7 +17,10 @@ function makePrisma(owner: string = SELLER) {
   const prisma = {
     shop:     { findUnique: vi.fn().mockResolvedValue({ id: SHOP, seller: { userId: owner } }) },
     product,
-    productImage:   { create: vi.fn().mockResolvedValue({}) },
+    productImage:   {
+      create:     vi.fn().mockResolvedValue({}),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
     category:       {
       findUnique: vi.fn().mockResolvedValue({ id: 'cat_1', shopId: SHOP }),
       create:     vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'cat_new', ...data })),
@@ -28,8 +31,13 @@ function makePrisma(owner: string = SELLER) {
       create:     vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'var_new', ...data })),
       update:     vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'var_1', ...data })),
     },
-    $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+    $transaction: vi.fn(),
   };
+  // Support BOTH shapes: the array form (Promise.all) and the interactive
+  // callback form used by updateProduct's image replace (tx === prisma).
+  prisma.$transaction.mockImplementation((arg: unknown) =>
+    Array.isArray(arg) ? Promise.all(arg) : (arg as (tx: unknown) => Promise<unknown>)(prisma),
+  );
   const redis = { del: vi.fn().mockResolvedValue(1), get: vi.fn().mockResolvedValue(null) };
   return { prisma, redis };
 }
@@ -104,6 +112,37 @@ describe('inventory.service — products (1.1 / 1.5)', () => {
   it('404s when updating a missing product', async () => {
     p.prisma.product.findUnique.mockResolvedValueOnce(null);
     await expect(svc(p).updateProduct('nope', { name: 'x' }, sellerAuth)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  // ── Primary product image: set / replace / clear (Seller Sprint 1) ──────────
+  it('SETs the primary image (sortOrder 0) when a URL is provided', async () => {
+    await svc(p).updateProduct('prod_1', { imageUrl: 'https://cdn.test/a.webp' }, sellerAuth);
+    expect(p.prisma.productImage.create).toHaveBeenCalledWith(
+      { data: { productId: 'prod_1', url: 'https://cdn.test/a.webp', sortOrder: 0 } },
+    );
+    expect(p.redis.del).toHaveBeenCalled(); // customer cache invalidated
+  });
+
+  it('REPLACES in place — clears the sortOrder-0 slot BEFORE inserting, so no duplicate primary row is appended', async () => {
+    await svc(p).updateProduct('prod_1', { imageUrl: 'https://cdn.test/new.webp' }, sellerAuth);
+    expect(p.prisma.productImage.deleteMany).toHaveBeenCalledWith({ where: { productId: 'prod_1', sortOrder: 0 } });
+    expect(p.prisma.productImage.create).toHaveBeenCalledTimes(1);
+    // delete must run before create — that ordering is what guarantees a single primary.
+    const delOrder = p.prisma.productImage.deleteMany.mock.invocationCallOrder[0]!;
+    const crtOrder = p.prisma.productImage.create.mock.invocationCallOrder[0]!;
+    expect(delOrder).toBeLessThan(crtOrder);
+  });
+
+  it('CLEARs the primary image (deletes sortOrder 0, creates nothing) when imageUrl is null', async () => {
+    await svc(p).updateProduct('prod_1', { imageUrl: null }, sellerAuth);
+    expect(p.prisma.productImage.deleteMany).toHaveBeenCalledWith({ where: { productId: 'prod_1', sortOrder: 0 } });
+    expect(p.prisma.productImage.create).not.toHaveBeenCalled();
+  });
+
+  it('leaves images UNTOUCHED when imageUrl is omitted from the update', async () => {
+    await svc(p).updateProduct('prod_1', { name: 'Renamed' }, sellerAuth);
+    expect(p.prisma.productImage.deleteMany).not.toHaveBeenCalled();
+    expect(p.prisma.productImage.create).not.toHaveBeenCalled();
   });
 });
 
