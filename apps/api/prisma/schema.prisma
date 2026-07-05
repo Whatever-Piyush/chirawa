@@ -263,6 +263,10 @@ model Category {
   name           String   @db.VarChar(100)
   sortOrder      Int      @default(0) @map("sort_order")
   isActive       Boolean  @default(true) @map("is_active")
+  // Seller Sprint 3 invariant: every product belongs to a category. Each shop has
+  // exactly one default category (isDefault) that receives products added without
+  // an explicit one. Created lazily on first need; can never be deleted.
+  isDefault      Boolean  @default(false) @map("is_default")
   // Category-level commission rate as a fraction (0.13 = 13%). A shop's own
   // commissionRate (if > 0) overrides this. Defaults to 0.
   commissionRate Decimal  @default(0) @map("commission_rate") @db.Decimal(5, 4)

@@ -1,4 +1,5 @@
-import type { PrismaClient, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import { NotFoundError, ForbiddenError, ValidationError } from '../../shared/errors/app-errors';
 import { isValidEan } from '../../shared/utils/barcode';
@@ -72,6 +73,41 @@ export interface InventoryDeps {
   processImage?: typeof defaultProcessImage;
 }
 
+// Seller Sprint 3 invariant — every product belongs to a category. Each shop has
+// exactly one default category (isDefault) that receives products added without an
+// explicit one; it is created lazily on first need and can never be deleted. The
+// name is intentionally a normal, friendly label (NOT an "Uncategorized" bucket);
+// a high sortOrder keeps it after the seller's named categories.
+export const DEFAULT_CATEGORY_NAME = 'Other';
+const DEFAULT_CATEGORY_SORT = 1000;
+
+export async function getOrCreateDefaultCategoryId(prisma: PrismaClient, shopId: string): Promise<string> {
+  const existing = await prisma.category.findFirst({
+    where:  { shopId, isDefault: true },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+  try {
+    const created = await prisma.category.create({
+      data: { shopId, name: DEFAULT_CATEGORY_NAME, isDefault: true, sortOrder: DEFAULT_CATEGORY_SORT },
+    });
+    return created.id;
+  } catch (err) {
+    // Race: a concurrent request created this shop's default first. The partial
+    // unique index (one default per shop) rejects our insert with P2002 — catch it,
+    // re-fetch the winning row, and return it so both callers converge on ONE
+    // default. Any other error propagates unchanged.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const winner = await prisma.category.findFirst({
+        where:  { shopId, isDefault: true },
+        select: { id: true },
+      });
+      if (winner) return winner.id;
+    }
+    throw err;
+  }
+}
+
 /**
  * Inventory writes for the catalog module (Phase 1.1–1.3, 1.5).
  * Every mutation enforces seller-owns-shop (admin bypass), validates paise
@@ -115,6 +151,10 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
     await assertShopOwner(input.shopId, auth);
     if (input.categoryId) await assertCategoryInShop(input.categoryId, input.shopId);
 
+    // Invariant (Sprint 3): a product always belongs to a category. When the seller
+    // adds one without picking a category, it goes to the shop's default category.
+    const categoryId = input.categoryId ?? await getOrCreateDefaultCategoryId(prisma, input.shopId);
+
     // Numeric stock is opt-in: only set stockQty (and derive status from it) when
     // the seller provides one. Otherwise the product is status-only (untracked).
     const data: Prisma.ProductUncheckedCreateInput = {
@@ -123,7 +163,7 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
       price:       input.pricePaise,
       mrpPaise:    input.mrpPaise ?? null,
       unit:        input.unit ?? null,
-      categoryId:  input.categoryId ?? null,
+      categoryId,
       description: input.description ?? null,
     };
     if (input.stockQty != null) {
@@ -176,10 +216,12 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
       }
       productId = existing.id;
     } else {
+      // Invariant (Sprint 3): a scanned add with no category lands in the default one.
+      const categoryId = input.categoryId ?? await getOrCreateDefaultCategoryId(prisma, input.shopId);
       const data: Prisma.ProductUncheckedCreateInput = {
         shopId: input.shopId, barcode: input.barcode, masterId: input.masterId ?? null,
         name: input.name, price: input.pricePaise, mrpPaise: input.mrpPaise ?? null,
-        unit: input.unit ?? null, categoryId: input.categoryId ?? null,
+        unit: input.unit ?? null, categoryId,
       };
       if (input.stockQty != null) { data.stockQty = input.stockQty; data.stockStatus = statusForQty(input.stockQty); }
       if (input.imageUrl) data.images = { create: { url: input.imageUrl, sortOrder: 0 } };
@@ -201,7 +243,10 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
     if (input.unit        !== undefined) data.unit        = input.unit;
     if (input.description !== undefined) data.description = input.description;
     if (input.categoryId  !== undefined) {
-      data.category = input.categoryId ? { connect: { id: input.categoryId } } : { disconnect: true };
+      // Invariant (Sprint 3): never leave a product uncategorized. Clearing the
+      // category (null) routes it to the shop's default category, not a disconnect.
+      const targetCategoryId = input.categoryId ?? await getOrCreateDefaultCategoryId(prisma, existing.shopId);
+      data.category = { connect: { id: targetCategoryId } };
     }
     if (input.stockQty !== undefined) {
       data.stockQty    = input.stockQty;
@@ -272,12 +317,19 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
   }
 
   async function deleteCategory(categoryId: string, auth: AuthCtx) {
-    const cat = await prisma.category.findUnique({ where: { id: categoryId }, select: { shopId: true } });
+    const cat = await prisma.category.findUnique({
+      where: { id: categoryId }, select: { shopId: true, isDefault: true },
+    });
     if (!cat) throw new NotFoundError('Category');
     await assertShopOwner(cat.shopId, auth);
-    // Soft delete; detach products so they don't point at a hidden category.
+    // The default category holds every otherwise-uncategorized product — deleting
+    // it would break the invariant, so it can never be removed (Sprint 3).
+    if (cat.isDefault) throw new ValidationError('Default category cannot be deleted');
+    // Soft delete; REASSIGN products to the shop's default category (invariant:
+    // every product keeps a category) instead of detaching them to null.
+    const defaultCategoryId = await getOrCreateDefaultCategoryId(prisma, cat.shopId);
     await prisma.$transaction([
-      prisma.product.updateMany({ where: { categoryId }, data: { categoryId: null } }),
+      prisma.product.updateMany({ where: { categoryId }, data: { categoryId: defaultCategoryId } }),
       prisma.category.update({ where: { id: categoryId }, data: { isActive: false } }),
     ]);
     await invalidate(cat.shopId);
@@ -372,6 +424,11 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
       return id;
     }
 
+    // Invariant (Sprint 3): rows with no `category` column go to the shop's default
+    // category. Memoized so a big uncategorized import resolves/creates it once.
+    let defaultCategoryId: string | undefined;
+    const ensureDefaultCategory = async () => (defaultCategoryId ??= await getOrCreateDefaultCategoryId(prisma, shopId));
+
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i]!;
       const rowNum = i + 1; // human-friendly (1-based, includes header row)
@@ -426,7 +483,8 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
           productId = existing.id;
           report.updated++;
         } else {
-          const data: Prisma.ProductUncheckedCreateInput = { shopId, name, price: pricePaise, mrpPaise, unit, categoryId, barcode };
+          const effectiveCategoryId = categoryId ?? await ensureDefaultCategory();
+          const data: Prisma.ProductUncheckedCreateInput = { shopId, name, price: pricePaise, mrpPaise, unit, categoryId: effectiveCategoryId, barcode };
           if (!variantName && stockQty != null) { data.stockQty = stockQty; data.stockStatus = statusForQty(stockQty); }
           // image_url is fetched → normalized → re-hosted to R2 (no hotlinking),
           // with provenance recorded. Failure is non-fatal: the product still

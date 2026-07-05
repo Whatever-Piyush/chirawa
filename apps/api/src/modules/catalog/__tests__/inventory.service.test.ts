@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createInventoryService } from '../inventory.service';
+import { Prisma } from '@prisma/client';
+import { createInventoryService, getOrCreateDefaultCategoryId, DEFAULT_CATEGORY_NAME } from '../inventory.service';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../../shared/errors/app-errors';
 
 const SELLER = 'seller_user_1';
@@ -22,7 +23,10 @@ function makePrisma(owner: string = SELLER) {
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     category:       {
-      findUnique: vi.fn().mockResolvedValue({ id: 'cat_1', shopId: SHOP }),
+      findUnique: vi.fn().mockResolvedValue({ id: 'cat_1', shopId: SHOP, isDefault: false }),
+      // Sprint 3: a shop's default category already exists in these fixtures, so
+      // getOrCreateDefaultCategoryId resolves it without creating a new one.
+      findFirst:  vi.fn().mockResolvedValue({ id: 'cat_default', shopId: SHOP }),
       create:     vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'cat_new', ...data })),
       update:     vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'cat_1', ...data })),
     },
@@ -158,10 +162,34 @@ describe('inventory.service — categories & variants (1.2 / 1.3)', () => {
     expect(p.redis.del).toHaveBeenCalled();
   });
 
-  it('soft-deletes a category and detaches its products', async () => {
+  // Sprint 3 invariant: deleting a category REASSIGNS its products to the shop's
+  // default category (never detaches to null — a product always keeps a category).
+  it('soft-deletes a category and reassigns its products to the default category', async () => {
     await svc(p).deleteCategory('cat_1', sellerAuth);
-    expect(p.prisma.product.updateMany).toHaveBeenCalledWith({ where: { categoryId: 'cat_1' }, data: { categoryId: null } });
+    expect(p.prisma.product.updateMany).toHaveBeenCalledWith({ where: { categoryId: 'cat_1' }, data: { categoryId: 'cat_default' } });
     expect(p.prisma.category.update).toHaveBeenCalledWith({ where: { id: 'cat_1' }, data: { isActive: false } });
+  });
+
+  it('refuses to delete the default category (invariant guard)', async () => {
+    p.prisma.category.findUnique.mockResolvedValueOnce({ id: 'cat_default', shopId: SHOP, isDefault: true });
+    await expect(svc(p).deleteCategory('cat_default', sellerAuth)).rejects.toBeInstanceOf(ValidationError);
+    expect(p.prisma.product.updateMany).not.toHaveBeenCalled();
+    expect(p.prisma.category.update).not.toHaveBeenCalled();
+  });
+
+  it('assigns the shop default category when a product is created without one (Sprint 3 invariant)', async () => {
+    await svc(p).createProduct({ shopId: SHOP, name: 'Loose Atta', pricePaise: 4000 }, sellerAuth);
+    expect(p.prisma.product.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ categoryId: 'cat_default' }) }),
+    );
+  });
+
+  it('lazily CREATES the default category the first time one is needed', async () => {
+    p.prisma.category.findFirst.mockResolvedValueOnce(null); // no default yet
+    await svc(p).createProduct({ shopId: SHOP, name: 'Loose Sugar', pricePaise: 4500 }, sellerAuth);
+    expect(p.prisma.category.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ shopId: SHOP, isDefault: true }) }),
+    );
   });
 
   it('creates a variant under an owned product (pricePaise→price)', async () => {
@@ -175,5 +203,58 @@ describe('inventory.service — categories & variants (1.2 / 1.3)', () => {
     const other = makePrisma('someone_else');
     await expect(svc(other).createVariant('prod_1', { name: 'x', pricePaise: 1 }, sellerAuth))
       .rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+// One default category per shop, enforced by a partial unique index. When two
+// requests race to lazily create it, the loser hits P2002 and must converge on the
+// winner's row rather than erroring (Sprint 3.1 race fix).
+describe('getOrCreateDefaultCategoryId — one default per shop (race safety)', () => {
+  const p2002 = () => new Prisma.PrismaClientKnownRequestError(
+    'Unique constraint failed', { code: 'P2002', clientVersion: 'test' },
+  );
+
+  it('returns the existing default without creating a new one', async () => {
+    const category = { findFirst: vi.fn().mockResolvedValue({ id: 'cat_default' }), create: vi.fn() };
+    const id = await getOrCreateDefaultCategoryId({ category } as never, SHOP);
+    expect(id).toBe('cat_default');
+    expect(category.create).not.toHaveBeenCalled();
+  });
+
+  it('lazily creates the default (name, isDefault) when the shop has none', async () => {
+    const category = {
+      findFirst: vi.fn().mockResolvedValue(null),
+      create:    vi.fn().mockResolvedValue({ id: 'cat_new' }),
+    };
+    const id = await getOrCreateDefaultCategoryId({ category } as never, SHOP);
+    expect(id).toBe('cat_new');
+    expect(category.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ shopId: SHOP, name: DEFAULT_CATEGORY_NAME, isDefault: true }) }),
+    );
+  });
+
+  it('on a concurrent create (P2002): catches, re-fetches, and returns the winner', async () => {
+    const category = {
+      // 1st: no default yet → attempt create; 2nd: after the losing insert → the winner.
+      findFirst: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'cat_winner' }),
+      create:    vi.fn().mockRejectedValue(p2002()),
+    };
+    const id = await getOrCreateDefaultCategoryId({ category } as never, SHOP);
+    expect(id).toBe('cat_winner');
+    expect(category.findFirst).toHaveBeenCalledTimes(2);
+    expect(category.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('rethrows a non-P2002 error unchanged (no swallowing)', async () => {
+    const boom = new Prisma.PrismaClientKnownRequestError('fk', { code: 'P2003', clientVersion: 'test' });
+    const category = { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockRejectedValue(boom) };
+    await expect(getOrCreateDefaultCategoryId({ category } as never, SHOP)).rejects.toBe(boom);
+    expect(category.findFirst).toHaveBeenCalledTimes(1); // no re-fetch on a non-race error
+  });
+
+  it('rethrows P2002 if the winner still cannot be found (defensive)', async () => {
+    const err = p2002();
+    const category = { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockRejectedValue(err) };
+    await expect(getOrCreateDefaultCategoryId({ category } as never, SHOP)).rejects.toBe(err);
   });
 });

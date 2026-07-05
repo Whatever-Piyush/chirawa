@@ -13,7 +13,13 @@ function makePrisma(opts: { existing?: { id: string } | null; ownerUserId?: stri
   const productImageDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
   const prisma = {
     shop: { findUnique: vi.fn().mockResolvedValue({ id: SHOP, seller: { userId: opts.ownerUserId ?? 'someone' } }) },
-    category: { findUnique: vi.fn().mockResolvedValue({ shopId: SHOP }) },
+    // Sprint 3: findFirst resolves the shop's (pre-existing) default category so a
+    // scanned add with no category still lands in one, without creating a new row.
+    category: {
+      findUnique: vi.fn().mockResolvedValue({ shopId: SHOP }),
+      findFirst:  vi.fn().mockResolvedValue({ id: 'cat_default', shopId: SHOP }),
+      create:     vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'cat_default', ...data })),
+    },
     product: { findFirst: vi.fn().mockResolvedValue(opts.existing ?? null), create: productCreate, update: productUpdate },
     productImage: { create: productImageCreate, deleteMany: productImageDeleteMany },
     $transaction: vi.fn(),

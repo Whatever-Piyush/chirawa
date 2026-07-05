@@ -23,6 +23,7 @@
     "db:seed:images": "tsx prisma/seeds/dev-images.ts",
     "admin:create": "tsx scripts/create-admin.ts",
     "db:backfill:barcode": "tsx prisma/backfill-barcode.ts",
+    "db:backfill:category": "tsx prisma/backfill-category.ts",
     "db:reset": "prisma migrate reset",
     "worker": "tsx watch src/worker/index.ts"
   },

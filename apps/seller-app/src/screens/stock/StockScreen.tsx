@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
-  View, Text, FlatList, Switch, StyleSheet, ActivityIndicator, Alert,
+  View, Text, SectionList, Switch, StyleSheet, ActivityIndicator, Alert,
   Modal, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Image, Linking,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
@@ -13,13 +14,27 @@ import { useAuth } from '../../context/AuthContext';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // mirrors the API's 5 MB upload cap
 
+// Per-shop AsyncStorage key for remembered category collapse state (Sprint 3).
+const collapseKey = (shopId: string) => `stock:collapsed:${shopId}`;
+
 interface Product {
   id: string; name: string; stockStatus: string;
   price: number; mrpPaise: number | null; unit: string | null;
   categoryId?: string | null; imageUrl?: string | null;
 }
-interface Category { id: string; name: string; products: Product[] }
+interface Category { id: string; name: string; sortOrder?: number; products: Product[] }
 interface ShopData  { id: string; name: string; categories: Category[] }
+
+// SectionList shapes (Sprint 3). Each category is one section; every row carries
+// its category id so edit/long-press keep working on the grouped rows.
+type RowItem = Product & { categoryId: string };
+interface StockSection {
+  id: string; name: string;
+  total: number;        // products shown under this section (matches during search)
+  outOfStock: number;   // of those, how many are out of stock
+  collapsed: boolean;
+  data: RowItem[];      // [] when collapsed → header still renders (sticky)
+}
 
 // Form state for add/edit. Strings (rupees) — converted to paise on save.
 interface FormState {
@@ -49,6 +64,10 @@ export default function StockScreen() {
   // Inventory search (Sprint 2). Own state — loadShop() never touches it, so the
   // query survives a refresh / stock toggle / offline-sync reload untouched.
   const [query, setQuery]       = useState('');
+  // Category collapse state (Sprint 3): the set of COLLAPSED category ids. Empty =
+  // all expanded (categories are expanded by default). Persisted per shop in
+  // AsyncStorage; own state, so a loadShop() refresh never clobbers it.
+  const [collapsedSet, setCollapsedSet] = useState<Set<string>>(new Set());
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -88,6 +107,34 @@ export default function StockScreen() {
     if (!state.token) return;
     void flushQueue(state.token).then(({ synced }) => { if (synced > 0) void loadShop(); }).catch(() => {});
   }, [state.token, loadShop]);
+
+  // Restore remembered category collapse state for this shop (Sprint 3). Keyed on
+  // shop id, so a loadShop() refresh (new object, same id) does NOT reload/clobber
+  // the in-memory set; an app restart remounts the screen → reload from storage.
+  useEffect(() => {
+    const shopId = shop?.id;
+    if (!shopId) return;
+    let cancelled = false;
+    void AsyncStorage.getItem(collapseKey(shopId)).then((raw) => {
+      if (cancelled || !raw) return;
+      try {
+        const ids = JSON.parse(raw) as unknown;
+        if (Array.isArray(ids)) setCollapsedSet(new Set(ids as string[]));
+      } catch { /* ignore a corrupt cache entry */ }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [shop?.id]);
+
+  // Tap a category header to collapse/expand; persist the set per shop (Sprint 3).
+  const toggleCategory = useCallback((catId: string) => {
+    setCollapsedSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(catId)) next.delete(catId); else next.add(catId);
+      const shopId = shop?.id;
+      if (shopId) void AsyncStorage.setItem(collapseKey(shopId), JSON.stringify([...next])).catch(() => {});
+      return next;
+    });
+  }, [shop?.id]);
 
   // Scan → look up the master → open the add sheet prefilled. Lookup failure
   // (offline) still opens it with the barcode so the seller can fill manually.
@@ -349,16 +396,41 @@ export default function StockScreen() {
   ) ?? [];
 
   // Client-side inventory search (Sprint 2): case-insensitive, whitespace-trimmed,
-  // matches product name OR unit. Filters the SAME product objects, so every row
-  // action (toggle / edit / long-press / image flow) works unchanged on results.
+  // matches product name OR unit.
   const normalizedQuery = query.trim().toLowerCase();
   const isSearching     = normalizedQuery !== '';
-  const filteredProducts = isSearching
-    ? allProducts.filter((p) =>
-        p.name.toLowerCase().includes(normalizedQuery) ||
-        (p.unit ?? '').toLowerCase().includes(normalizedQuery),
-      )
-    : allProducts;
+
+  // ── Category sections (Sprint 3) ────────────────────────────────────────────
+  // One SectionList section per category, in server sortOrder; products keep their
+  // server order inside each. Collapsed → empty `data` (the sticky header still
+  // shows). While searching we force-expand and drop non-matching categories; the
+  // remembered collapse set is never mutated, so it returns when search clears.
+  const sections = useMemo<StockSection[]>(() => {
+    const cats = [...(shop?.categories ?? [])].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    const q = normalizedQuery;
+    const matches = (p: RowItem) =>
+      p.name.toLowerCase().includes(q) || (p.unit ?? '').toLowerCase().includes(q);
+
+    return cats
+      .map((c) => {
+        const rows: RowItem[] = c.products.map((p) => ({ ...p, categoryId: c.id }));
+        const shown     = isSearching ? rows.filter(matches) : rows;
+        const collapsed = isSearching ? false : collapsedSet.has(c.id);
+        return {
+          id:         c.id,
+          name:       c.name,
+          total:      shown.length,
+          outOfStock: shown.filter((p) => p.stockStatus === 'out_of_stock').length,
+          collapsed,
+          data:       collapsed ? [] : shown,
+        };
+      })
+      // While searching, hide categories with no match; otherwise keep every
+      // category (empty ones stay visible with a "0 products" header).
+      .filter((s) => !isSearching || s.total > 0);
+  }, [shop, isSearching, normalizedQuery, collapsedSet]);
+
+  const searchResultCount = isSearching ? sections.reduce((n, s) => n + s.total, 0) : 0;
 
   const photoPreview = form.localUri ?? form.imageUrl; // on-device file first, else the uploaded URL
 
@@ -404,7 +476,7 @@ export default function StockScreen() {
             {(allProducts.length > 0 || isSearching) && (
               <View style={styles.searchWrap}>
                 <View style={styles.searchBar}>
-                  <Text style={styles.searchIcon}>🔍</Text>
+                  <Text style={styles.searchIcon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">🔍</Text>
                   <TextInput
                     style={styles.searchInput}
                     value={query}
@@ -418,37 +490,65 @@ export default function StockScreen() {
                   />
                   {query.length > 0 && (
                     <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Search saaf karein">
-                      <Text style={styles.searchClear}>✕</Text>
+                      <Text style={styles.searchClear} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">✕</Text>
                     </Pressable>
                   )}
                 </View>
                 {isSearching && (
                   <Text style={styles.resultCount}>
-                    {filteredProducts.length} {filteredProducts.length === 1 ? 'result' : 'results'}
+                    {searchResultCount} {searchResultCount === 1 ? 'result' : 'results'}
                   </Text>
                 )}
               </View>
             )}
-            <FlatList
+            <SectionList<RowItem, StockSection>
               style={styles.list}
-              data={filteredProducts}
-              keyExtractor={(p) => p.id}
-              contentContainerStyle={{ padding: Spacing.lg, gap: Spacing.sm }}
+              sections={sections}
+              keyExtractor={(item) => item.id}
+              stickySectionHeadersEnabled
+              contentContainerStyle={styles.listContent}
               keyboardShouldPersistTaps="handled"
               ListEmptyComponent={
                 isSearching
                   ? <View style={styles.noResults}>
-                      <Text style={styles.noResultsEmoji}>🔍</Text>
+                      <Text style={styles.noResultsEmoji} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">🔍</Text>
                       <Text style={styles.noResultsText}>Kuch nahi mila</Text>
                       <Text style={styles.noResultsSub}>"{query.trim()}" se koi product match nahi hua</Text>
                     </View>
                   : <Text style={styles.empty}>Abhi koi product nahi. "+ Add" dabayein.</Text>
               }
+              renderSectionHeader={({ section }) => (
+                <Pressable
+                  style={styles.sectionHeader}
+                  onPress={() => toggleCategory(section.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: !section.collapsed }}
+                  accessibilityLabel={
+                    `${section.name}, ${section.total} ${section.total === 1 ? 'product' : 'products'}` +
+                    (section.outOfStock > 0 ? `, ${section.outOfStock} out of stock` : '')
+                  }
+                >
+                  <Text style={styles.sectionChevron} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{section.collapsed ? '▸' : '▾'}</Text>
+                  <Text style={styles.sectionIcon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">🗂️</Text>
+                  <Text style={styles.sectionName} numberOfLines={1}>{section.name}</Text>
+                  <View style={styles.sectionMeta}>
+                    <Text style={styles.sectionCount}>{section.total} {section.total === 1 ? 'product' : 'products'}</Text>
+                    {section.outOfStock > 0 && <Text style={styles.sectionOOS}>{section.outOfStock} out of stock</Text>}
+                  </View>
+                </Pressable>
+              )}
+              renderSectionFooter={({ section }) => (
+                // Expanded but empty → the "no products" hint. Collapsed empties show
+                // only the "0 products" count in the header above.
+                !section.collapsed && section.total === 0
+                  ? <Text style={styles.emptyCatRow}>No products in this category yet.</Text>
+                  : null
+              )}
               renderItem={({ item }) => (
                 <Pressable style={styles.productRow} onPress={() => openEdit(item)} onLongPress={() => productActions(item)}>
                   {item.imageUrl
                     ? <Image source={{ uri: item.imageUrl }} style={styles.rowThumb} accessibilityLabel={`${item.name} ki photo`} />
-                    : <View style={[styles.rowThumb, styles.rowThumbPlaceholder]}><Text style={styles.rowThumbIcon}>📦</Text></View>}
+                    : <View style={[styles.rowThumb, styles.rowThumbPlaceholder]}><Text style={styles.rowThumbIcon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">📦</Text></View>}
                   <View style={styles.productInfo}>
                     <Text style={styles.productName}>{item.name}</Text>
                     <Text style={styles.productPrice}>
@@ -609,6 +709,21 @@ const styles = StyleSheet.create({
   // inventory search (Sprint 2)
   body:        { flex: 1 },
   list:        { flex: 1 },
+  listContent: { paddingBottom: Spacing.xl },
+  // category sections (Sprint 3)
+  sectionHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
+    backgroundColor: Colors.background,       // opaque — the sticky header sits over rows
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  sectionChevron: { fontSize: FontSize.sm, color: Colors.textMuted, width: 14, textAlign: 'center' },
+  sectionIcon:    { fontSize: FontSize.md },
+  sectionName:    { flex: 1, fontSize: FontSize.md, fontWeight: '800', color: Colors.text },
+  sectionMeta:    { alignItems: 'flex-end' },
+  sectionCount:   { fontSize: FontSize.sm, color: Colors.textMuted, fontWeight: '600' },
+  sectionOOS:     { fontSize: FontSize.sm, color: Colors.error, fontWeight: '700', marginTop: 1 },
+  emptyCatRow:    { marginHorizontal: Spacing.lg, marginTop: Spacing.sm, color: Colors.textMuted, fontStyle: 'italic', fontSize: FontSize.sm },
   searchWrap:  { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md },
   searchBar:   { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, backgroundColor: Colors.card, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: Spacing.md },
   searchIcon:  { fontSize: FontSize.md, color: Colors.textMuted },
@@ -626,7 +741,8 @@ const styles = StyleSheet.create({
   retryBtnText:{ color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
   productRow: {
     backgroundColor: Colors.card, borderRadius: Radius.md,
-    padding: Spacing.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: Spacing.lg, marginHorizontal: Spacing.lg, marginTop: Spacing.sm,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     ...Shadow.card,
   },
   productInfo:  { flex: 1 },
