@@ -18,14 +18,16 @@ export function Header() {
           <LocationPill />
         </div>
 
-        {/* Search launcher — non-interactive placeholder until Task 9. The label
-            renders via useT (client island) to prove web i18n resolves Hindi. */}
-        <div className="flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-ink-muted shadow-sm">
+        {/* Search launcher → /search (Task 9). */}
+        <Link
+          href="/search"
+          className="flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-ink-muted shadow-sm transition-shadow hover:shadow-md"
+        >
           <span aria-hidden>🔍</span>
           <span className="text-sm">
             <T k="home.searchPlaceholder" />
           </span>
-        </div>
+        </Link>
       </div>
     </header>
   );
