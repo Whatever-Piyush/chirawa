@@ -5,9 +5,8 @@ import { useGuestCart } from '@/context/GuestCartContext';
 import { CartLine } from '@/components/cart/CartLine';
 import { formatPaise } from '@/lib/format';
 
-// Guest-cart review page. "Proceed" targets /login?next=/checkout while there
-// is no session infra; once middleware gating lands (Task 11) this flips to
-// /checkout and the middleware owns the redirect.
+// Guest-cart review page. "Proceed" targets /checkout — the middleware
+// redirects logged-out users to /login?next=/checkout (Task 11).
 export function CartPageClient() {
   const { items, ready, count, subtotalPaise, clear } = useGuestCart();
 
@@ -81,7 +80,7 @@ export function CartPageClient() {
           </div>
 
           <Link
-            href="/login?next=/checkout"
+            href="/checkout"
             className="mt-4 block rounded-xl bg-primary py-3 text-center text-md font-bold text-white shadow-primary transition-colors hover:bg-primary-dark"
           >
             चेकआउट करें

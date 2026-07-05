@@ -1,15 +1,11 @@
 import { cookies } from 'next/headers';
 import type { AuthTokens } from '@chirawa/types';
+import { AUTH_COOKIES, ACCESS_TOKEN_MAX_AGE, REFRESH_TOKEN_MAX_AGE } from './cookie-names';
 
 // httpOnly session cookies. The browser never reads these (Bearer is injected by
 // the BFF); they are minted at verify-otp (Task 11) and rotated on refresh.
-export const AUTH_COOKIES = {
-  access: 'bl_at',
-  refresh: 'bl_rt',
-} as const;
-
-export const ACCESS_TOKEN_MAX_AGE = 15 * 60; // 15 min (JWT lifetime)
-export const REFRESH_TOKEN_MAX_AGE = 7 * 24 * 60 * 60; // 7 days (opaque refresh)
+// Names/lifetimes live in cookie-names.ts (also imported by middleware).
+export { AUTH_COOKIES, ACCESS_TOKEN_MAX_AGE, REFRESH_TOKEN_MAX_AGE };
 
 // Cookie attributes for the session cookies. Secure-by-default: only disabled
 // when COOKIE_SECURE is explicitly 'false' (local dev over http).
