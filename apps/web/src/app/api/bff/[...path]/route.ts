@@ -45,12 +45,16 @@ const ALLOW: Record<string, RegExp[]> = {
     /^auth\/send-otp$/,
     /^cart\/items$/,
     /^pricing\/preview$/,
-    /^users\/me\/addresses(\/[^/]+\/default)?$/,
+    /^users\/me\/addresses$/,
     /^orders$/,
     /^orders\/[^/]+\/rating$/,
     /^geo\/(reverse|autocomplete|place)$/,
   ],
-  PATCH: [/^cart\/items\/[^/]+$/, /^orders\/[^/]+\/(delivery-address|receiver)$/],
+  PATCH: [
+    /^cart\/items\/[^/]+$/,
+    /^orders\/[^/]+\/(delivery-address|receiver)$/,
+    /^users\/me\/addresses\/[^/]+\/default$/, // setDefaultAddress is a PATCH
+  ],
   PUT: [/^users\/me\/addresses\/[^/]+$/],
   DELETE: [
     /^cart$/,

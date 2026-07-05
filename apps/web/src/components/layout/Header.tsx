@@ -15,7 +15,16 @@ export function Header() {
             <span className="text-xs font-medium text-white/80">चिरावा</span>
           </Link>
 
-          <LocationPill />
+          <div className="flex items-center gap-2">
+            <LocationPill />
+            <Link
+              href="/account"
+              aria-label="मेरा अकाउंट"
+              className="grid h-9 w-9 place-items-center rounded-full bg-white/15 text-lg transition-colors hover:bg-white/25"
+            >
+              👤
+            </Link>
+          </div>
         </div>
 
         {/* Search launcher → /search (Task 9). */}
