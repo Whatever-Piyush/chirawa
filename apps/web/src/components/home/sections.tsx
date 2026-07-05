@@ -6,8 +6,8 @@ import { catalog, type FeedTile } from '@/lib/catalog-types';
 import { ProductTile, type TileProduct } from '@/components/product/ProductTile';
 import { ShopCard } from '@/components/home/ShopCard';
 
-// ─── Layout helpers ─────────────────────────────────────────────────────────
-function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+// ─── Layout helpers (also reused by shop/product pages) ─────────────────────
+export function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="mt-8">
       <div className="mb-3 flex items-end justify-between gap-2">
@@ -19,7 +19,7 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
   );
 }
 
-function Rail({ children }: { children: ReactNode }) {
+export function Rail({ children }: { children: ReactNode }) {
   return (
     <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {children}
