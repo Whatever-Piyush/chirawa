@@ -143,6 +143,12 @@ export const SellerApi = {
   updateStock: (productId: string, stockStatus: string, token: string) =>
     request('PATCH', `/catalog/products/${productId}/stock`, { stockStatus }, token),
 
+  // Bulk stock-status update (Seller Sprint 4). Server behaves like N single
+  // updateStock calls; returns which ids were updated vs skipped (not owned/found).
+  bulkUpdateStock: (productIds: string[], stockStatus: string, token: string) =>
+    request<{ stockStatus: string; updatedIds: string[]; skippedIds: string[] }>(
+      'PATCH', '/catalog/products/bulk-stock', { productIds, stockStatus }, token),
+
   // ── Scan → autocomplete → toggle (Catalog Engine Phase 3) ───────────────────
   // Barcode scan lookup → prefill. Unknown barcode triggers a server-side live
   // OFF lookup that bootstraps a needs_review master.

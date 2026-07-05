@@ -68,6 +68,16 @@ export const updateProductSchema = z
 
 export const setStockQtySchema = z.object({ stockQty: z.number().int().min(0).max(1_000_000) });
 
+// Bulk stock-status update (Seller Sprint 4). productIds are uuid-validated (the
+// client only ever sends ids from its own loaded inventory, and this keeps a bad
+// value from erroring the whole `IN` query). stockStatus is a plain string so the
+// service can reject it with the SAME 'Invalid stock status' message as the single
+// endpoint (behavioural parity), rather than a zod enum message.
+export const bulkStockSchema = z.object({
+  productIds:  z.array(uuid).min(1).max(1000),
+  stockStatus: z.string(),
+});
+
 // ── Category ────────────────────────────────────────────────────────────────
 export const createCategorySchema = z.object({
   shopId:    uuid,
@@ -130,6 +140,7 @@ export type CreateProductInput  = z.infer<typeof createProductSchema>;
 export type StockThisInput      = z.infer<typeof stockThisSchema>;
 export type UpdateProductInput  = z.infer<typeof updateProductSchema>;
 export type SetStockQtyInput    = z.infer<typeof setStockQtySchema>;
+export type BulkStockInput      = z.infer<typeof bulkStockSchema>;
 export type CreateCategoryInput = z.infer<typeof createCategorySchema>;
 export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
 export type CreateVariantInput  = z.infer<typeof createVariantSchema>;

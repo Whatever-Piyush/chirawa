@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, StockStatus } from '@prisma/client';
 import type Redis from 'ioredis';
 import { NotFoundError, ForbiddenError, ValidationError } from '../../shared/errors/app-errors';
 import { isValidEan } from '../../shared/utils/barcode';
@@ -71,7 +71,15 @@ const statusForQty = (qty: number): 'available' | 'out_of_stock' =>
 // Injectable so tests can stub the image pipeline (avoids real network/R2).
 export interface InventoryDeps {
   processImage?: typeof defaultProcessImage;
+  // Injected by the catalog route so bulkSetProductStock fires the SAME restock
+  // re-gate as the single PATCH /products/:id/stock handler
+  // (requestsService.notifyRestock). Fire-and-forget, non-blocking.
+  notifyRestock?: (masterId: string) => Promise<unknown>;
 }
+
+// Stock statuses a seller may set — mirrors the single stock endpoint's allow-list
+// (catalog.routes.ts PATCH /products/:id/stock) so bulk validation stays identical.
+const STOCK_STATUSES = ['available', 'out_of_stock', 'hidden'] as const;
 
 // Seller Sprint 3 invariant — every product belongs to a category. Each shop has
 // exactly one default category (isDefault) that receives products added without an
@@ -118,6 +126,7 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
   const catalog = createCatalogService(prisma, redis);
   const invalidate = (shopId: string) => catalog.invalidateShopCache(shopId);
   const processImage = deps.processImage ?? defaultProcessImage;
+  const notifyRestock = deps.notifyRestock;
 
   async function assertShopOwner(shopId: string, auth: AuthCtx): Promise<void> {
     if (auth.role === 'admin') return;
@@ -290,6 +299,69 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
     });
     await invalidate(existing.shopId);
     return { id: updated.id, stockQty: updated.stockQty, stockStatus: updated.stockStatus };
+  }
+
+  // ── Bulk stock status (Seller Sprint 4) ─────────────────────────────────────
+  // Behaviourally IDENTICAL to N calls of the single PATCH /products/:id/stock
+  // endpoint (catalog.routes.ts): same status validation + message, same seller
+  // ownership rule (admin bypasses), a per-product audit row (fromStatus→toStatus),
+  // per-product cache invalidation, and the per-product master restock re-gate.
+  // The ONLY optimization is batching the two DB writes (updateMany + createMany);
+  // not-found / not-owned ids are SKIPPED (returned in skippedIds), exactly the
+  // products that would have thrown as single calls, so the rest still succeed.
+  async function bulkSetProductStock(productIds: string[], stockStatus: string, auth: AuthCtx) {
+    if (!(STOCK_STATUSES as readonly string[]).includes(stockStatus)) {
+      throw new ValidationError('Invalid stock status');
+    }
+    const status = stockStatus as StockStatus;
+    // A bulk request is a SET of products to update — de-dupe, preserving order.
+    const requested = [...new Set(productIds)];
+
+    const products = await prisma.product.findMany({
+      where:   { id: { in: requested } },
+      include: { shop: { include: { seller: { select: { userId: true } } } } },
+    });
+    const byId = new Map(products.map((p) => [p.id, p]));
+
+    // Partition into eligible (found + owned, or admin) vs skipped (not found /
+    // not owned) — precisely the products that would succeed vs throw as singles.
+    const eligible: typeof products = [];
+    const skippedIds: string[] = [];
+    for (const id of requested) {
+      const product = byId.get(id);
+      if (!product) { skippedIds.push(id); continue; }                       // single → 'Product not found'
+      if (auth.role === 'seller' && product.shop.seller.userId !== auth.userId) {
+        skippedIds.push(id); continue;                                       // single → 'Not your product'
+      }
+      eligible.push(product);
+    }
+
+    if (eligible.length > 0) {
+      const eligibleIds = eligible.map((p) => p.id);
+      // The ONLY permitted optimization: batch the two DB writes.
+      await prisma.product.updateMany({ where: { id: { in: eligibleIds } }, data: { stockStatus: status } });
+      await prisma.stockUpdateLog.createMany({
+        data: eligible.map((p) => ({
+          productId:   p.id,
+          updatedById: auth.userId,
+          fromStatus:  p.stockStatus,   // captured pre-update, per product (audit parity)
+          toStatus:    status,
+        })),
+      });
+
+      // Cache invalidation + restock re-gate are NOT batched — each fires exactly
+      // once per product, identically to the corresponding single call.
+      for (const p of eligible) await invalidate(p.shopId);
+      if (notifyRestock) {
+        for (const p of eligible) {
+          if (p.stockStatus !== 'available' && status === 'available' && p.masterId) {
+            void notifyRestock(p.masterId).catch(() => {});
+          }
+        }
+      }
+    }
+
+    return { stockStatus: status, updatedIds: eligible.map((p) => p.id), skippedIds };
   }
 
   // ── Categories ──────────────────────────────────────────────────────────────
@@ -521,7 +593,7 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
   }
 
   return {
-    createProduct, updateProduct, deleteProduct, setStockQty,
+    createProduct, updateProduct, deleteProduct, setStockQty, bulkSetProductStock,
     upsertProductByBarcode,
     createCategory, updateCategory, deleteCategory,
     createVariant, updateVariant, deleteVariant,

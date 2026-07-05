@@ -34,6 +34,8 @@ interface StockSection {
   outOfStock: number;   // of those, how many are out of stock
   collapsed: boolean;
   data: RowItem[];      // [] when collapsed → header still renders (sticky)
+  memberIds: string[];  // ids shown under this section regardless of collapse — drives
+                        // tri-state section selection + search-scoped Select All (Sprint 4)
 }
 
 // Form state for add/edit. Strings (rupees) — converted to paise on save.
@@ -68,6 +70,11 @@ export default function StockScreen() {
   // all expanded (categories are expanded by default). Persisted per shop in
   // AsyncStorage; own state, so a loadShop() refresh never clobbers it.
   const [collapsedSet, setCollapsedSet] = useState<Set<string>>(new Set());
+  // Bulk selection mode (Sprint 4). selectedIds = product ids ticked for a bulk
+  // stock action. Selection persists across search/collapse; cleared on exit.
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy]           = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -369,10 +376,12 @@ export default function StockScreen() {
     }
   }
 
-  function productActions(p: Product) {
-    Alert.alert(p.name, undefined, [
-      { text: 'Galat image report karein', onPress: () => void reportImage(p.id) },
-      { text: 'Product hatayein', style: 'destructive', onPress: () => void doDelete(p.id) },
+  // Single-product report/delete. Long-press now enters selection mode (Sprint 4),
+  // so these actions moved to the edit sheet's "⋯" — reachable via tap → edit → ⋯.
+  function productActions(productId: string, name: string) {
+    Alert.alert(name, undefined, [
+      { text: 'Galat image report karein', onPress: () => void reportImage(productId) },
+      { text: 'Product hatayein', style: 'destructive', onPress: () => void doDelete(productId) },
       { text: 'Cancel', style: 'cancel' },
     ]);
   }
@@ -387,6 +396,7 @@ export default function StockScreen() {
   }
   async function doDelete(productId: string) {
     if (!state.token) return;
+    setModalOpen(false); // invoked from the edit sheet's ⋯ — close it as the row disappears
     try { await SellerApi.deleteProduct(productId, state.token); await loadShop(); }
     catch (e: unknown) { Alert.alert('Error', e instanceof Error ? e.message : 'Delete nahi hua'); }
   }
@@ -423,6 +433,7 @@ export default function StockScreen() {
           outOfStock: shown.filter((p) => p.stockStatus === 'out_of_stock').length,
           collapsed,
           data:       collapsed ? [] : shown,
+          memberIds:  shown.map((p) => p.id),   // regardless of collapse (Sprint 4 selection)
         };
       })
       // While searching, hide categories with no match; otherwise keep every
@@ -432,6 +443,63 @@ export default function StockScreen() {
 
   const searchResultCount = isSearching ? sections.reduce((n, s) => n + s.total, 0) : 0;
 
+  // ── Bulk selection (Sprint 4) ───────────────────────────────────────────────
+  // Every product id currently visible (search-scoped) — the reach of "Select All".
+  const visibleMemberIds = useMemo(() => sections.flatMap((s) => s.memberIds), [sections]);
+  const allInViewSelected = visibleMemberIds.length > 0 && visibleMemberIds.every((id) => selectedIds.has(id));
+
+  const sectionSelectState = (section: StockSection): 'checked' | 'indeterminate' | 'unchecked' => {
+    const ids = section.memberIds;
+    if (ids.length === 0) return 'unchecked';
+    const sel = ids.reduce((n, id) => n + (selectedIds.has(id) ? 1 : 0), 0);
+    return sel === 0 ? 'unchecked' : sel === ids.length ? 'checked' : 'indeterminate';
+  };
+
+  function enterSelection(preselectId?: string) {
+    setSelectionMode(true);
+    if (preselectId) setSelectedIds(new Set([preselectId]));
+  }
+  function exitSelection() { setSelectionMode(false); setSelectedIds(new Set()); }
+  function toggleProduct(id: string) {
+    setSelectedIds((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  }
+  // Tri-state: if the section is fully selected, clear it; otherwise select all its members.
+  function toggleSection(section: StockSection) {
+    const ids = section.memberIds;
+    const allSel = ids.length > 0 && ids.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => (allSel ? next.delete(id) : next.add(id)));
+      return next;
+    });
+  }
+  // Global Select All — scoped to the active search (visibleMemberIds already is).
+  function toggleSelectAll() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      visibleMemberIds.forEach((id) => (allInViewSelected ? next.delete(id) : next.add(id)));
+      return next;
+    });
+  }
+
+  // Bulk stock write — one call to the parity endpoint (== N single toggles).
+  async function runBulkStock(stockStatus: 'available' | 'out_of_stock') {
+    if (!state.token || selectedIds.size === 0) return;
+    setBulkBusy(true);
+    try {
+      const res = await SellerApi.bulkUpdateStock([...selectedIds], stockStatus, state.token);
+      exitSelection();
+      await loadShop();
+      if (res.skippedIds.length > 0) {
+        Alert.alert('Ho gaya', `${res.updatedIds.length} update hue, ${res.skippedIds.length} skip hue`);
+      }
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Bulk update nahi hua');
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   const photoPreview = form.localUri ?? form.imageUrl; // on-device file first, else the uploaded URL
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.accent} size="large" /></View>;
@@ -439,24 +507,44 @@ export default function StockScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Inventory</Text>
-          <Text style={styles.headerSub}>
-            {allProducts.filter((p) => p.stockStatus === 'available').length}/{allProducts.length} available
-          </Text>
-        </View>
-        {shop && (
-          <View style={styles.headerBtns}>
-            <Pressable style={styles.importBtn} onPress={() => void handleImport()} disabled={importing}>
-              {importing ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.importBtnText}>⬆ CSV</Text>}
+        {selectionMode ? (
+          // ── Selection app bar (Sprint 4) ──────────────────────────────────
+          <View style={styles.selectionBar}>
+            <Pressable onPress={exitSelection} hitSlop={10} accessibilityRole="button" accessibilityLabel="Selection band karein">
+              <Text style={styles.selectionClose} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">✕</Text>
             </Pressable>
-            <Pressable style={styles.scanBtn} onPress={() => setScannerOpen(true)} disabled={lookingUp}>
-              {lookingUp ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.scanBtnText}>📷 Scan</Text>}
-            </Pressable>
-            <Pressable style={styles.addBtn} onPress={openAdd}>
-              <Text style={styles.addBtnText}>+ Add</Text>
+            <Text style={styles.selectionCount}>{selectedIds.size} selected</Text>
+            <Pressable onPress={toggleSelectAll} hitSlop={10} accessibilityRole="button">
+              <Text style={styles.selectionAction}>{allInViewSelected ? 'Clear all' : 'Select all'}</Text>
             </Pressable>
           </View>
+        ) : (
+          <>
+            <View>
+              <Text style={styles.headerTitle}>Inventory</Text>
+              <Text style={styles.headerSub}>
+                {allProducts.filter((p) => p.stockStatus === 'available').length}/{allProducts.length} available
+              </Text>
+            </View>
+            {shop && (
+              <View style={styles.headerBtns}>
+                {allProducts.length > 0 && (
+                  <Pressable style={styles.selectBtn} onPress={() => enterSelection()} accessibilityRole="button" accessibilityLabel="Select mode">
+                    <Text style={styles.selectBtnText}>Select</Text>
+                  </Pressable>
+                )}
+                <Pressable style={styles.importBtn} onPress={() => void handleImport()} disabled={importing}>
+                  {importing ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.importBtnText}>⬆ CSV</Text>}
+                </Pressable>
+                <Pressable style={styles.scanBtn} onPress={() => setScannerOpen(true)} disabled={lookingUp}>
+                  {lookingUp ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.scanBtnText}>📷 Scan</Text>}
+                </Pressable>
+                <Pressable style={styles.addBtn} onPress={openAdd}>
+                  <Text style={styles.addBtnText}>+ Add</Text>
+                </Pressable>
+              </View>
+            )}
+          </>
         )}
       </View>
 
@@ -528,6 +616,17 @@ export default function StockScreen() {
                     (section.outOfStock > 0 ? `, ${section.outOfStock} out of stock` : '')
                   }
                 >
+                  {selectionMode && (
+                    <Pressable
+                      onPress={() => toggleSection(section)}
+                      hitSlop={6}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: sectionSelectState(section) === 'checked' }}
+                      accessibilityLabel={`${section.name} — poori category select karein`}
+                    >
+                      <SelectBox state={sectionSelectState(section)} />
+                    </Pressable>
+                  )}
                   <Text style={styles.sectionChevron} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{section.collapsed ? '▸' : '▾'}</Text>
                   <Text style={styles.sectionIcon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">🗂️</Text>
                   <Text style={styles.sectionName} numberOfLines={1}>{section.name}</Text>
@@ -544,31 +643,65 @@ export default function StockScreen() {
                   ? <Text style={styles.emptyCatRow}>No products in this category yet.</Text>
                   : null
               )}
-              renderItem={({ item }) => (
-                <Pressable style={styles.productRow} onPress={() => openEdit(item)} onLongPress={() => productActions(item)}>
-                  {item.imageUrl
-                    ? <Image source={{ uri: item.imageUrl }} style={styles.rowThumb} accessibilityLabel={`${item.name} ki photo`} />
-                    : <View style={[styles.rowThumb, styles.rowThumbPlaceholder]}><Text style={styles.rowThumbIcon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">📦</Text></View>}
-                  <View style={styles.productInfo}>
-                    <Text style={styles.productName}>{item.name}</Text>
-                    <Text style={styles.productPrice}>
-                      ₹{Math.round(item.price / 100)}
-                      {item.mrpPaise ? <Text style={styles.mrp}>  ₹{Math.round(item.mrpPaise / 100)}</Text> : null}
-                      {item.unit ? ` / ${item.unit}` : ''}
-                    </Text>
-                  </View>
-                  {updating === item.id
-                    ? <ActivityIndicator color={Colors.accent} />
-                    : <Switch
-                        value={item.stockStatus === 'available'}
-                        onValueChange={() => void toggleStock(item.id, item.stockStatus)}
-                        trackColor={{ false: Colors.border, true: Colors.success }}
-                        thumbColor={Colors.white}
-                      />
-                  }
-                </Pressable>
-              )}
+              renderItem={({ item }) => {
+                const selected = selectedIds.has(item.id);
+                return (
+                  <Pressable
+                    style={[styles.productRow, selectionMode && selected && styles.productRowSelected]}
+                    // In selection mode: tap toggles the tick, long-press just toggles too.
+                    // Normal mode: tap edits, long-press ENTERS selection with this row ticked.
+                    onPress={() => (selectionMode ? toggleProduct(item.id) : openEdit(item))}
+                    onLongPress={() => (selectionMode ? toggleProduct(item.id) : enterSelection(item.id))}
+                    accessibilityRole={selectionMode ? 'checkbox' : 'button'}
+                    accessibilityState={selectionMode ? { checked: selected } : undefined}
+                  >
+                    {item.imageUrl
+                      ? <Image source={{ uri: item.imageUrl }} style={styles.rowThumb} accessibilityLabel={`${item.name} ki photo`} />
+                      : <View style={[styles.rowThumb, styles.rowThumbPlaceholder]}><Text style={styles.rowThumbIcon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">📦</Text></View>}
+                    <View style={styles.productInfo}>
+                      <Text style={styles.productName}>{item.name}</Text>
+                      <Text style={styles.productPrice}>
+                        ₹{Math.round(item.price / 100)}
+                        {item.mrpPaise ? <Text style={styles.mrp}>  ₹{Math.round(item.mrpPaise / 100)}</Text> : null}
+                        {item.unit ? ` / ${item.unit}` : ''}
+                      </Text>
+                    </View>
+                    {selectionMode
+                      ? <SelectBox state={selected ? 'checked' : 'unchecked'} />
+                      : updating === item.id
+                        ? <ActivityIndicator color={Colors.accent} />
+                        : <Switch
+                            value={item.stockStatus === 'available'}
+                            onValueChange={() => void toggleStock(item.id, item.stockStatus)}
+                            trackColor={{ false: Colors.border, true: Colors.success }}
+                            thumbColor={Colors.white}
+                          />
+                    }
+                  </Pressable>
+                );
+              }}
             />
+            {/* Bottom action bar (Sprint 4) — bulk stock write over the selection. */}
+            {selectionMode && (
+              <View style={styles.actionBar}>
+                <Pressable
+                  style={[styles.actionBtn, styles.actionBtnAvail, (selectedIds.size === 0 || bulkBusy) && styles.actionBtnDisabled]}
+                  disabled={selectedIds.size === 0 || bulkBusy}
+                  onPress={() => void runBulkStock('available')}
+                  accessibilityRole="button"
+                >
+                  {bulkBusy ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.actionBtnText}>✓ Available</Text>}
+                </Pressable>
+                <Pressable
+                  style={[styles.actionBtn, styles.actionBtnOut, (selectedIds.size === 0 || bulkBusy) && styles.actionBtnDisabled]}
+                  disabled={selectedIds.size === 0 || bulkBusy}
+                  onPress={() => void runBulkStock('out_of_stock')}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.actionBtnText}>✕ Out of stock</Text>
+                </Pressable>
+              </View>
+            )}
           </View>
       }
 
@@ -577,7 +710,15 @@ export default function StockScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalRoot}>
           <View style={styles.sheet}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>{editingId ? 'Product Edit' : 'Naya Product'}</Text>
+            <View style={styles.sheetTitleRow}>
+              <Text style={styles.sheetTitle}>{editingId ? 'Product Edit' : 'Naya Product'}</Text>
+              {editingId && (
+                // Report / delete relocated here — long-press now enters selection (Sprint 4).
+                <Pressable onPress={() => productActions(editingId, form.name.trim() || 'Product')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Aur options">
+                  <Text style={styles.sheetMore} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">⋯</Text>
+                </Pressable>
+              )}
+            </View>
             <ScrollView keyboardShouldPersistTaps="handled">
               {/* Photo — upload-on-pick with preview / progress / cancel / retry / remove */}
               <Text style={styles.fieldLabel}>Photo</Text>
@@ -689,6 +830,20 @@ function Field(props: {
   );
 }
 
+// Tri-state checkbox (Sprint 4). Decorative glyph — the parent Pressable carries
+// the accessibilityRole="checkbox" + checked state, so the glyph is SR-hidden.
+function SelectBox({ state }: { state: 'checked' | 'indeterminate' | 'unchecked' }) {
+  return (
+    <View style={[styles.checkbox, state !== 'unchecked' && styles.checkboxOn]}>
+      {state !== 'unchecked' && (
+        <Text style={styles.checkboxGlyph} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          {state === 'checked' ? '✓' : '–'}
+        </Text>
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   center:    { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -788,4 +943,30 @@ const styles = StyleSheet.create({
   btnGhostText:{ color: Colors.text, fontWeight: '700', fontSize: FontSize.md },
   btnPrimary:  { backgroundColor: Colors.primary },
   btnPrimaryText: { color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
+  // sheet title row: title + the relocated ⋯ (report/delete moved here since
+  // long-press now enters selection — Sprint 4).
+  sheetTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sheetMore:     { fontSize: FontSize.xxl, color: Colors.textMuted, fontWeight: '800', marginBottom: Spacing.md, paddingHorizontal: Spacing.xs },
+  // ── Bulk selection mode (Sprint 4) ──────────────────────────────────────────
+  // "Select" entry button — a header secondary action, like ⬆ CSV / 📷 Scan.
+  selectBtn:      { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.md, minWidth: 64, alignItems: 'center' },
+  selectBtnText:  { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
+  // Selection app bar — replaces the title/actions in the header while selecting.
+  selectionBar:    { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  selectionClose:  { color: Colors.white, fontSize: FontSize.xl, fontWeight: '700' },
+  selectionCount:  { flex: 1, textAlign: 'center', marginHorizontal: Spacing.md, color: Colors.white, fontSize: FontSize.lg, fontWeight: '800' },
+  selectionAction: { color: Colors.white, fontSize: FontSize.md, fontWeight: '700' },
+  // Selected-row highlight — a light primary tint + border over the white card.
+  productRowSelected: { borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: '#FFF0F4' },
+  // Tri-state checkbox — same glyph in the row (right) and the section header (left).
+  checkbox:      { width: 24, height: 24, borderRadius: Radius.sm, borderWidth: 2, borderColor: Colors.border, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
+  checkboxOn:    { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  checkboxGlyph: { color: Colors.white, fontSize: FontSize.sm, fontWeight: '900' },
+  // Bottom action bar — the bulk stock write over the current selection.
+  actionBar:         { flexDirection: 'row', gap: Spacing.md, padding: Spacing.lg, backgroundColor: Colors.card, borderTopWidth: 1, borderTopColor: Colors.border },
+  actionBtn:         { flex: 1, flexDirection: 'row', gap: Spacing.sm, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
+  actionBtnAvail:    { backgroundColor: Colors.success },
+  actionBtnOut:      { backgroundColor: Colors.error },
+  actionBtnDisabled: { opacity: 0.5 },
+  actionBtnText:     { color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
 });
