@@ -328,6 +328,8 @@ Refresh runs **server-side** in the BFF (reads `bl_rt` → `/auth/refresh` → r
 
 ---
 
+- [x] UI overhaul (premium design pass, 2026-07-05, `b6dc9ad`) — Poppins Devanagari+Latin **self-hosted via next/font** (CSP `font-src 'self'` holds; `font-heavy` remapped to loaded 800), elevation scale (card/lift/glow/nav) + spring easing + shimmer/fade-up/float/pop, consistent focus-visible rings + reduced-motion + noscript fallbacks, sticky condensing header with rotating search hint, **mobile BottomNav** (cart badge; capsule sits above it), hero (layered gradient, floating glass tiles, stat pills), snap rails with edge fades + desktop paddles, reveal-on-scroll sections, card hover lift + image zoom on tiles/shop cards, shop banner header w/ floating logo, PDP gallery zoom + thumb rings, animated tracking stepper, polished CTAs, richer footer. Verified: build ✅ all pages 200 ✅ 0 external font/asset refs ✅ SSR content intact ✅.
+
 ## 7.5 Final verification sweep + launch checklist (2026-07-05)
 
 **Sweep results (prod build vs live dev backend):** all public pages 200 (home/shop/product/search/cart/login/robots) · 6/6 security headers incl. HSTS · login → server-cart add → pricing preview ✅ · **order placement re-verified earlier in-hours** (final-sweep attempt after 8 PM IST correctly refused by the backend service-hours rule `SHOP_CLOSED` — which also proves the checkout error path) · order page 200, history renders · anon gates 307 · BFF admin 404 · evil-origin POST 403 · 11 rapid verify-otp → **429 from the web's own limiter** · logout → `{authed:false}` · **0 RN-only deps in `.next`** · web socket handshake+subscribe live ✅.
