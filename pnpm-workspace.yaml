@@ -10,3 +10,19 @@ allowBuilds:
   protobufjs: true
   react-native-screens: true
   sharp: true
+# Security patch floors for transitive deps (pnpm audit 2026-07-05). Same-major
+# only — pinned so a selector can never jump a consumer to a new major.
+# Deliberately NOT overridden (major-version jumps; tracked for upgrades):
+# fastify v4→v5.7.2+, uuid <11.1.1, @opentelemetry/core <2.8.0.
+overrides:
+  'fast-uri@<3.1.2': '>=3.1.2 <4'
+  'form-data@>=4.0.0 <4.0.6': '>=4.0.6 <5'
+  'form-data@<2.5.6': '>=2.5.6 <3'
+  'js-yaml@>=4.0.0 <=4.1.1': '>=4.1.2 <5'
+  'js-yaml@<3.15.0': '>=3.15.0 <4'
+  'postcss@<8.5.10': '>=8.5.10 <9'
+  'protobufjs@<=7.6.2': '>=7.6.3 <8'
+  'tar@<=7.5.15': '>=7.5.16 <8'
+  'undici@<6.27.0': '>=6.27.0 <7'
+  'ws@>=8.0.0 <8.21.0': '>=8.21.0 <9'
+  '@babel/core@<7.29.1': '>=7.29.1 <8'

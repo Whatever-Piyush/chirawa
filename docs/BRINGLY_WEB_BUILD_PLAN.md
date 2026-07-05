@@ -328,6 +328,21 @@ Refresh runs **server-side** in the BFF (reads `bl_rt` → `/auth/refresh` → r
 
 ---
 
+## 7.5 Final verification sweep + launch checklist (2026-07-05)
+
+**Sweep results (prod build vs live dev backend):** all public pages 200 (home/shop/product/search/cart/login/robots) · 6/6 security headers incl. HSTS · login → server-cart add → pricing preview ✅ · **order placement re-verified earlier in-hours** (final-sweep attempt after 8 PM IST correctly refused by the backend service-hours rule `SHOP_CLOSED` — which also proves the checkout error path) · order page 200, history renders · anon gates 307 · BFF admin 404 · evil-origin POST 403 · 11 rapid verify-otp → **429 from the web's own limiter** · logout → `{authed:false}` · **0 RN-only deps in `.next`** · web socket handshake+subscribe live ✅.
+
+**Dependency audit:** 20 → **5** advisories via same-major override floors in `pnpm-workspace.yaml` (fast-uri, form-data ×2, js-yaml ×2, postcss, protobufjs, tar, undici, ws, @babel/core). All 3 RN apps `tsc` ✅, web build ✅, API boots ✅ after overrides. **Remaining (major jumps, tracked):** fastify v4→≥5.7.2 (high), uuid ≥11.1.1, @opentelemetry/core ≥2.8.0.
+
+**Prod launch checklist (env, not code):**
+- [ ] API: `NODE_ENV=production` (kills the dev OTP bypass — it is gated on NODE_ENV)
+- [ ] API: `FRONTEND_URLS` includes the real web origin (socket CORS)
+- [ ] API: `TRUST_PROXY` = real proxy hops (`1` behind one nginx; NOT `true`)
+- [ ] Web: `BACKEND_API_BASE` (server-only), `NEXT_PUBLIC_SOCKET_URL` = public API origin, `NEXT_PUBLIC_IMAGE_HOST` = R2/CDN host (§8 — still pending)
+- [ ] Web: `COOKIE_SECURE` unset (secure default) · HTTPS everywhere (HSTS + upgrade-insecure-requests are prod-automatic)
+- [ ] Manual device QA: browser click-through (login/checkout UIs, live tracking while a rider moves), Lighthouse pass
+- [ ] Plan the fastify v4→v5 upgrade (last high-severity advisory)
+
 ## 8. Flagged gaps / open questions
 - **S3/CloudFront image host** for `next/image` `remotePatterns` (Task 3) — confirm before Task 6.
 - **Promo-code field at checkout** (Task 13) — defaulted **hidden**; enable only if requested.
