@@ -22,6 +22,20 @@ export const envSchema = z
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     HOST: z.string().default('0.0.0.0'),
+    // Fastify trustProxy: 'true'/'false', a hop count ('1'), or a comma list of
+    // trusted proxy IPs/CIDRs ('127.0.0.1,::1'). 'true' trusts EVERY client's
+    // X-Forwarded-For — fine in dev, spoofable rate-limit keys if the API port
+    // is directly reachable in prod. Set to the real proxy hops when deploying.
+    TRUST_PROXY: z
+      .string()
+      .default('true')
+      .transform((v): boolean | number | string[] => {
+        const t = v.trim();
+        if (t === 'true') return true;
+        if (t === 'false') return false;
+        if (/^\d+$/.test(t)) return Number(t);
+        return t.split(',').map((s) => s.trim()).filter(Boolean);
+      }),
 
     // ── Database ─────────────────────────────────────────────────────────────
     // Required — server won't start without a DB URL
