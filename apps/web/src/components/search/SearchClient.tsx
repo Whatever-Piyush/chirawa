@@ -110,7 +110,7 @@ export function SearchClient() {
           submit(input);
         }}
       >
-        <div className="flex items-center gap-2 rounded-full border-2 border-primary bg-surface px-4 py-2.5 shadow-sm">
+        <div className="flex items-center gap-2 rounded-full border-2 border-hairline bg-surface px-4 py-2.5 shadow-card transition-all duration-300 ease-spring focus-within:border-primary focus-within:shadow-lift">
           <span aria-hidden>🔍</span>
           <input
             autoFocus
@@ -135,7 +135,7 @@ export function SearchClient() {
           )}
           <button
             type="submit"
-            className="rounded-full bg-primary px-4 py-1.5 text-sm font-bold text-white transition-colors hover:bg-primary-dark"
+            className="tap-highlight-none rounded-full bg-primary px-4 py-1.5 text-sm font-bold text-white transition-all duration-200 ease-spring hover:bg-primary-dark hover:shadow-primary active:scale-95"
           >
             खोजें
           </button>

@@ -40,36 +40,42 @@ export function ProductTile({ product }: { product: TileProduct }) {
     });
 
   return (
-    <div className="flex w-full flex-col rounded-lg border border-hairline bg-surface p-2.5 shadow-card">
-      <Link href={`/product/${product.productId}`} className="group">
-        <div className="relative mb-2 aspect-square overflow-hidden rounded-md bg-surface-alt">
+    <div className="card-lift flex w-full flex-col rounded-2xl border border-hairline bg-surface p-2.5 shadow-card">
+      <Link href={`/product/${product.productId}`} className="tap-highlight-none group">
+        <div className="relative mb-2 aspect-square overflow-hidden rounded-xl bg-gradient-to-br from-surface-alt to-primary-light/40">
           {product.imageUrl ? (
-            <Image src={product.imageUrl} alt={product.name} fill sizes="144px" className="object-contain" />
+            <Image
+              src={product.imageUrl}
+              alt={product.name}
+              fill
+              sizes="144px"
+              className="object-contain p-1 transition-transform duration-500 ease-spring group-hover:scale-110"
+            />
           ) : (
-            <div className="grid h-full place-items-center text-3xl" aria-hidden>
+            <div className="grid h-full place-items-center text-3xl transition-transform duration-500 ease-spring group-hover:scale-110" aria-hidden>
               🛍️
             </div>
           )}
           {disc > 0 && !outOfStock && (
-            <span className="absolute left-1 top-1 rounded-full bg-success px-1.5 py-0.5 text-[10px] font-bold text-white">
+            <span className="absolute left-1.5 top-1.5 rounded-md bg-success px-1.5 py-0.5 text-[10px] font-black tracking-wide text-white shadow-sm">
               {disc}% OFF
             </span>
           )}
           {outOfStock && <StockBadge />}
         </div>
 
-        <p className="line-clamp-2 min-h-[2.5rem] text-xs font-semibold text-ink group-hover:text-primary">
+        <p className="line-clamp-2 min-h-[2.5rem] text-xs font-semibold leading-snug text-ink transition-colors group-hover:text-primary">
           {product.name}
         </p>
       </Link>
       {product.unit ? <p className="mt-0.5 text-xs text-ink-faint">{product.unit}</p> : null}
       {product.shopCount && product.shopCount > 1 ? (
-        <p className="mt-0.5 text-[10px] text-ink-faint">{product.shopCount} दुकानों में</p>
+        <p className="mt-0.5 text-[10px] text-ink-faint">🏪 {product.shopCount} दुकानों में</p>
       ) : null}
 
       <div className="mt-2 flex items-center justify-between gap-1">
         <div className="flex flex-col leading-tight">
-          <span className="text-sm font-bold text-ink">{formatPaise(product.pricePaise)}</span>
+          <span className="text-sm font-black text-ink">{formatPaise(product.pricePaise)}</span>
           {disc > 0 && product.mrpPaise != null ? (
             <span className="text-[11px] text-ink-faint line-through">{formatPaise(product.mrpPaise)}</span>
           ) : null}

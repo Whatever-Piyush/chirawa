@@ -54,7 +54,9 @@ const config: Config = {
         semibold: '600',
         bold: '700',
         black: '800',
-        heavy: '900',
+        // Mapped to a LOADED weight — Poppins ships 400–800 here; a 900 token
+        // would faux-bold. 800 Poppins is the brand "heavy".
+        heavy: '800',
       },
       borderRadius: {
         xs: '4px',
@@ -78,6 +80,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: [
+          'var(--font-poppins)',
           'ui-sans-serif',
           'system-ui',
           '-apple-system',
@@ -94,14 +97,46 @@ const config: Config = {
         // Gradients.primary / Gradients.warm from the theme.
         'brand-gradient': 'linear-gradient(135deg, #FF6B35 0%, #FF9A5C 100%)',
         'brand-warm': 'linear-gradient(135deg, #FF6B35 0%, #FFB07A 100%)',
+        // Hero: deeper, layered warm gradient with a soft radial glow.
+        'hero-warm':
+          'radial-gradient(80rem 40rem at 110% -20%, rgba(255,255,255,0.18), transparent 60%), radial-gradient(50rem 30rem at -10% 120%, rgba(196,56,58,0.35), transparent 55%), linear-gradient(135deg, #FF6B35 0%, #F04E23 55%, #E23A2E 100%)',
       },
       boxShadow: {
-        card: '0 2px 6px rgba(0,0,0,0.06)',
+        // Layered elevation scale (ambient + key light).
+        card: '0 1px 2px rgba(26,26,46,0.04), 0 4px 14px rgba(26,26,46,0.05)',
+        lift: '0 2px 6px rgba(26,26,46,0.06), 0 16px 32px -8px rgba(26,26,46,0.14)',
         soft: '0 4px 12px rgba(0,0,0,0.08)',
-        primary: '0 4px 12px rgba(255,107,53,0.30)',
+        primary: '0 4px 14px rgba(255,107,53,0.35)',
+        glow: '0 6px 24px rgba(255,107,53,0.45)',
+        nav: '0 -4px 16px rgba(26,26,46,0.08)',
       },
       maxWidth: {
         content: '72rem',
+      },
+      keyframes: {
+        shimmer: {
+          '100%': { transform: 'translateX(100%)' },
+        },
+        'fade-up': {
+          from: { opacity: '0', transform: 'translateY(12px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        float: {
+          '0%, 100%': { transform: 'translateY(0) rotate(var(--float-tilt, 0deg))' },
+          '50%': { transform: 'translateY(-10px) rotate(var(--float-tilt, 0deg))' },
+        },
+        pop: {
+          from: { opacity: '0', transform: 'scale(0.8)' },
+          to: { opacity: '1', transform: 'scale(1)' },
+        },
+      },
+      animation: {
+        'fade-up': 'fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both',
+        float: 'float 6s ease-in-out infinite',
+        pop: 'pop 0.25s cubic-bezier(0.16, 1, 0.3, 1) both',
+      },
+      transitionTimingFunction: {
+        spring: 'cubic-bezier(0.16, 1, 0.3, 1)',
       },
     },
   },

@@ -108,11 +108,12 @@ export function LoginClient() {
 
   return (
     <div className="mx-auto w-full max-w-md px-4 py-10 pb-28">
-      <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
-        <p className="text-3xl" aria-hidden>
+      <div className="animate-fade-up rounded-[1.5rem] border border-hairline bg-surface p-6 shadow-lift">
+        <p className="inline-grid h-14 w-14 animate-float place-items-center rounded-2xl bg-primary-light text-3xl" aria-hidden>
           🛵
         </p>
-        <h1 className="mt-2 text-xl font-heavy text-ink">Bringly में आपका स्वागत है</h1>
+        <h1 className="mt-3 text-xl font-heavy tracking-tight text-ink">Bringly में आपका स्वागत है</h1>
+        <p className="mt-0.5 text-sm text-ink-muted">मिनटों में किराना, आपके दरवाज़े तक</p>
 
         {step === 'phone' ? (
           <form

@@ -162,7 +162,7 @@ export function OrderClient({ orderId, groupId }: { orderId: string; groupId: st
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-6 pb-28">
       {/* Confirmation header */}
-      <div className="rounded-xl border border-hairline bg-surface p-4 shadow-card">
+      <div className="animate-fade-up rounded-[1.25rem] border border-hairline bg-surface p-4 shadow-card">
         <div className="flex items-start justify-between gap-2">
           <div>
             <h1 className="text-lg font-heavy text-ink">

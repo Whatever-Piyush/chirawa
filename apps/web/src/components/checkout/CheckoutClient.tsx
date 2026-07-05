@@ -218,9 +218,9 @@ export function CheckoutClient() {
             type="button"
             onClick={() => void placeOrder()}
             disabled={!canPreview || !preview || previewLoading || placing}
-            className="mt-4 h-12 w-full rounded-xl bg-primary text-md font-bold text-white shadow-primary transition-colors hover:bg-primary-dark disabled:opacity-50"
+            className="tap-highlight-none mt-4 h-12 w-full rounded-xl bg-primary text-md font-bold text-white shadow-primary transition-all duration-300 ease-spring hover:bg-primary-dark hover:shadow-glow active:scale-[0.98] disabled:opacity-50"
           >
-            {placing ? 'ऑर्डर हो रहा है…' : `ऑर्डर करें · ${preview ? formatPaise(preview.total) : ''}`}
+            {placing ? '⏳ ऑर्डर हो रहा है…' : `ऑर्डर करें · ${preview ? formatPaise(preview.total) : ''}`}
           </button>
           <p className="mt-2 text-center text-xs text-ink-faint">💵 डिलीवरी पर नकद भुगतान</p>
         </div>

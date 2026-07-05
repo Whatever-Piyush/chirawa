@@ -1,15 +1,15 @@
-// Loading placeholders for the home Suspense boundaries.
+// Loading placeholders for the home Suspense boundaries (shimmer sweep).
 
 export function ShelfSkeleton({ title }: { title?: string }) {
   return (
-    <section className="mt-8">
-      {title ? <div className="mb-3 h-5 w-40 rounded bg-surface-alt" /> : null}
+    <section className="mt-10">
+      {title ? <div className="skeleton mb-4 h-6 w-40" /> : null}
       <div className="flex gap-3 overflow-hidden">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="w-36 shrink-0 animate-pulse rounded-lg border border-hairline bg-surface p-2.5">
-            <div className="mb-2 aspect-square rounded-md bg-surface-alt" />
-            <div className="h-3 w-3/4 rounded bg-surface-alt" />
-            <div className="mt-2 h-3 w-1/2 rounded bg-surface-alt" />
+          <div key={i} className="w-36 shrink-0 rounded-2xl border border-hairline bg-surface p-2.5">
+            <div className="skeleton mb-2 aspect-square rounded-xl" />
+            <div className="skeleton h-3 w-3/4" />
+            <div className="skeleton mt-2 h-3 w-1/2" />
           </div>
         ))}
       </div>
@@ -19,13 +19,13 @@ export function ShelfSkeleton({ title }: { title?: string }) {
 
 export function GridSkeleton() {
   return (
-    <section className="mt-8">
-      <div className="mb-3 h-5 w-32 rounded bg-surface-alt" />
-      <div className="grid grid-cols-4 gap-3 sm:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="flex animate-pulse flex-col items-center gap-1.5">
-            <div className="h-16 w-16 rounded-full bg-surface-alt" />
-            <div className="h-3 w-12 rounded bg-surface-alt" />
+    <section className="mt-10">
+      <div className="skeleton mb-4 h-6 w-32" />
+      <div className="grid grid-cols-4 gap-3 sm:grid-cols-6 lg:grid-cols-8">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="flex flex-col items-center gap-2">
+            <div className="skeleton h-16 w-16 rounded-full sm:h-20 sm:w-20" />
+            <div className="skeleton h-3 w-12" />
           </div>
         ))}
       </div>

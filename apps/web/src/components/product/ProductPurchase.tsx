@@ -63,10 +63,10 @@ export function ProductPurchase({ initial }: { initial: ProductDetail }) {
                 type="button"
                 disabled={!v.inStock}
                 onClick={() => setSelectedVariantId(v.id)}
-                className={`rounded-xl border-2 px-3.5 py-2 text-sm font-semibold transition-colors ${
+                className={`tap-highlight-none rounded-xl border-2 px-3.5 py-2 text-sm font-semibold transition-all duration-200 ease-spring active:scale-95 ${
                   sel
-                    ? 'border-primary bg-primary-light text-primary'
-                    : 'border-hairline bg-surface text-ink-muted'
+                    ? 'scale-[1.03] border-primary bg-primary-light text-primary shadow-card'
+                    : 'border-hairline bg-surface text-ink-muted hover:border-primary/50'
                 } disabled:opacity-40`}
               >
                 {v.name}
@@ -109,9 +109,9 @@ export function ProductPurchase({ initial }: { initial: ProductDetail }) {
           <button
             type="button"
             onClick={add}
-            className="h-12 w-full rounded-xl bg-primary text-md font-bold text-white shadow-primary transition-colors hover:bg-primary-dark"
+            className="tap-highlight-none h-12 w-full rounded-xl bg-primary text-md font-bold text-white shadow-primary transition-all duration-300 ease-spring hover:bg-primary-dark hover:shadow-glow active:scale-[0.98]"
           >
-            कार्ट में डालें · {formatPaise(effPrice)}
+            🧺 कार्ट में डालें · {formatPaise(effPrice)}
           </button>
         )}
       </div>

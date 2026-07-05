@@ -42,14 +42,14 @@ export function StatusStepper({ status }: { status: string }) {
           <li key={p.key} className="flex min-w-0 flex-1 flex-col items-center gap-1 text-center">
             <span className="flex w-full items-center">
               <span
-                className={`h-0.5 flex-1 ${i === 0 ? 'opacity-0' : done || current ? 'bg-success' : 'bg-hairline'}`}
+                className={`h-1 flex-1 rounded-full transition-colors duration-700 ${i === 0 ? 'opacity-0' : done || current ? 'bg-success' : 'bg-hairline'}`}
               />
               <span
-                className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border-2 text-md ${
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full border-2 text-md transition-all duration-500 ease-spring ${
                   done
                     ? 'border-success bg-success-light'
                     : current
-                      ? 'border-primary bg-primary-light'
+                      ? 'scale-110 border-primary bg-primary-light shadow-primary ring-4 ring-primary/15'
                       : 'border-hairline bg-surface'
                 }`}
                 aria-hidden
@@ -57,7 +57,7 @@ export function StatusStepper({ status }: { status: string }) {
                 {done ? '✓' : p.icon}
               </span>
               <span
-                className={`h-0.5 flex-1 ${i === PHASES.length - 1 ? 'opacity-0' : done ? 'bg-success' : 'bg-hairline'}`}
+                className={`h-1 flex-1 rounded-full transition-colors duration-700 ${i === PHASES.length - 1 ? 'opacity-0' : done ? 'bg-success' : 'bg-hairline'}`}
               />
             </span>
             <span

@@ -10,7 +10,7 @@ type Props = {
 };
 
 // When quantity is 0 → an "ADD" pill; otherwise the −/qty/+ stepper. Optimistic:
-// callers update the guest cart immediately (no server round-trip in Task 5).
+// callers update the guest cart immediately (no server round-trip).
 export function QtyStepper({
   quantity,
   onIncrement,
@@ -27,7 +27,7 @@ export function QtyStepper({
         type="button"
         onClick={onIncrement}
         disabled={disabled}
-        className={`${h} rounded-full border border-primary bg-primary-light px-5 text-sm font-bold uppercase tracking-wide text-primary transition-colors hover:bg-primary hover:text-white disabled:pointer-events-none disabled:opacity-50`}
+        className={`${h} tap-highlight-none rounded-full border border-primary bg-primary-light px-5 text-sm font-bold uppercase tracking-wide text-primary transition-all duration-200 ease-spring hover:bg-primary hover:text-white hover:shadow-primary active:scale-90 disabled:pointer-events-none disabled:opacity-50`}
       >
         {addLabel}
       </button>
@@ -35,22 +35,24 @@ export function QtyStepper({
   }
 
   return (
-    <div className={`${h} inline-flex items-center rounded-full bg-primary font-bold text-white`}>
+    <div className={`${h} inline-flex animate-pop items-center rounded-full bg-primary font-bold text-white shadow-primary`}>
       <button
         type="button"
         onClick={onDecrement}
         aria-label="कम करें"
-        className="grid h-full w-8 place-items-center text-lg"
+        className="tap-highlight-none grid h-full w-8 place-items-center rounded-l-full text-lg transition-colors hover:bg-white/15 active:bg-white/25"
       >
         −
       </button>
-      <span className="min-w-[1.5rem] text-center text-sm tabular-nums">{quantity}</span>
+      <span key={quantity} className="min-w-[1.5rem] animate-pop text-center text-sm tabular-nums">
+        {quantity}
+      </span>
       <button
         type="button"
         onClick={onIncrement}
         disabled={disabled}
         aria-label="और जोड़ें"
-        className="grid h-full w-8 place-items-center text-lg disabled:opacity-40"
+        className="tap-highlight-none grid h-full w-8 place-items-center rounded-r-full text-lg transition-colors hover:bg-white/15 active:bg-white/25 disabled:opacity-40"
       >
         +
       </button>

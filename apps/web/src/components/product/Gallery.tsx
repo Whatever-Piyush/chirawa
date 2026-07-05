@@ -22,32 +22,35 @@ export function Gallery({ images, name }: { images: string[]; name: string }) {
 
   return (
     <div>
-      <div className="relative aspect-square w-full overflow-hidden rounded-xl border border-hairline bg-surface">
+      <div className="group relative aspect-square w-full overflow-hidden rounded-[1.5rem] border border-hairline bg-gradient-to-br from-surface to-primary-light/30 shadow-card">
         <Image
+          key={main}
           src={main}
           alt={name}
           fill
           priority
           sizes="(min-width: 768px) 50vw, 100vw"
-          className="object-contain p-6"
+          className="animate-pop object-contain p-8 transition-transform duration-700 ease-spring group-hover:scale-110"
         />
         {images.length > 1 && (
-          <span className="absolute right-3 top-3 rounded-full bg-black/45 px-2.5 py-0.5 text-xs font-semibold text-white">
+          <span className="absolute right-3.5 top-3.5 rounded-full bg-ink/50 px-2.5 py-1 text-xs font-bold text-white backdrop-blur-sm">
             {Math.min(active, images.length - 1) + 1}/{images.length}
           </span>
         )}
       </div>
 
       {images.length > 1 && (
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+        <div className="mt-3 flex gap-2.5 overflow-x-auto pb-1">
           {images.map((url, i) => (
             <button
               key={`${url}-${i}`}
               type="button"
               onClick={() => setActive(i)}
               aria-label={`फ़ोटो ${i + 1}`}
-              className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 bg-surface ${
-                i === active ? 'border-primary' : 'border-hairline'
+              className={`tap-highlight-none relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 bg-surface transition-all duration-300 ease-spring ${
+                i === active
+                  ? 'scale-105 border-primary shadow-primary'
+                  : 'border-hairline opacity-70 hover:opacity-100'
               }`}
             >
               <Image src={url} alt="" fill sizes="64px" className="object-contain p-1" />

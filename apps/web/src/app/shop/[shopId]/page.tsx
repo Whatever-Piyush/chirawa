@@ -179,42 +179,63 @@ export default async function ShopPage({ params }: { params: Params }) {
         dangerouslySetInnerHTML={{ __html: jsonLd(shop, flat) }}
       />
 
-      {/* Shop header */}
-      <section className="rounded-xl border border-hairline bg-surface p-4 shadow-card sm:p-5">
-        <div className="flex items-start gap-4">
-          <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-surface-alt">
-            {shop.logoUrl ? (
-              <Image src={shop.logoUrl} alt={shop.name} fill sizes="64px" className="object-cover" />
-            ) : (
-              <div className="grid h-full place-items-center text-3xl" aria-hidden>
-                🏪
-              </div>
-            )}
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-xl font-heavy leading-tight text-ink">{shop.name}</h1>
-            {shop.description ? (
-              <p className="mt-0.5 line-clamp-2 text-sm text-ink-muted">{shop.description}</p>
-            ) : null}
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
-              {shop.rating.average != null && shop.rating.count > 0 && (
-                <span className="inline-flex items-center gap-0.5 rounded bg-success/10 px-1.5 py-0.5 font-semibold text-success">
-                  ★ {shop.rating.average} ({shop.rating.count})
-                </span>
-              )}
-              <span>⏱ {shop.estimatedDeliveryMinutes} मिनट में डिलीवरी</span>
-              <span>🕒 {shop.openTime}–{shop.closeTime}</span>
-            </div>
-            <p className="mt-1 truncate text-xs text-ink-faint">📍 {shop.address}</p>
-          </div>
+      {/* Shop header — banner + floating logo card */}
+      <section className="relative overflow-hidden rounded-[1.5rem] border border-hairline bg-surface shadow-card">
+        <div className="relative h-24 bg-hero-warm sm:h-28">
+          <span className="absolute right-4 top-4 hidden text-5xl opacity-25 sm:block" aria-hidden>
+            🏪
+          </span>
         </div>
 
-        {!shop.isCurrentlyOpen && (
-          <div className="mt-3 rounded-lg bg-danger-light px-3 py-2 text-sm font-semibold text-danger">
-            दुकान अभी बंद है — {shop.openTime} से {shop.closeTime} तक खुली रहती है। आप सामान देख
-            सकते हैं।
+        <div className="px-4 pb-4 sm:px-6 sm:pb-5">
+          <div className="-mt-10 flex items-end gap-4">
+            <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl border-4 border-surface bg-surface shadow-lift">
+              {shop.logoUrl ? (
+                <Image src={shop.logoUrl} alt={shop.name} fill sizes="80px" className="object-cover" />
+              ) : (
+                <div className="grid h-full place-items-center bg-primary-light text-4xl" aria-hidden>
+                  🏪
+                </div>
+              )}
+            </div>
+            <div className="min-w-0 flex-1 pb-1">
+              <h1 className="truncate text-xxl font-heavy leading-tight tracking-tight text-ink">
+                {shop.name}
+              </h1>
+              {shop.rating.average != null && shop.rating.count > 0 && (
+                <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-success px-1.5 py-0.5 text-xs font-bold text-white">
+                  ★ {shop.rating.average}
+                  <span className="font-medium text-white/85">({shop.rating.count})</span>
+                </span>
+              )}
+            </div>
           </div>
-        )}
+
+          {shop.description ? (
+            <p className="mt-2.5 line-clamp-2 text-sm leading-relaxed text-ink-muted">
+              {shop.description}
+            </p>
+          ) : null}
+
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-ink-muted">
+            <span className="inline-flex items-center gap-1 rounded-full bg-surface-alt px-2.5 py-1">
+              ⏱ {shop.estimatedDeliveryMinutes} मिनट में डिलीवरी
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-surface-alt px-2.5 py-1">
+              🕒 {shop.openTime}–{shop.closeTime}
+            </span>
+            <span className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-surface-alt px-2.5 py-1">
+              📍 {shop.address}
+            </span>
+          </div>
+
+          {!shop.isCurrentlyOpen && (
+            <div className="mt-3 flex items-center gap-2 rounded-xl border border-danger/20 bg-danger-light px-3 py-2.5 text-sm font-semibold text-danger">
+              <span aria-hidden>🌙</span> दुकान अभी बंद है — {shop.openTime} से {shop.closeTime} तक
+              खुली रहती है। आप सामान देख सकते हैं।
+            </div>
+          )}
+        </div>
       </section>
 
       {/* Products, grouped by shop category */}

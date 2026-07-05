@@ -81,9 +81,9 @@ export function CartPageClient() {
 
           <Link
             href="/checkout"
-            className="mt-4 block rounded-xl bg-primary py-3 text-center text-md font-bold text-white shadow-primary transition-colors hover:bg-primary-dark"
+            className="tap-highlight-none mt-4 block rounded-xl bg-primary py-3 text-center text-md font-bold text-white shadow-primary transition-all duration-300 ease-spring hover:bg-primary-dark hover:shadow-glow active:scale-[0.98]"
           >
-            चेकआउट करें
+            चेकआउट करें →
           </Link>
           <p className="mt-2 text-center text-xs text-ink-faint">💵 डिलीवरी पर नकद भुगतान</p>
         </div>
