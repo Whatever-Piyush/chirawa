@@ -7,10 +7,18 @@ import {
   REFRESH_TOKEN_MAX_AGE,
 } from '@/lib/api/cookies';
 
-// Generic same-origin passthrough proxy. The browser calls /api/bff/<path> and
-// this forwards to BACKEND_API_BASE/<path>, injecting the Bearer from the
-// httpOnly cookie and refreshing on 401 (dormant until login mints cookies in
-// Task 11). Keeping the browser same-origin means no backend CORS changes.
+// Same-origin BFF proxy. The browser calls /api/bff/<path> and this forwards to
+// BACKEND_API_BASE/<path>, injecting the Bearer from the httpOnly cookie and
+// refreshing on 401. Keeping the browser same-origin means no backend REST CORS.
+//
+// Hardening (plan B2):
+//  - explicit method+path ALLOWLIST — only the customer storefront surface is
+//    proxied; admin/seller/payment/loyalty/notification routes and the
+//    cookie-owning auth flows (verify-otp/refresh/logout live in /api/auth/*)
+//    are unreachable through here (404, indistinguishable from unknown paths)
+//  - forwards the client IP chain (x-forwarded-for) so backend per-IP rate
+//    limits key on the real user instead of this server's egress IP
+//  - request body cap (100 KB) and upstream timeout (15 s)
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -18,6 +26,42 @@ export const runtime = 'nodejs';
 const BACKEND_API_BASE = (
   process.env.BACKEND_API_BASE ?? 'http://localhost:3000/api/v1'
 ).replace(/\/$/, '');
+
+const MAX_BODY_BYTES = 100_000;
+const UPSTREAM_TIMEOUT_MS = 15_000;
+
+// method → allowed path patterns (matched against the decoded /-joined path,
+// no leading slash, no query). Keep in sync with @chirawa/api-client usage.
+const ALLOW: Record<string, RegExp[]> = {
+  GET: [
+    /^catalog\/(shops|products|feed|daily-essentials|specials|categories|bestsellers|category-images|master)(\/.*)?$/,
+    /^search(\/suggest)?$/,
+    /^cart$/,
+    /^users\/me\/addresses(\/.*)?$/,
+    /^orders(\/.*)?$/,
+    /^delivery\/orders\/[^/]+\/rider-location$/,
+  ],
+  POST: [
+    /^auth\/send-otp$/,
+    /^cart\/items$/,
+    /^pricing\/preview$/,
+    /^users\/me\/addresses(\/[^/]+\/default)?$/,
+    /^orders$/,
+    /^orders\/[^/]+\/(cancel|rate)$/,
+    /^geo\/(reverse|autocomplete|place)$/,
+  ],
+  PATCH: [/^cart\/items\/[^/]+$/, /^orders\/[^/]+\/(delivery-address|receiver)$/],
+  PUT: [/^users\/me\/addresses\/[^/]+$/],
+  DELETE: [/^cart$/, /^cart\/items\/[^/]+$/, /^users\/me\/addresses\/[^/]+$/],
+};
+
+function isAllowed(method: string, path: string): boolean {
+  return (ALLOW[method] ?? []).some((re) => re.test(path));
+}
+
+function jsonError(status: number, code: string, message: string): NextResponse {
+  return NextResponse.json({ success: false, error: { code, message } }, { status });
+}
 
 // Request headers we forward browser → backend. (Host/cookie/connection are not.)
 const FORWARD_REQ_HEADERS = ['content-type', 'idempotency-key', 'accept', 'accept-language'];
@@ -28,6 +72,12 @@ function buildHeaders(req: NextRequest, token: string | null): Headers {
     const v = req.headers.get(name);
     if (v) h.set(name, v);
   }
+  // Real client IP chain (when fronted by nginx/CDN) so backend per-IP rate
+  // limits and OTP abuse caps key on the user, not this server.
+  const xff = req.headers.get('x-forwarded-for');
+  if (xff) h.set('x-forwarded-for', xff);
+  const realIp = req.headers.get('x-real-ip');
+  if (realIp) h.set('x-real-ip', realIp);
   if (token) h.set('authorization', `Bearer ${token}`);
   return h;
 }
@@ -50,6 +100,7 @@ async function tryRefresh(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
       cache: 'no-store',
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
     if (!r.ok) return null;
     const data = (await r.json()) as { tokens?: { accessToken?: string; refreshToken?: string } };
@@ -67,13 +118,22 @@ async function handle(
   ctx: { params: Promise<{ path: string[] }> },
 ): Promise<NextResponse> {
   const { path } = await ctx.params;
-  const targetPath = '/' + (path ?? []).map(encodeURIComponent).join('/');
-  const target = `${BACKEND_API_BASE}${targetPath}${req.nextUrl.search}`;
+  const segments = (path ?? []).map(encodeURIComponent);
+  const joined = segments.join('/');
 
   const method = req.method.toUpperCase();
+  if (!isAllowed(method, joined)) {
+    return jsonError(404, 'NOT_FOUND', 'Route not found');
+  }
+
+  const target = `${BACKEND_API_BASE}/${joined}${req.nextUrl.search}`;
+
   const hasBody = method !== 'GET' && method !== 'HEAD';
   // Buffer the body so it can be replayed on a post-refresh retry.
   const bodyBuf = hasBody ? await req.arrayBuffer() : undefined;
+  if (bodyBuf !== undefined && bodyBuf.byteLength > MAX_BODY_BYTES) {
+    return jsonError(413, 'PAYLOAD_TOO_LARGE', 'Request body too large');
+  }
 
   const store = await cookies();
   const accessToken = store.get(AUTH_COOKIES.access)?.value ?? null;
@@ -85,19 +145,29 @@ async function handle(
       headers: buildHeaders(req, token),
       redirect: 'manual',
       cache: 'no-store',
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     };
     if (bodyBuf !== undefined) init.body = bodyBuf;
     return fetch(target, init);
   };
 
-  let backendRes = await send(accessToken);
+  let backendRes: Response;
+  try {
+    backendRes = await send(accessToken);
+  } catch {
+    return jsonError(504, 'UPSTREAM_TIMEOUT', 'Backend did not respond in time');
+  }
 
-  // Refresh-on-401 → rotate cookies → retry once (dormant with no cookies).
+  // Refresh-on-401 → rotate cookies → retry once.
   let rotated: { accessToken: string; refreshToken: string } | null = null;
   if (backendRes.status === 401 && refreshToken) {
     rotated = await tryRefresh(refreshToken);
     if (rotated) {
-      backendRes = await send(rotated.accessToken);
+      try {
+        backendRes = await send(rotated.accessToken);
+      } catch {
+        return jsonError(504, 'UPSTREAM_TIMEOUT', 'Backend did not respond in time');
+      }
     } else {
       // Unrecoverable session — clear cookies and surface the 401.
       const res401 = passthrough(backendRes);
