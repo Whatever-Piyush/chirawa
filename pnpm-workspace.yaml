@@ -9,3 +9,4 @@ allowBuilds:
   prisma: true
   protobufjs: true
   react-native-screens: true
+  sharp: true
