@@ -47,12 +47,17 @@ const ALLOW: Record<string, RegExp[]> = {
     /^pricing\/preview$/,
     /^users\/me\/addresses(\/[^/]+\/default)?$/,
     /^orders$/,
-    /^orders\/[^/]+\/(cancel|rate)$/,
+    /^orders\/[^/]+\/rating$/,
     /^geo\/(reverse|autocomplete|place)$/,
   ],
   PATCH: [/^cart\/items\/[^/]+$/, /^orders\/[^/]+\/(delivery-address|receiver)$/],
   PUT: [/^users\/me\/addresses\/[^/]+$/],
-  DELETE: [/^cart$/, /^cart\/items\/[^/]+$/, /^users\/me\/addresses\/[^/]+$/],
+  DELETE: [
+    /^cart$/,
+    /^cart\/items\/[^/]+$/,
+    /^users\/me\/addresses\/[^/]+$/,
+    /^orders\/[^/]+$/, // cancel = DELETE /orders/:id (ownership enforced backend-side)
+  ],
 };
 
 function isAllowed(method: string, path: string): boolean {
