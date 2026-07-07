@@ -23,6 +23,8 @@ import type {
   SearchSuggestResponse,
   SearchFilters,
   LoyaltyResponse,
+  MeResponse,
+  UpdateMyProfileRequest,
 } from '@chirawa/types';
 
 export class ApiError extends Error {
@@ -350,6 +352,16 @@ export class ChirawaApiClient {
     orderId: string,
   ): Promise<{ location: { lat: number; lng: number; ageMs: number } | null }> {
     return this.request('GET', `/delivery/orders/${orderId}/rider-location`);
+  }
+
+  // ─── Profile ─────────────────────────────────────────────────────────────
+
+  async getMe(): Promise<MeResponse> {
+    return this.request<MeResponse>('GET', '/users/me');
+  }
+
+  async updateMyProfile(data: UpdateMyProfileRequest): Promise<MeResponse> {
+    return this.request<MeResponse>('PUT', '/users/me', data);
   }
 
   // ─── Loyalty ─────────────────────────────────────────────────────────────

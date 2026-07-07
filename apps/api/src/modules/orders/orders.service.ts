@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
-import type { PlaceOrderInput } from './orders.schema';
+import type { PlaceOrderInput, ListOrdersQuery } from './orders.schema';
 import { calculateDeliveryFee, getActiveFeeRuleVersion } from '../pricing/pricing.service';
 import { validatePromo, resolveAutoPromo, type ValidatedPromo } from '../promotions/promotions.service';
 import { createResolverService, type AggLine } from '../orders/resolver.service';
@@ -444,7 +444,10 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     return { ...order, rider, eta, refund };
   }
 
-  async function getMyOrders(userId: string, role: string, riderProfileId: string) {
+  async function getMyOrders(
+    userId: string, role: string, riderProfileId: string,
+    opts?: ListOrdersQuery,
+  ) {
     let where: Record<string, unknown> = {};
 
     if (role === 'customer') {
@@ -461,10 +464,17 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       where = { shopId: sellerProfile.shop.id };
     }
 
+    // A4-impl-1: honor page/limit so history isn't capped at the newest 50.
+    // Param-less calls keep the legacy contract (page 1 × 50). The clamps are a
+    // service-level backstop — the route schema already rejects out-of-range input.
+    const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 50);
+    const page  = Math.max(opts?.page ?? 1, 1);
+
     return prisma.order.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      take:    50,
+      skip:    (page - 1) * limit,
+      take:    limit,
       include: { items: { select: { productId: true, productName: true, quantity: true, unitPrice: true } } },
     });
   }

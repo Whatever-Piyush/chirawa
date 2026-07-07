@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { currentISTHour, currentISTTimeHHMM, isWithinOperatingHours } from '../operating-hours';
+import { describe, it, expect, vi } from 'vitest';
+import { currentISTHour, currentISTTimeHHMM, isWithinOperatingHours, hourFromEnv } from '../operating-hours';
 import { computeIsOpen } from '../../../modules/catalog/catalog.service';
 
 // P1-4 regression tests. Every case uses a FIXED UTC instant with a known IST
@@ -89,5 +89,53 @@ describe('OPERATING_HOURS_DISABLED override (load-test harness, Phase 6)', () =>
       delete process.env.OPERATING_HOURS_DISABLED;
       process.env.NODE_ENV = prevEnv;
     }
+  });
+});
+
+describe('hourFromEnv (business-hours override parsing)', () => {
+  it('falls back to the launch default when unset/blank/invalid', () => {
+    expect(hourFromEnv(undefined, 9)).toBe(9);
+    expect(hourFromEnv('', 9)).toBe(9);
+    expect(hourFromEnv('  ', 20)).toBe(20);
+    expect(hourFromEnv('notanumber', 9)).toBe(9);
+    expect(hourFromEnv('9.5', 9)).toBe(9);   // non-integer → default (no silent rounding)
+    expect(hourFromEnv('-1', 20)).toBe(20);  // out of range
+    expect(hourFromEnv('25', 20)).toBe(20);  // out of range
+  });
+
+  it('accepts valid 0–24 overrides', () => {
+    expect(hourFromEnv('0', 9)).toBe(0);
+    expect(hourFromEnv('24', 20)).toBe(24);
+    expect(hourFromEnv('11', 9)).toBe(11);
+  });
+});
+
+describe('OPERATING_HOURS_* env override (building phase 24/7)', () => {
+  // The module reads env at load, so exercise a fresh instance per case.
+  const freshWith = async (env: Record<string, string | undefined>) => {
+    vi.resetModules();
+    const prev: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(env)) { prev[k] = process.env[k]; if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    try {
+      return await import('../operating-hours');
+    } finally {
+      for (const [k, v] of Object.entries(prev)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+      vi.resetModules();
+    }
+  };
+  const utc = (h: number, m = 0) => new Date(Date.UTC(2026, 6, 15, h, m));
+
+  it('default (no override) keeps the 9 AM – 8 PM launch window + label', async () => {
+    const m = await freshWith({ OPERATING_HOURS_OPEN: undefined, OPERATING_HOURS_CLOSE: undefined });
+    expect(m.OPERATING_HOURS_LABEL).toBe('9 AM – 8 PM');
+    expect(m.isWithinOperatingHours(utc(14, 30))).toBe(false); // 20:00 IST — closed
+    expect(m.isWithinOperatingHours(utc(6, 0))).toBe(true);    // 11:30 IST — open
+  });
+
+  it('OPEN=0 / CLOSE=24 runs 24/7 in ANY environment (incl. production) and labels "24/7"', async () => {
+    const m = await freshWith({ NODE_ENV: 'production', OPERATING_HOURS_OPEN: '0', OPERATING_HOURS_CLOSE: '24' });
+    expect(m.OPERATING_HOURS_LABEL).toBe('24/7');
+    expect(m.isWithinOperatingHours(utc(20, 0))).toBe(true);  // 01:30 IST — closed under default, open 24/7
+    expect(m.isWithinOperatingHours(utc(14, 30))).toBe(true); // 20:00 IST — closed under default, open 24/7
   });
 });

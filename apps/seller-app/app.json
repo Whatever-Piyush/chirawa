@@ -2,7 +2,7 @@
   "expo": {
     "name": "Bringly Seller",
     "slug": "chirawa-seller",
-    "owner": "aaaaaadiii",
+    "owner": "piyushlatta",
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
@@ -48,11 +48,6 @@
           "cameraPermission": "Bringly ko product ki photo lene ke liye camera chahiye."
         }
       ]
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "aaef7351-4246-4a3c-b64d-151da185e187"
-      }
-    }
+    ]
   }
 }

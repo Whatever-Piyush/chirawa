@@ -20,6 +20,7 @@ import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api.service';
 import { FEATURES } from '../../config/features';
+import { SUPPORT_WHATSAPP_NUMBER } from '../../config/support';
 import type { LoyaltyResponse } from '@chirawa/types';
 import type { RootStackParamList, TabParamList } from '../../navigation/AppNavigator';
 import { Text, FauxGradient } from '../../components/ui';
@@ -33,8 +34,6 @@ const TIER_META: Record<string, { emoji: string; color: string }> = {
   silver: { emoji: '🥈', color: '#9CA3AF' },
   gold:   { emoji: '🥇', color: '#F59E0B' },
 };
-
-const WHATSAPP_NUMBER = '919999999999';
 
 type NavProp = CompositeNavigationProp<
   BottomTabNavigationProp<TabParamList>,
@@ -163,7 +162,7 @@ export default function ProfileScreen() {
 
   const handleHelp = () => {
     const msg = encodeURIComponent('Hi, I need help with Bringly app');
-    void Linking.openURL(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`);
+    void Linking.openURL(`https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${msg}`);
   };
 
   const handleShare = () => {
@@ -176,7 +175,7 @@ export default function ProfileScreen() {
     const msg = encodeURIComponent(
       "Hi! I'd like to list my shop on Bringly. My shop name is:",
     );
-    void Linking.openURL(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`);
+    void Linking.openURL(`https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${msg}`);
   };
 
   const handlePickMode = (next: ThemeMode) => {

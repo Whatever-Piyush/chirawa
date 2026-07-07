@@ -248,6 +248,7 @@ model Shop {
   products    Product[]
   orders      Order[]
   settlements Settlement[]
+  recoveryOffers RecoveryOffer[] // Seller Sprint 5 Phase A — recovery offers this shop received as a partner
 
   @@index([isActive])
   @@index([isOpen])
@@ -590,6 +591,7 @@ model Order {
   statusHistory       OrderStatusHistory[]
   payments            Payment[]
   deliveryAssignments DeliveryAssignment[]
+  recoveryNeeds       RecoveryNeed[]       // Seller Sprint 5 Phase A — recovery episodes opened on this order
 
   @@index([customerId, createdAt(sort: Desc)])
   @@index([status, createdAt])
@@ -637,6 +639,7 @@ model OrderItem {
 
   order   Order   @relation(fields: [orderId], references: [id])
   product Product @relation(fields: [productId], references: [id])
+  recoveryLines RecoveryNeedLine[] // Seller Sprint 5 Phase A — this line's presence in a recovery need
 
   @@index([orderId])
   @@map("order_items")
@@ -1069,4 +1072,121 @@ model SearchAlias {
 
   @@index([term])
   @@map("search_aliases")
+}
+
+// ─── Seller Sprint 5 Phase A — Distributed Recovery / Fulfillment Engine ────────
+// Production foundation for Recovery Orders: domain models, numbering, state
+// machine, and the immutable audit event record. Additive and inert — intake,
+// reservations, partner selection, routing, settlement, notifications, and UI are
+// LATER phases (S5.1+). Nothing here mutates existing order/inventory behaviour.
+
+// Lifecycle of a single recovery episode (Architecture §12). Terminal states:
+// fulfilled, refunded, cancelled.
+enum RecoveryNeedState {
+  open
+  searching
+  offered
+  accepted
+  ready
+  picked_up
+  fulfilled
+  exhausted
+  refunded
+  cancelled
+}
+
+// Outcome of one recovery offer (Architecture §12). `pending` = live/outstanding.
+enum RecoveryOfferOutcome {
+  pending
+  accepted
+  rejected
+  timed_out
+}
+
+// One originating unavailability episode on a parent (per-shop child) order. Holds
+// the missing lines, a stable display number (parent base + a 1-based recovery
+// suffix, e.g. 39-1 — stable across every offer within the need), lifecycle state,
+// and its offers + audit events.
+model RecoveryNeed {
+  id            String            @id @default(uuid()) @db.Uuid
+  parentOrderId String            @map("parent_order_id") @db.Uuid
+  // sequence = the recovery suffix (1-based per parent order). number = the display
+  // string "<base>-<sequence>". Both are fixed at creation and never change.
+  sequence      Int
+  number        String            @db.VarChar(40)
+  state         RecoveryNeedState @default(open)
+  // Deadline of the CURRENT outstanding offer's window; null unless state=offered.
+  deadlineAt    DateTime?         @map("deadline_at")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  parentOrder Order              @relation(fields: [parentOrderId], references: [id])
+  lines       RecoveryNeedLine[]
+  offers      RecoveryOffer[]
+  events      RecoveryEvent[]
+
+  // One recovery suffix per parent order — closes the numbering race so two
+  // concurrent needs can never claim the same suffix (the service tolerates the
+  // resulting P2002 by re-counting and retrying).
+  @@unique([parentOrderId, sequence])
+  @@index([parentOrderId])
+  @@index([state])
+  @@map("recovery_needs")
+}
+
+// A missing line inside a recovery need — references the parent order's item and
+// the quantity being recovered.
+model RecoveryNeedLine {
+  id          String @id @default(uuid()) @db.Uuid
+  needId      String @map("need_id") @db.Uuid
+  orderItemId String @map("order_item_id") @db.Uuid
+  quantity    Int
+
+  need      RecoveryNeed @relation(fields: [needId], references: [id], onDelete: Cascade)
+  orderItem OrderItem    @relation(fields: [orderItemId], references: [id])
+
+  @@index([needId])
+  @@map("recovery_need_lines")
+}
+
+// One immutable record per partner asked (Architecture §11). Dispatch is strictly
+// sequential — at most one `pending` offer per need (enforced by a partial unique
+// index in the migration). Outcome is written exactly once (pending → terminal);
+// rows are never renumbered or deleted.
+model RecoveryOffer {
+  id            String               @id @default(uuid()) @db.Uuid
+  needId        String               @map("need_id") @db.Uuid
+  partnerShopId String               @map("partner_shop_id") @db.Uuid
+  offeredAt     DateTime             @default(now()) @map("offered_at")
+  expiresAt     DateTime             @map("expires_at")
+  outcome       RecoveryOfferOutcome @default(pending)
+  decidedAt     DateTime?            @map("decided_at")
+
+  need        RecoveryNeed    @relation(fields: [needId], references: [id], onDelete: Cascade)
+  partnerShop Shop            @relation(fields: [partnerShopId], references: [id])
+  events      RecoveryEvent[]
+
+  @@index([needId, offeredAt])
+  @@map("recovery_offers")
+}
+
+// Append-only recovery event record — the authoritative audit trail (Architecture
+// §17). `type` is an extensible string; Phase A emits line_claimed, need_opened,
+// state_changed, offer_sent, offer_accepted, offer_rejected, offer_timed_out.
+// Never updated or deleted.
+model RecoveryEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  needId    String   @map("need_id") @db.Uuid
+  offerId   String?  @map("offer_id") @db.Uuid
+  type      String   @db.VarChar(40)
+  actorId   String?  @map("actor_id") @db.Uuid
+  actorRole String?  @map("actor_role") @db.VarChar(20)
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  need  RecoveryNeed   @relation(fields: [needId], references: [id], onDelete: Cascade)
+  offer RecoveryOffer? @relation(fields: [offerId], references: [id])
+
+  @@index([needId, createdAt])
+  @@map("recovery_events")
 }

@@ -77,6 +77,51 @@ export async function validatePromo(
   return { promoId: promo.id, code: promo.code, type: promo.type as PromoType, discountPaise };
 }
 
+// The promo half of the checkout preview. MUST mirror order creation
+// (orders.service.placeOrder) exactly: a typed code is validated — soft-failing
+// into `promoError` so the bill still renders — otherwise first-time customers
+// get FIRSTORDER auto-applied. Like creation, the promo applies at the
+// whole-cart subtotal regardless of how many shops the cart spans; the old
+// single-shop gate in the preview route made multi-shop bills show a total the
+// order was then not charged (A3 parity fix).
+export interface PromoPreviewResult {
+  discount:         number;
+  appliedPromoCode: string | null;
+  promoError:       string | null;
+}
+
+export async function previewPromo(
+  prisma: PrismaClient,
+  ctx: {
+    promoCode?:        string;
+    userId:            string;
+    cartSubtotalPaise: number;
+    deliveryFeePaise:  number;
+  },
+): Promise<PromoPreviewResult> {
+  const base = {
+    userId:            ctx.userId,
+    cartSubtotalPaise: ctx.cartSubtotalPaise,
+    deliveryFeePaise:  ctx.deliveryFeePaise,
+  };
+  if (ctx.promoCode) {
+    try {
+      const v = await validatePromo(prisma, { code: ctx.promoCode, ...base });
+      return { discount: v.discountPaise, appliedPromoCode: v.code, promoError: null };
+    } catch (e) {
+      return {
+        discount:         0,
+        appliedPromoCode: null,
+        promoError:       e instanceof Error ? e.message : 'Promo code valid nahi hai',
+      };
+    }
+  }
+  const auto = await resolveAutoPromo(prisma, base);
+  return auto
+    ? { discount: auto.discountPaise, appliedPromoCode: auto.code, promoError: null }
+    : { discount: 0, appliedPromoCode: null, promoError: null };
+}
+
 // First-time customers (no non-cancelled orders) get FIRSTORDER auto-applied at
 // checkout without typing anything. Returns null when not eligible or when the
 // promo is missing/min-cart-not-met — auto-apply must never block checkout.

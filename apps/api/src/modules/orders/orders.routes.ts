@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { createOrdersService } from './orders.service';
 import { createPaymentsService } from '../payments/payments.service';
-import { placeOrderSchema, rateOrderSchema, codCollectedSchema, type PlaceOrderInput, type RateOrderInput } from './orders.schema';
+import { placeOrderSchema, rateOrderSchema, codCollectedSchema, listOrdersQuerySchema, type PlaceOrderInput, type RateOrderInput } from './orders.schema';
 import { authenticate, requireRole } from '../../shared/middleware/auth.middleware';
 import { ValidationError } from '../../shared/errors/app-errors';
 import { runIdempotent, readIdempotencyKey } from '../../shared/utils/idempotency';
@@ -48,9 +48,14 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
     return reply.status(result.status).send(result.body);
   });
 
-  // GET /api/v1/orders
-  app.get('/', async (request, reply) => {
-    const orders = await ordersService.getMyOrders(request.auth!.userId, request.auth!.role, request.auth!.profileId);
+  // GET /api/v1/orders?page=&limit= — params optional; absent = legacy newest-50
+  // (A4-impl-1: real pagination so order #51+ stays reachable).
+  app.get<{ Querystring: { page?: string; limit?: string } }>('/', async (request, reply) => {
+    const parsed = listOrdersQuerySchema.safeParse(request.query);
+    if (!parsed.success) throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid pagination');
+    const orders = await ordersService.getMyOrders(
+      request.auth!.userId, request.auth!.role, request.auth!.profileId, parsed.data,
+    );
     return reply.send(orders);
   });
 

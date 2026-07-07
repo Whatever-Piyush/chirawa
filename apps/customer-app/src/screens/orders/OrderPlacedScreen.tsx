@@ -14,7 +14,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'OrderPlaced'>;
 const AUTO_ADVANCE_MS = 2000;
 
 export default function OrderPlacedScreen({ navigation, route }: Props) {
-  const { orderId, groupId, shops, totalAmount } = route.params;
+  const { orderId, groupId, shops, totalAmount, savedPaise } = route.params;
   // Multi-shop: the cart was split into one order per shop. Show the per-shop
   // breakdown + grand total so the customer sees exactly what went where.
   const isGroup = !!groupId && !!shops && shops.length > 1;
@@ -100,6 +100,15 @@ export default function OrderPlacedScreen({ navigation, route }: Props) {
               <Text style={styles.orderIdText}>#{orderId.slice(-6).toUpperCase()}</Text>
             </View>
           )}
+
+          {/* Savings recap (A3) — carried from the checkout bill's discount */}
+          {typeof savedPaise === 'number' && savedPaise > 0 && (
+            <View style={styles.savedPill}>
+              <Text style={styles.savedPillText}>
+                {t('cart.saved')}{Math.round(savedPaise / 100)}{t('cart.savedSuffix')} 🎉
+              </Text>
+            </View>
+          )}
         </Animated.View>
       </View>
 
@@ -141,6 +150,12 @@ const makeStyles = (Colors: ColorPalette) =>
       paddingHorizontal: Spacing.md, paddingVertical: 6, marginTop: Spacing.lg,
     },
     orderIdText: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textSecondary, letterSpacing: 0.5 },
+
+    savedPill: {
+      backgroundColor: Colors.successLight, borderRadius: Radius.full,
+      paddingHorizontal: Spacing.lg, paddingVertical: 8, marginTop: Spacing.md,
+    },
+    savedPillText: { color: Colors.success, fontWeight: FontWeight.heavy, fontSize: FontSize.sm },
 
     // Multi-shop per-shop breakdown card.
     breakdownCard: {

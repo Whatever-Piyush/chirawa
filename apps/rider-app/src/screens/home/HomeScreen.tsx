@@ -1,12 +1,16 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   Modal, Alert, ActivityIndicator, Vibration,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { io, type Socket } from 'socket.io-client';
 import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
 import { RiderApi } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
+import { setRiderOnline } from '../../hooks/useRiderLocationPublisher';
+import type { MainTabParamList } from '../../navigation/AppNavigator';
 import { DEV_HOST } from '../../config/devHost';
 
 const SOCKET_URL = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chirawa.in';
@@ -19,19 +23,25 @@ interface Assignment {
 
 export default function HomeScreen() {
   const { state }                   = useAuth();
+  const navigation                  = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const [isOnline,   setIsOnline]   = useState(false);
   const [toggling,   setToggling]   = useState(false);
   const [assignment, setAssignment] = useState<Assignment | null>(null);
-  const [accepting,  setAccepting]  = useState(false);
-  const [timer,      setTimer]      = useState(60);
-  const socketRef  = useRef<Socket | null>(null);
-  const timerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
-  const vibRef     = useRef<ReturnType<typeof setInterval> | null>(null);
+  const socketRef     = useRef<Socket | null>(null);
+  const vibRef        = useRef<ReturnType<typeof setInterval> | null>(null);
+  const vibTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load current availability on mount
+  // Load current availability on mount. Mirrors into the location publisher's
+  // module store so going offline stops rider:location emits mid-batch; the
+  // cleanup resets the mirror on logout/session change (module state outlives us).
   useEffect(() => {
     if (!state.token) return;
-    void RiderApi.getAvailability(state.token).then((r) => setIsOnline(r.status === 'online')).catch(() => {});
+    void RiderApi.getAvailability(state.token).then((r) => {
+      const online = r.status === 'online';
+      setIsOnline(online);
+      setRiderOnline(online);
+    }).catch(() => {});
+    return () => setRiderOnline(false);
   }, [state.token]);
 
   // Socket.io
@@ -40,32 +50,22 @@ export default function HomeScreen() {
     const socket = io(SOCKET_URL, { auth: { token: state.token }, transports: ['websocket'] });
     socket.on('order:assigned', (data: Assignment) => {
       setAssignment(data);
-      setTimer(60);
       startAlarm();
     });
     socketRef.current = socket;
     return () => { socket.disconnect(); stopAlarm(); };
   }, [state.token]);
 
-  // 60-second countdown
-  useEffect(() => {
-    if (!assignment) return;
-    timerRef.current = setInterval(() => {
-      setTimer((t) => {
-        if (t <= 1) { stopAlarm(); setAssignment(null); return 60; }
-        return t - 1;
-      });
-    }, 1000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [assignment]);
-
   function startAlarm() {
+    stopAlarm(); // a second assignment while one is showing must not leak the old interval
     vibRef.current = setInterval(() => Vibration.vibrate([400, 400, 400]), 1200);
+    // Same 60s cap the old countdown enforced — just without the fake deadline UI.
+    vibTimeoutRef.current = setTimeout(stopAlarm, 60000);
   }
   function stopAlarm() {
     Vibration.cancel();
-    if (vibRef.current)  { clearInterval(vibRef.current);  vibRef.current  = null; }
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (vibRef.current)        { clearInterval(vibRef.current);      vibRef.current        = null; }
+    if (vibTimeoutRef.current) { clearTimeout(vibTimeoutRef.current); vibTimeoutRef.current = null; }
   }
 
   async function toggleAvailability() {
@@ -75,6 +75,7 @@ export default function HomeScreen() {
       const newStatus = isOnline ? 'offline' : 'online';
       await RiderApi.setAvailability(newStatus, state.token);
       setIsOnline(!isOnline);
+      setRiderOnline(!isOnline);
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Update nahi hua');
     } finally {
@@ -82,24 +83,12 @@ export default function HomeScreen() {
     }
   }
 
-  async function acceptOrder() {
-    if (!assignment || !state.token) return;
-    setAccepting(true);
-    stopAlarm();
-    try {
-      // Accept is handled by backend assigning — just dismiss and go to delivery tab
-      setAssignment(null);
-      Alert.alert('✅ Order Accept!', 'Shop pe pahuncho aur pickup karo.');
-    } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Accept nahi hua');
-    } finally {
-      setAccepting(false);
-    }
-  }
-
-  function declineOrder() {
+  // The backend already assigned this order to us (there is no accept/reject
+  // API) — the modal is a notification, not a choice. Acknowledge and go.
+  function goToDelivery() {
     stopAlarm();
     setAssignment(null);
+    navigation.navigate('Delivery');
   }
 
   return (
@@ -134,15 +123,11 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Incoming order modal — 60 second timer */}
+      {/* Assignment notification — the order is already ours, no accept/decline */}
       <Modal visible={!!assignment} animationType="slide" statusBarTranslucent>
         <View style={styles.orderModal}>
-          <Text style={styles.orderModalTitle}>📦 NAYI DELIVERY!</Text>
-
-          <View style={styles.timerCircle}>
-            <Text style={styles.timerText}>{timer}</Text>
-            <Text style={styles.timerLabel}>seconds</Text>
-          </View>
+          <Text style={styles.orderModalTitle}>🛵 Nayi delivery aayi hai!</Text>
+          <Text style={styles.orderModalSub}>Yeh order aapko assign ho gaya hai</Text>
 
           <View style={styles.orderInfo}>
             <Text style={styles.orderInfoShop}>🏪 {assignment?.shopName}</Text>
@@ -157,15 +142,8 @@ export default function HomeScreen() {
             </Text>
           </View>
 
-          <TouchableOpacity style={styles.acceptBtn} onPress={acceptOrder} disabled={accepting}>
-            {accepting
-              ? <ActivityIndicator color={Colors.white} />
-              : <Text style={styles.acceptBtnText}>✅ ACCEPT KAREIN</Text>
-            }
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.declineBtn} onPress={declineOrder}>
-            <Text style={styles.declineBtnText}>❌ Decline</Text>
+          <TouchableOpacity style={styles.acceptBtn} onPress={goToDelivery}>
+            <Text style={styles.acceptBtnText}>Chalo — pickup karo</Text>
           </TouchableOpacity>
         </View>
       </Modal>
@@ -192,9 +170,7 @@ const styles = StyleSheet.create({
   // Modal
   orderModal: { flex: 1, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center', padding: Spacing.xl, gap: Spacing.xl },
   orderModalTitle: { fontSize: FontSize.xxl, fontWeight: '900', color: Colors.white },
-  timerCircle: { width: 120, height: 120, borderRadius: 60, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
-  timerText:   { fontSize: FontSize.xxxl, fontWeight: '900', color: Colors.white },
-  timerLabel:  { fontSize: FontSize.xs, color: 'rgba(255,255,255,0.7)' },
+  orderModalSub:   { fontSize: FontSize.md, color: 'rgba(255,255,255,0.85)', marginTop: -Spacing.md },
   orderInfo:   { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: Radius.lg, padding: Spacing.lg, width: '100%', gap: Spacing.sm },
   orderInfoShop:   { fontSize: FontSize.lg, fontWeight: '700', color: Colors.white },
   orderInfoAddr:   { fontSize: FontSize.sm, color: 'rgba(255,255,255,0.8)' },
@@ -204,6 +180,4 @@ const styles = StyleSheet.create({
   upiTag:   { color: 'rgba(255,255,255,0.8)' },
   acceptBtn: { backgroundColor: Colors.white, borderRadius: Radius.lg, padding: Spacing.xl, width: '100%', alignItems: 'center' },
   acceptBtnText: { fontSize: FontSize.xl, fontWeight: '900', color: Colors.primary },
-  declineBtn:    { borderWidth: 2, borderColor: Colors.white, borderRadius: Radius.lg, padding: Spacing.lg, width: '100%', alignItems: 'center' },
-  declineBtnText: { color: Colors.white, fontSize: FontSize.lg, fontWeight: '700' },
 });

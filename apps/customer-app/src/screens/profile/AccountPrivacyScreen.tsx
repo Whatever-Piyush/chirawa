@@ -7,8 +7,8 @@ import { useTheme, type ColorPalette } from '../../theme/ThemeContext';
 import { useT } from '@chirawa/i18n';
 import { useAuth } from '../../context/AuthContext';
 import { Text } from '../../components/ui';
+import { SUPPORT_WHATSAPP_NUMBER } from '../../config/support';
 
-const WHATSAPP_NUMBER = '919999999999';
 const PRIVACY_URL = 'https://chirawa.in/privacy';
 const TERMS_URL = 'https://chirawa.in/terms';
 
@@ -28,7 +28,7 @@ export default function AccountPrivacyScreen() {
 
   const openWhatsApp = (msgKey: string) => {
     const msg = encodeURIComponent(t(msgKey));
-    void Linking.openURL(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`);
+    void Linking.openURL(`https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${msg}`);
   };
 
   const handleDelete = () => {

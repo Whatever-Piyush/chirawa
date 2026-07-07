@@ -14,6 +14,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useAddresses } from '../../context/AddressContext';
 import LocationSheet from '../../components/location/LocationSheet';
 import LocationPermissionModal from '../../components/location/LocationPermissionModal';
+import { useActiveOrders } from '../../hooks/useActiveOrders';
+import ActiveOrdersStrip from './ActiveOrdersStrip';
 import Header from './Header';
 import SearchBar from './SearchBar';
 import DailyEssentialsShelf from './DailyEssentialsShelf';
@@ -57,6 +59,10 @@ export default function HomeScreen({ navigation }: Props) {
   // piyush: app-open "location off" prompt.
   const [permModal, setPermModal] = useState(false);
 
+  // Milestone A1: orders in flight — pinned to the top of the feed so tracking
+  // is always one tap away after any restart/return (live via the user socket).
+  const { entries: activeOrders, refresh: refreshActiveOrders } = useActiveOrders();
+
   const loadEssentials = useCallback(async () => {
     try {
       setEssentials(await fetchDailyEssentials());
@@ -81,8 +87,11 @@ export default function HomeScreen({ navigation }: Props) {
     void loadAddresses(); void loadEssentials(); void loadBestsellers(); void loadCategoryImages();
   }, [loadAddresses, loadEssentials, loadBestsellers, loadCategoryImages]);
   useEffect(
-    () => navigation.addListener('focus', () => { void loadAddresses(); }),
-    [navigation, loadAddresses],
+    () => navigation.addListener('focus', () => {
+      void loadAddresses();
+      void refreshActiveOrders();
+    }),
+    [navigation, loadAddresses, refreshActiveOrders],
   );
 
   // On app open, prompt to enable location if permission is off (once per mount).
@@ -123,9 +132,9 @@ export default function HomeScreen({ navigation }: Props) {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([loadEssentials(), loadAddresses(), loadBestsellers(), loadCategoryImages()]);
+    await Promise.all([loadEssentials(), loadAddresses(), loadBestsellers(), loadCategoryImages(), refreshActiveOrders()]);
     setRefreshing(false);
-  }, [loadEssentials, loadAddresses, loadBestsellers, loadCategoryImages]);
+  }, [loadEssentials, loadAddresses, loadBestsellers, loadCategoryImages, refreshActiveOrders]);
 
   const addressLine = activeAddress
     ? `${activeAddress.street}, ${activeAddress.locality}`
@@ -184,6 +193,20 @@ export default function HomeScreen({ navigation }: Props) {
         }
       >
         {closed && <ClosedBanner />}
+        {activeOrders.length > 0 && (
+          <ActiveOrdersStrip
+            entries={activeOrders}
+            onPressEntry={(entry) =>
+              navigation.navigate(
+                'OrderTracking',
+                entry.groupId
+                  ? { orderId: entry.orderId, groupId: entry.groupId }
+                  : { orderId: entry.orderId },
+              )
+            }
+            onPressViewAll={() => navigation.navigate('MainTabs', { screen: 'OrderHistory' })}
+          />
+        )}
         <DailyEssentialsShelf tiles={essentials} loading={essLoading} />
         <BestsellersSection clusters={bestsellers} onSelect={openCategory} />
         <CategorySections categories={categories} onSelect={openCategory} imagesByCategory={categoryImages} />

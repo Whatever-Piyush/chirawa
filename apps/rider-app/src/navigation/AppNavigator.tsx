@@ -24,8 +24,15 @@ export type RootStackParamList = {
   MainTabs:  undefined;
 };
 
+export type MainTabParamList = {
+  Home:     undefined;
+  Delivery: undefined;
+  Earnings: undefined;
+  Profile:  undefined;
+};
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const Tab   = createBottomTabNavigator();
+const Tab   = createBottomTabNavigator<MainTabParamList>();
 
 function MainTabs() {
   return (
