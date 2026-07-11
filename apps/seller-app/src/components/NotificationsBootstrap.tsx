@@ -18,6 +18,11 @@ function handleNotificationTap(data: NotificationData): void {
     navigationRef.navigate('MainTabs', { screen: 'Settlement' });
     return;
   }
+  // Morning verification card (Inventory Engine S5) — the 9 AM stock-check push.
+  if (data.screen === 'MorningCard') {
+    navigationRef.navigate('MorningCard');
+    return;
+  }
   // New order, paid, cancelled, etc. → orders queue. If the notification carries
   // an orderId (it always does for order-related pushes), pass it through so the
   // queue can pop the Accept/Reject modal for that specific order on arrival.

@@ -1,5 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { haversineMeters, type LatLng } from '../../shared/utils/geo';
+import { confidence as beliefConfidence, effectiveQty as beliefEffectiveQty } from '../inventory/belief';
+import { getInventoryConfig } from '../inventory/inventory.config';
 
 // ─── Checkout resolver (Catalog Engine Phase 5) ───────────────────────────────
 // The Phase 4 feed shows one aggregated tile per master at the LOWEST in-stock
@@ -15,7 +17,11 @@ export interface Candidate {
   shopId:    string;
   productId: string;
   price:     number;        // paise — this shop's current price
-  stockQty:  number | null; // null = untracked (treated as unlimited); number = must cover the qty
+  // Belief-derived promisable quantity (Inventory Engine): expected − reserved −
+  // drift buffer. null = untracked/binary (no numeric cap — stockStatus gated
+  // upstream); a number must cover the requested qty to be viable.
+  effectiveQty: number | null;
+  confidence?:  number;     // tracked items only; candidates below θ never reach here
   lat:       number;
   lng:       number;
 }
@@ -39,6 +45,19 @@ export interface Assignment {
 export interface ResolveResult {
   assignments: Map<string, Assignment>; // line.key → concrete (shop, product, price)
   dropped:     string[];                // line.keys with zero in-stock candidates
+  // JSON-safe decision snapshot: why each line went where (persisted on the
+  // fee-carrier order as resolverTrace — answers "why Seller A?" from data).
+  trace:       ResolverTrace;
+}
+
+export interface ResolverTrace {
+  maxShops: number;
+  lines: Array<{
+    key: string; masterId: string; qty: number;
+    candidates: Array<{ shopId: string; productId: string; price: number; effectiveQty: number | null; confidence?: number; viable: boolean }>;
+  }>;
+  chosen: Array<{ shopId: string; lineKeys: string[] }>;
+  dropped: string[];
 }
 
 export interface ResolveOpts {
@@ -47,6 +66,13 @@ export interface ResolveOpts {
   // strict: a line is only merged onto a shop selling it at the cheapest price,
   // so the customer is NEVER charged above the displayed lowest-in-stock price.
   priceTolerancePaise?: number;
+  // Products that just lost a reservation race — the placement retry loop
+  // excludes them so the resolver picks another shop (or drops the line).
+  excludeProductIds?: string[];
+  // Cap on distinct shops per resolution (Inventory Engine): every extra pickup
+  // is +4–7 min and +1 failure surface. Lines not coverable within the cap are
+  // dropped. Default comes from AppConfig inv.max_shops_per_group (hard cap 3).
+  maxShops?: number;
 }
 
 /**
@@ -73,8 +99,10 @@ export function resolveAggregatedLines(
   opts: ResolveOpts = {},
 ): ResolveResult {
   const tolerance = opts.priceTolerancePaise ?? 0;
+  const maxShops = Math.min(3, Math.max(1, opts.maxShops ?? 3));
   const assignments = new Map<string, Assignment>();
   const dropped: string[] = [];
+  const trace: ResolverTrace = { maxShops, lines: [], chosen: [], dropped: [] };
 
   // Per line: the candidates that can actually fulfil the requested quantity,
   // and the cheapest such price (the floor the tolerance is measured against).
@@ -82,7 +110,16 @@ export function resolveAggregatedLines(
   const states: LineState[] = [];
   for (const line of lines) {
     const all = candidatesByMaster.get(line.masterId) ?? [];
-    const viable = all.filter((c) => c.stockQty == null || c.stockQty >= line.quantity);
+    const viable = all.filter((c) => c.effectiveQty == null || c.effectiveQty >= line.quantity);
+    trace.lines.push({
+      key: line.key, masterId: line.masterId, qty: line.quantity,
+      candidates: all.map((c) => ({
+        shopId: c.shopId, productId: c.productId, price: c.price,
+        effectiveQty: c.effectiveQty,
+        ...(c.confidence != null ? { confidence: Number(c.confidence.toFixed(3)) } : {}),
+        viable: c.effectiveQty == null || c.effectiveQty >= line.quantity,
+      })),
+    });
     if (viable.length === 0) { dropped.push(line.key); continue; }
     const floor = Math.min(...viable.map((c) => c.price));
     states.push({ line, viable, floor });
@@ -94,7 +131,9 @@ export function resolveAggregatedLines(
   const unassigned = new Set(states.map((s) => s.line.key));
   const byKey = new Map(states.map((s) => [s.line.key, s]));
 
-  while (unassigned.size > 0) {
+  // Each loop iteration opens exactly one (new) shop; the cap bounds pickups.
+  let shopsOpened = 0;
+  while (unassigned.size > 0 && shopsOpened < maxShops) {
     // Build, per shop, the set of unassigned lines it can cover (and the concrete
     // product + price it would use for each). A shop is identified by shopId; all
     // of a shop's candidates share lat/lng.
@@ -129,25 +168,37 @@ export function resolveAggregatedLines(
       assignments.set(x.key, { shopId: best.shopId, productId: x.productId, unitPrice: x.price });
       unassigned.delete(x.key);
     }
+    trace.chosen.push({ shopId: best.shopId, lineKeys: best.covered.map((x) => x.key) });
+    shopsOpened += 1;
   }
 
-  return { assignments, dropped };
+  // Lines the shop cap left uncovered are dropped, not silently spread thinner.
+  for (const key of unassigned) dropped.push(key);
+
+  trace.dropped = [...dropped];
+  return { assignments, dropped, trace };
 }
 
 export function createResolverService(prisma: PrismaClient) {
   /**
    * Resolve a batch of aggregated cart lines to concrete shops against LIVE
-   * inventory. Queries every active, in-stock, open-shop Product for the lines'
-   * masters (using the @@index([masterId, stockStatus, isActive]) index) and
-   * hands them to the pure resolver.
+   * belief state. Queries every active, in-stock, open-shop Product for the
+   * lines' masters, computes read-time effective qty + confidence per candidate
+   * (Inventory Engine), gates out candidates below θ_hide (visibility and
+   * routability are ONE predicate — never route what we wouldn't show), and
+   * hands the survivors to the pure resolver with the shop cap.
    */
   async function resolveCart(
     lines: AggLine[],
     deliveryPoint: LatLng,
     opts: ResolveOpts = {},
   ): Promise<ResolveResult> {
-    if (lines.length === 0) return { assignments: new Map(), dropped: [] };
+    if (lines.length === 0) {
+      return { assignments: new Map(), dropped: [], trace: { maxShops: 0, lines: [], chosen: [], dropped: [] } };
+    }
 
+    const cfg = await getInventoryConfig(prisma);
+    const now = new Date();
     const masterIds = [...new Set(lines.map((l) => l.masterId))];
     const products = await prisma.product.findMany({
       where: {
@@ -155,29 +206,58 @@ export function createResolverService(prisma: PrismaClient) {
         isActive:    true,
         stockStatus: 'available',
         shop:        { isActive: true, isOpen: true },
+        ...(opts.excludeProductIds?.length ? { id: { notIn: opts.excludeProductIds } } : {}),
       },
       select: {
-        id: true, masterId: true, shopId: true, price: true, stockQty: true,
+        id: true, masterId: true, shopId: true, price: true,
         shop: { select: { lat: true, lng: true } },
+        inventoryState: {
+          select: {
+            expectedQty: true, reservedQty: true, velocityClass: true,
+            confidenceBase: true, lastVerifiedAt: true,
+          },
+        },
       },
     });
 
     const candidatesByMaster = new Map<string, Candidate[]>();
     for (const p of products) {
       if (!p.masterId) continue; // the `in` filter guarantees this, but keep TS happy
+
+      let effective: number | null = null;
+      let conf: number | undefined;
+      const s = p.inventoryState;
+      if (s && s.expectedQty != null) {
+        const belief = {
+          expectedQty: s.expectedQty, reservedQty: s.reservedQty,
+          velocityClass: s.velocityClass, confidenceBase: Number(s.confidenceBase),
+          lastVerifiedAt: s.lastVerifiedAt,
+        };
+        conf = beliefConfidence(belief, cfg, now);
+        // θ gate: decay may have crossed the line since the last projection
+        // event — the resolver reads the belief live, never a stale status.
+        if (conf < cfg.thetaHide) continue;
+        effective = beliefEffectiveQty(belief, cfg, now) ?? 0;
+        if (effective <= 0) continue;
+      }
+
       const list = candidatesByMaster.get(p.masterId) ?? [];
       list.push({
         shopId:    p.shopId,
         productId: p.id,
         price:     p.price,
-        stockQty:  p.stockQty,
+        effectiveQty: effective,
+        ...(conf != null ? { confidence: conf } : {}),
         lat:       Number(p.shop.lat),
         lng:       Number(p.shop.lng),
       });
       candidatesByMaster.set(p.masterId, list);
     }
 
-    return resolveAggregatedLines(lines, candidatesByMaster, deliveryPoint, opts);
+    return resolveAggregatedLines(lines, candidatesByMaster, deliveryPoint, {
+      ...opts,
+      maxShops: opts.maxShops ?? cfg.maxShopsPerGroup,
+    });
   }
 
   return { resolveCart };

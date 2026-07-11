@@ -28,8 +28,21 @@ function makePrisma(owner: string = SELLER) {
       create:     vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'var_new', ...data })),
       update:     vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'var_1', ...data })),
     },
-    $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+    // Inventory Engine: numeric stock writes flow through applyInventoryEvent.
+    inventoryState: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert:     vi.fn().mockResolvedValue({}),
+    },
+    inventoryEvent: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    appConfig:      { findMany: vi.fn().mockResolvedValue([]) },
+    $transaction: vi.fn(),
   };
+  // Supports both the array form (Promise.all) and the interactive form
+  // (recordSellerCount passes a function; the fake prisma doubles as its tx).
+  prisma.$transaction.mockImplementation((arg: unknown) =>
+    typeof arg === 'function'
+      ? (arg as (tx: unknown) => Promise<unknown>)(prisma)
+      : Promise.all(arg as Promise<unknown>[]));
   const redis = { del: vi.fn().mockResolvedValue(1), get: vi.fn().mockResolvedValue(null) };
   return { prisma, redis };
 }
@@ -43,29 +56,46 @@ describe('inventory.service — products (1.1 / 1.5)', () => {
   let p: ReturnType<typeof makePrisma>;
   beforeEach(() => { p = makePrisma(); });
 
-  it('creates a product owned by the seller, mapping pricePaise→price and deriving available status', async () => {
+  it('creates a product owned by the seller, mapping pricePaise→price, tracking stock via a seller_count event', async () => {
     const out = await svc(p).createProduct(
       { shopId: SHOP, name: 'Atta', pricePaise: 28500, mrpPaise: 32000, stockQty: 40 }, sellerAuth,
     );
     expect(p.prisma.product.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ price: 28500, stockQty: 40, stockStatus: 'available', shopId: SHOP }) }),
+      expect.objectContaining({ data: expect.objectContaining({ price: 28500, shopId: SHOP }) }),
     );
+    // Inventory Engine: the count is a belief event — state upsert + event row +
+    // legacy stockQty mirror on the product, never direct stockQty in create.
+    expect(p.prisma.inventoryState.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ productId: 'prod_new', expectedQty: 40 }),
+    }));
+    expect(p.prisma.inventoryEvent.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({ eventType: 'seller_count', qtyAfter: 40, actorType: 'seller' })],
+    }));
+    expect(p.prisma.product.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'prod_new' }, data: expect.objectContaining({ stockQty: 40 }),
+    }));
     expect(p.redis.del).toHaveBeenCalled(); // cache invalidated
     expect(out.id).toBe('prod_new');
   });
 
-  it('leaves stock untracked (no stockQty/status forced) when stockQty omitted', async () => {
+  it('leaves stock untracked when stockQty omitted — binary state row only', async () => {
     await svc(p).createProduct({ shopId: SHOP, name: 'Atta', pricePaise: 100 }, sellerAuth);
     const data = p.prisma.product.create.mock.calls[0]![0].data as Record<string, unknown>;
     expect(data).not.toHaveProperty('stockQty');
     expect(data).not.toHaveProperty('stockStatus');
+    // The reservation CAS needs a state row even for binary items.
+    expect(p.prisma.inventoryState.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: { productId: 'prod_new' },
+    }));
+    expect(p.prisma.inventoryEvent.createMany).not.toHaveBeenCalled();
   });
 
-  it('tracks stock and derives out_of_stock when stockQty is explicitly 0', async () => {
+  it('tracks stock and projects out_of_stock when stockQty is explicitly 0', async () => {
     await svc(p).createProduct({ shopId: SHOP, name: 'Atta', pricePaise: 100, stockQty: 0 }, sellerAuth);
-    expect(p.prisma.product.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ stockQty: 0, stockStatus: 'out_of_stock' }) }),
-    );
+    expect(p.prisma.product.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'prod_new' },
+      data:  expect.objectContaining({ stockQty: 0, stockStatus: 'out_of_stock' }),
+    }));
   });
 
   it('rejects a seller who does not own the shop', async () => {
@@ -88,11 +118,38 @@ describe('inventory.service — products (1.1 / 1.5)', () => {
     expect(out).toEqual({ id: 'prod_1', isActive: false });
   });
 
-  it('setStockQty flips status: 0→out_of_stock, >0→available', async () => {
-    await svc(p).setStockQty('prod_1', 0, sellerAuth);
-    expect(p.prisma.product.update).toHaveBeenCalledWith({ where: { id: 'prod_1' }, data: { stockQty: 0, stockStatus: 'out_of_stock' } });
-    await svc(p).setStockQty('prod_1', 7, sellerAuth);
-    expect(p.prisma.product.update).toHaveBeenCalledWith({ where: { id: 'prod_1' }, data: { stockQty: 7, stockStatus: 'available' } });
+  it('setStockQty projects status through the belief layer: 0→out_of_stock, >0→available', async () => {
+    const zero = await svc(p).setStockQty('prod_1', 0, sellerAuth);
+    expect(zero).toEqual({ id: 'prod_1', stockQty: 0, stockStatus: 'out_of_stock' });
+    expect(p.prisma.product.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'prod_1' }, data: expect.objectContaining({ stockQty: 0, stockStatus: 'out_of_stock' }),
+    }));
+    const seven = await svc(p).setStockQty('prod_1', 7, sellerAuth);
+    expect(seven).toEqual({ id: 'prod_1', stockQty: 7, stockStatus: 'available' });
+    expect(p.prisma.inventoryEvent.createMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('verifyShelf: "out" writes a trusted zero via seller_toggle_out', async () => {
+    const out = await svc(p).verifyShelf('prod_1', 'out', undefined, sellerAuth);
+    expect(p.prisma.inventoryEvent.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({ eventType: 'seller_toggle_out' })],
+    }));
+    expect(out.stockStatus).toBe('out_of_stock');
+  });
+
+  it('verifyShelf: "low" writes the bucket default, never asks for a count', async () => {
+    await svc(p).verifyShelf('prod_1', 'low', undefined, sellerAuth);
+    expect(p.prisma.inventoryEvent.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({ eventType: 'seller_bucket', qtyAfter: 8 })],
+    }));
+  });
+
+  it('verifyShelf: an exact qty upgrades the answer to a seller_count', async () => {
+    const out = await svc(p).verifyShelf('prod_1', 'have', 17, sellerAuth);
+    expect(p.prisma.inventoryEvent.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({ eventType: 'seller_count', qtyAfter: 17 })],
+    }));
+    expect(out.stockQty).toBe(17);
   });
 
   it('rejects an update that would push price above MRP', async () => {

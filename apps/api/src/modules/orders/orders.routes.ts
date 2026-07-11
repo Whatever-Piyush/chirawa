@@ -79,10 +79,18 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
   // ── Seller actions ────────────────────────────────────────────────────────
 
   // POST /api/v1/orders/:id/accept
+  // Optional body (Inventory Engine S2 chips): lineOverrides answers the accept
+  // screen's per-line "है?" — [{ orderItemId, availableQty }]. availableQty 0 =
+  // "नहीं" (line refunds), < ordered = "सिर्फ n" (line shrinks + residual
+  // refunds), ≥ ordered = confirmed. Accept without a body stays 1-tap.
   app.post('/:id/accept',
     { preHandler: [requireRole('seller')] },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const result = await ordersService.sellerAcceptOrder(request.params.id, request.auth!.userId);
+    async (request: FastifyRequest<{ Params: { id: string }; Body?: { lineOverrides?: Array<{ orderItemId: string; availableQty: number }> } }>, reply) => {
+      const body = (request.body ?? {}) as { lineOverrides?: Array<{ orderItemId: string; availableQty: number }> };
+      const overrides = Array.isArray(body.lineOverrides)
+        ? body.lineOverrides.filter((o) => o && typeof o.orderItemId === 'string' && Number.isFinite(o.availableQty))
+        : [];
+      const result = await ordersService.sellerAcceptOrder(request.params.id, request.auth!.userId, overrides);
       return reply.send(result);
     },
   );

@@ -34,6 +34,9 @@ export interface ProductCardData {
   imageColor?: string;           // placeholder fill until real images land
   isNonVeg?:   boolean;
   hasVariants?: boolean;         // multi-variant products open the PDP to choose a size
+  // Inventory Engine: max promisable units across carrying shops. null/undefined
+  // = untracked (no cap). Low values show "सिर्फ N बचे" and clamp the stepper.
+  capQty?:     number | null;
 }
 
 // Per-size layout dimensions. The ADD button and the −/+ stepper share ONE width
@@ -96,7 +99,11 @@ function ProductCard({
     });
     void addItem(product);
   };
-  const onInc = () => { void setQuantity(product.productId, qty + 1); };
+  // Inventory Engine cap: the stepper never exceeds what any shop can promise
+  // (the backend clamp is the hard gate; this avoids the round-trip + toast).
+  const atCap = product.capQty != null && qty >= product.capQty;
+  const lowStock = product.capQty != null && product.capQty > 0 && product.capQty <= 5;
+  const onInc = () => { if (atCap) return; void setQuantity(product.productId, qty + 1); };
   const onDec = () => { void setQuantity(product.productId, qty - 1); };
 
   const onCarouselScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -171,6 +178,11 @@ function ProductCard({
           <View style={styles.denseRibbon}>
             <Text weight="bold" color={Colors.white} style={styles.denseRibbonText}>{offPct}% OFF</Text>
           </View>
+        )}
+
+        {/* genuinely-low tracked stock (Inventory Engine) — never fabricated urgency */}
+        {lowStock && (
+          <Text weight="semibold" style={styles.lowStock}>सिर्फ {product.capQty} बचे</Text>
         )}
 
         {/* title */}
@@ -272,6 +284,10 @@ function ProductCard({
         <Text weight="semibold" style={styles.off}>
           ₹{Math.round(((product.mrpPaise ?? 0) - product.pricePaise) / 100)} OFF
         </Text>
+      )}
+      {/* genuinely-low tracked stock (Inventory Engine) — never fabricated urgency */}
+      {lowStock && (
+        <Text weight="semibold" style={styles.lowStock}>सिर्फ {product.capQty} बचे</Text>
       )}
 
       {/* name */}
@@ -404,4 +420,6 @@ const makeStyles = (Colors: ColorPalette, dims: typeof DIMS[ProductCardSize], ca
   denseName: { fontSize: dims.nameSize, lineHeight: dims.nameSize + 4, marginTop: 4 },
   denseEtaRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4 },
   denseEta: { fontSize: 10, lineHeight: 13 },
+  // "सिर्फ N बचे" — low tracked stock (Inventory Engine)
+  lowStock: { fontSize: 10, lineHeight: 13, color: '#C2410C', marginTop: 2 },
 });

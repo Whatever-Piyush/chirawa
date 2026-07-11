@@ -161,6 +161,9 @@ export interface AggTile {
   unit:       string | null;
   brand:      string | null;
   shopCount:  number;          // identity hidden, count only
+  // Inventory Engine: max promisable units across carrying shops; null =
+  // untracked (no numeric cap). Drives "सिर्फ N बचे" + the stepper clamp.
+  capQty:     number | null;
 }
 
 // One aggregated tile → a ProductCard. The feed gives a single canonical image,
@@ -175,6 +178,7 @@ export function toFeedCard(t: AggTile): ProductCardData {
     imageUrl:    t.imageUrl,
     images:      t.imageUrl ? [t.imageUrl] : [],
     hasVariants: false,   // an aggregated tile is a single representative SKU
+    capQty:      t.capQty ?? null,
   };
 }
 

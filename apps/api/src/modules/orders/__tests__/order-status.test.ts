@@ -2,13 +2,15 @@ import { describe, it, expect, vi } from 'vitest';
 import { assertTransition, transitionOrderStatus } from '../order-status';
 import { BusinessRuleError } from '../../../shared/errors/app-errors';
 
-// A minimal fake transaction client — the primitive only touches order.updateMany
-// (compare-and-set) and orderStatusHistory.create.
+// A minimal fake transaction client — the primitive touches order.updateMany
+// (compare-and-set) + orderStatusHistory.create, and on picked_up/cancelled the
+// inventory hooks claim reservations via $queryRaw (empty = nothing held).
 function makeTx(flipCount = 1) {
   const updateMany = vi.fn().mockResolvedValue({ count: flipCount });
   const create     = vi.fn().mockResolvedValue({});
-  const tx = { order: { updateMany }, orderStatusHistory: { create } };
-  return { tx: tx as unknown as Parameters<typeof transitionOrderStatus>[0], updateMany, create };
+  const queryRaw   = vi.fn().mockResolvedValue([]);
+  const tx = { order: { updateMany }, orderStatusHistory: { create }, $queryRaw: queryRaw };
+  return { tx: tx as unknown as Parameters<typeof transitionOrderStatus>[0], updateMany, create, queryRaw };
 }
 
 const actor = { role: 'rider', id: 'u1' };
@@ -31,6 +33,35 @@ describe('transitionOrderStatus — the single enforcement point', () => {
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: 'delivered', codCollectedPaise: 16000 }),
     }));
+  });
+
+  // ── Inventory hooks (Inventory Engine) ───────────────────────────────────────
+  it('COMMITS held reservations on → picked_up (same transaction)', async () => {
+    const { tx, queryRaw } = makeTx();
+    await transitionOrderStatus(tx, 'o1', 'ready_for_pickup', 'picked_up', actor);
+    const sql = (queryRaw.mock.calls[0]![0] as string[]).join('?');
+    expect(sql).toContain('UPDATE reservations');
+    expect(sql).toContain("'committed'");
+  });
+
+  it('RELEASES held reservations on → cancelled (same transaction)', async () => {
+    const { tx, queryRaw } = makeTx();
+    await transitionOrderStatus(tx, 'o1', 'confirmed', 'cancelled', actor);
+    const sql = (queryRaw.mock.calls[0]![0] as string[]).join('?');
+    expect(sql).toContain('UPDATE reservations');
+    expect(sql).toContain("'released'");
+  });
+
+  it('runs NO inventory hook on other transitions', async () => {
+    const { tx, queryRaw } = makeTx();
+    await transitionOrderStatus(tx, 'o1', 'confirmed', 'preparing', actor);
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('skips the hooks entirely when the compare-and-set loses the race', async () => {
+    const { tx, queryRaw } = makeTx(0);
+    await transitionOrderStatus(tx, 'o1', 'confirmed', 'cancelled', actor);
+    expect(queryRaw).not.toHaveBeenCalled();
   });
 
   // ── Terminal-backward rejections (V1 / V2 / V4) ──────────────────────────────

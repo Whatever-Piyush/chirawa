@@ -66,6 +66,13 @@ export const updateProductSchema = z
 
 export const setStockQtySchema = z.object({ stockQty: z.number().int().min(0).max(1_000_000) });
 
+// Shelf verification (Inventory Engine S5) — morning card / restock answers.
+// 'have' | 'low' map to bucket defaults; an explicit qty upgrades to a count.
+export const verifyShelfSchema = z.object({
+  state: z.enum(['have', 'low', 'out']),
+  qty:   z.number().int().min(0).max(1_000_000).optional(),
+});
+
 // ── Category ────────────────────────────────────────────────────────────────
 export const createCategorySchema = z.object({
   shopId:    uuid,

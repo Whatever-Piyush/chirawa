@@ -24,6 +24,9 @@ export const JobNames = {
   SEND_PUSH:             'send-push',
   SEND_SMS:              'send-sms',
   CATALOG_ENRICH:        'catalog-enrich',
+  RESERVATION_SWEEP:     'reservation-sweep',
+  INVENTORY_RECONCILE:   'inventory-reconcile',
+  MORNING_CARD_PUSH:     'morning-card-push',
 } as const;
 
 export interface AssignBatchPayload {

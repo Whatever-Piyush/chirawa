@@ -4,6 +4,8 @@ import type { AddToCartInput, UpdateCartItemInput } from './cart.schema';
 import {
   NotFoundError, ValidationError, BusinessRuleError,
 } from '../../shared/errors/app-errors';
+import { effectiveQty } from '../inventory/belief';
+import { getInventoryConfig } from '../inventory/inventory.config';
 
 // Fee band thresholds in paise — when cart crosses these, delivery fee changes
 // ₹100 = 10000 paise, ₹300 = 30000 paise
@@ -77,6 +79,32 @@ function computeSubtotal(items: CartItem[]): number {
 }
 
 export function createCartService(prisma: PrismaClient, redis: Redis) {
+
+  // Inventory Engine cart-time honesty: for a COUNT-TRACKED product, cap the
+  // requested quantity at the read-time promisable amount so the customer
+  // learns "सिर्फ N बचे" at add-to-cart, not as a checkout failure. Binary
+  // products keep the status-only gate (unchanged).
+  async function assertWithinEffectiveQty(productId: string, productName: string, totalQty: number): Promise<void> {
+    const state = await prisma.inventoryState.findUnique({
+      where: { productId },
+      select: {
+        expectedQty: true, reservedQty: true, velocityClass: true,
+        confidenceBase: true, lastVerifiedAt: true,
+      },
+    });
+    if (!state || state.expectedQty == null) return; // untracked — no numeric cap
+    const cfg = await getInventoryConfig(prisma);
+    const cap = effectiveQty({
+      expectedQty: state.expectedQty, reservedQty: state.reservedQty,
+      velocityClass: state.velocityClass, confidenceBase: Number(state.confidenceBase),
+      lastVerifiedAt: state.lastVerifiedAt,
+    }, cfg, new Date())!;
+    if (totalQty > cap) {
+      throw new BusinessRuleError(
+        cap > 0 ? `${productName}: sirf ${cap} available hai` : `${productName} abhi stock mein nahi hai`,
+      );
+    }
+  }
 
   // ── Load cart from Redis (or return empty) ────────────────────────────────
   async function loadCart(userId: string): Promise<CartData | null> {
@@ -203,6 +231,8 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
       // Update existing — add to quantity
       const existing = items[existingIndex]!;
       const newQty   = existing.quantity + input.quantity;
+      // Base-product lines only — variants keep their own status gate above.
+      if (!variantId) await assertWithinEffectiveQty(product.id, product.name, newQty);
       items[existingIndex] = {
         ...existing,
         unitPrice, // Refresh price
@@ -210,6 +240,7 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
         subtotal:  unitPrice * newQty,
       };
     } else {
+      if (!variantId) await assertWithinEffectiveQty(product.id, product.name, input.quantity);
       items.push(newItem);
     }
 
@@ -269,11 +300,12 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
       } else {
         const product = await prisma.product.findUnique({
           where:  { id: productId },
-          select: { price: true, stockStatus: true },
+          select: { price: true, stockStatus: true, name: true },
         });
         if (!product || product.stockStatus === 'out_of_stock') {
           throw new BusinessRuleError('Yeh item abhi available nahi hai');
         }
+        await assertWithinEffectiveQty(productId, product.name, input.quantity);
         unitPrice = product.price;
       }
 

@@ -4,11 +4,14 @@ import {
   Modal, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
 import { SellerApi, type ProductInput, type StockThisInput } from '../../services/api.service';
 import { saveStockThis, flushQueue } from '../../services/offline-queue';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { useAuth } from '../../context/AuthContext';
+import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 interface Product {
   id: string; name: string; stockStatus: string;
@@ -30,6 +33,7 @@ const EMPTY_FORM: FormState = { name: '', priceRupees: '', mrpRupees: '', unit: 
 
 export default function StockScreen() {
   const { state }               = useAuth();
+  const navigation              = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [shop, setShop]         = useState<ShopData | null>(null);
   const [loading, setLoading]   = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
@@ -262,6 +266,14 @@ export default function StockScreen() {
         )}
       </View>
 
+      {/* Morning verification card entry (Inventory Engine S5) */}
+      {shop && (
+        <Pressable style={styles.morningBanner} onPress={() => navigation.navigate('MorningCard')}>
+          <Text style={styles.morningBannerText}>☀️ आज का स्टॉक चेक — 1 मिनट</Text>
+          <Text style={styles.morningBannerArrow}>→</Text>
+        </Pressable>
+      )}
+
       {!shop
         ? <View style={styles.center}><Text style={styles.noShop}>Koi shop nahi mili</Text></View>
         : <FlatList
@@ -381,6 +393,15 @@ const styles = StyleSheet.create({
   scanBtn:     { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.md, minWidth: 72, alignItems: 'center' },
   scanBtnText: { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
   noShop:      { fontSize: FontSize.lg, color: Colors.textMuted },
+  // Morning card banner (Inventory Engine S5)
+  morningBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginHorizontal: Spacing.lg, marginTop: Spacing.md,
+    backgroundColor: Colors.accent, borderRadius: Radius.md,
+    paddingVertical: Spacing.md, paddingHorizontal: Spacing.lg,
+  },
+  morningBannerText:  { color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
+  morningBannerArrow: { color: Colors.white, fontWeight: '900', fontSize: FontSize.lg },
   empty:       { textAlign: 'center', color: Colors.textMuted, marginTop: Spacing.xl, fontSize: FontSize.md },
   productRow: {
     backgroundColor: Colors.card, borderRadius: Radius.md,

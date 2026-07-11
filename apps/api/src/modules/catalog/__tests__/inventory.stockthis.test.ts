@@ -10,14 +10,25 @@ function makePrisma(opts: { existing?: { id: string } | null; ownerUserId?: stri
   const productCreate = vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'prod_new', ...data }));
   const productUpdate = vi.fn().mockResolvedValue({});
   const productImageCreate = vi.fn().mockResolvedValue({});
+  const stateUpsert = vi.fn().mockResolvedValue({});
   const prisma = {
     shop: { findUnique: vi.fn().mockResolvedValue({ id: SHOP, seller: { userId: opts.ownerUserId ?? 'someone' } }) },
     category: { findUnique: vi.fn().mockResolvedValue({ shopId: SHOP }) },
-    product: { findFirst: vi.fn().mockResolvedValue(opts.existing ?? null), create: productCreate, update: productUpdate },
+    product: {
+      findFirst: vi.fn().mockResolvedValue(opts.existing ?? null),
+      findUnique: vi.fn().mockResolvedValue({ stockStatus: 'available' }),
+      create: productCreate, update: productUpdate,
+    },
     productImage: { create: productImageCreate },
+    // Inventory Engine (belief writes for stockQty + binary state rows)
+    inventoryState: { findUnique: vi.fn().mockResolvedValue(null), upsert: stateUpsert },
+    inventoryEvent: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    appConfig: { findMany: vi.fn().mockResolvedValue([]) },
+    $transaction: vi.fn(),
   };
+  prisma.$transaction.mockImplementation((fn: (tx: unknown) => Promise<unknown>) => fn(prisma));
   const redis = { del: vi.fn().mockResolvedValue(1) };
-  return { prisma, redis, productCreate, productUpdate, productImageCreate };
+  return { prisma, redis, productCreate, productUpdate, productImageCreate, stateUpsert };
 }
 const svc = (p: ReturnType<typeof makePrisma>) => createInventoryService(p.prisma as never, p.redis as never);
 
@@ -30,8 +41,16 @@ describe('upsertProductByBarcode (Phase 3 "I stock this")', () => {
 
     expect(res).toEqual({ id: 'prod_new', created: true });
     expect(p.productCreate).toHaveBeenCalledWith({ data: expect.objectContaining({
-      shopId: SHOP, barcode: VALID, masterId: 'mc1', name: 'Atta', price: 28500, stockQty: 10, stockStatus: 'available',
+      shopId: SHOP, barcode: VALID, masterId: 'mc1', name: 'Atta', price: 28500,
     }) });
+    // Inventory Engine: the scanned count is a seller_count belief event, not
+    // direct columns on create.
+    expect(p.stateUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ productId: 'prod_new', expectedQty: 10 }),
+    }));
+    expect(p.prisma.inventoryEvent.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({ eventType: 'seller_count', qtyAfter: 10 })],
+    }));
     expect(p.redis.del).toHaveBeenCalled(); // cache invalidated
   });
 
@@ -42,6 +61,9 @@ describe('upsertProductByBarcode (Phase 3 "I stock this")', () => {
     expect(res).toEqual({ id: 'prod_x', created: false });
     expect(p.productUpdate).toHaveBeenCalledWith({ where: { id: 'prod_x' }, data: expect.objectContaining({ price: 30000 }) });
     expect(p.productCreate).not.toHaveBeenCalled();
+    // No stockQty in the re-scan → binary state row ensured, no belief event.
+    expect(p.stateUpsert).toHaveBeenCalledWith(expect.objectContaining({ create: { productId: 'prod_x' } }));
+    expect(p.prisma.inventoryEvent.createMany).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid (non-GS1) barcode — never stored as a join key', async () => {

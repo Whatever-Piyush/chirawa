@@ -14,14 +14,16 @@ import VerifyOtpScreen   from '../screens/auth/VerifyOtpScreen';
 import SetPinScreen      from '../screens/auth/SetPinScreen';
 import OrderQueueScreen  from '../screens/orders/OrderQueueScreen';
 import StockScreen       from '../screens/stock/StockScreen';
+import MorningCardScreen from '../screens/stock/MorningCardScreen';
 import SettlementScreen  from '../screens/settlement/SettlementScreen';
 import ProfileScreen     from '../screens/profile/ProfileScreen';
 
 export type RootStackParamList = {
-  OtpLogin:   undefined;
-  VerifyOtp:  { phone: string };
-  SetPin:     { token: string };
-  MainTabs:   NavigatorScreenParams<TabParamList> | undefined;
+  OtpLogin:    undefined;
+  VerifyOtp:   { phone: string };
+  SetPin:      { token: string };
+  MainTabs:    NavigatorScreenParams<TabParamList> | undefined;
+  MorningCard: undefined;
 };
 
 export type TabParamList = {
@@ -76,7 +78,10 @@ export default function AppNavigator() {
     <NavigationContainer ref={navigationRef}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {state.isAuthenticated && !state.requiresPin ? (
-          <Stack.Screen name="MainTabs" component={MainTabs} />
+          <>
+            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen name="MorningCard" component={MorningCardScreen} />
+          </>
         ) : state.isAuthenticated && state.requiresPin ? (
           <Stack.Screen name="SetPin"
             component={SetPinScreen}

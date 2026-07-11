@@ -49,6 +49,47 @@ export async function setupSchedules(queues: {
     },
   );
 
+  // ── Reservation expiry sweep — every 60s (Inventory Engine) ───────────────
+  // Releases prepaid holds whose payment never landed within the TTL. Idempotent
+  // (held-claim guard), so overlap/rerun is harmless.
+  await queues.reconciliation.add(
+    JobNames.RESERVATION_SWEEP,
+    {},
+    {
+      repeat:     { every: 60 * 1000 },
+      jobId:      'reservation-sweep-recurring',
+      removeOnComplete: { count: 5 },
+      removeOnFail:     { count: 5 },
+    },
+  );
+
+  // ── Inventory reconciler — 2:30 AM IST (21:00 UTC) (Inventory Engine) ─────
+  // Asserts the stock invariants nightly and auto-fixes the safe ones — the
+  // same discipline as payment reconciliation, applied to inventory.
+  await queues.reconciliation.add(
+    JobNames.INVENTORY_RECONCILE,
+    {},
+    {
+      repeat:     { pattern: '0 21 * * *' },
+      jobId:      'inventory-reconcile-recurring',
+      removeOnComplete: { count: 7 },
+      removeOnFail:     { count: 5 },
+    },
+  );
+
+  // ── Morning verification card — 9:00 AM IST (03:30 UTC) (Inventory Engine) ─
+  // Pushes each seller their ≤N most-doubted tracked items at shop-open time.
+  await queues.reconciliation.add(
+    JobNames.MORNING_CARD_PUSH,
+    {},
+    {
+      repeat:     { pattern: '30 3 * * *' },
+      jobId:      'morning-card-push-recurring',
+      removeOnComplete: { count: 7 },
+      removeOnFail:     { count: 5 },
+    },
+  );
+
   // ── Location cleanup — 2 AM IST (20:30 UTC previous day) ─────────────────
   await queues.cleanup.add(
     JobNames.LOCATION_CLEANUP,

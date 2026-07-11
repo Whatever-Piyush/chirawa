@@ -29,6 +29,8 @@ function makeService(order: unknown, flipCount = 1) {
       count:             vi.fn().mockResolvedValue(0),
     },
     orderStatusHistory: { create: historyCreate },
+    // Inventory hook on → picked_up commits reservations — none held here.
+    $queryRaw: vi.fn(async () => []),
     $transaction: vi.fn(),
   };
   prisma.$transaction.mockImplementation((fn: (tx: typeof prisma) => unknown) => fn(prisma));

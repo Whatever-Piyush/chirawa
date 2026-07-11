@@ -18,6 +18,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:images": "tsx prisma/seeds/dev-images.ts",
     "db:backfill:barcode": "tsx prisma/backfill-barcode.ts",
+    "db:backfill:inventory": "tsx prisma/backfill-inventory.ts",
     "db:reset": "prisma migrate reset",
     "worker": "tsx watch src/worker/index.ts"
   },

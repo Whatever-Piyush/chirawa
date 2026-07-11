@@ -4,6 +4,8 @@ import { NotFoundError, ForbiddenError, ValidationError } from '../../shared/err
 import { isValidEan } from '../../shared/utils/barcode';
 import { processImage as defaultProcessImage } from '../../services/image-pipeline';
 import { createCatalogService } from './catalog.service';
+import { applyInventoryEvent, ensureInventoryState } from '../inventory/apply-event';
+import { getInventoryConfig } from '../inventory/inventory.config';
 import type {
   CreateProductInput, UpdateProductInput, StockThisInput,
   CreateCategoryInput, UpdateCategoryInput,
@@ -62,8 +64,9 @@ function parseIntOrNull(raw: string | undefined): number | null {
   return Number.isInteger(n) && n >= 0 ? n : null;
 }
 
-// 0 stock => out_of_stock, otherwise available. (Restocking re-enables an item;
-// the explicit hide/show toggle lives in the separate /stock endpoint.)
+// 0 stock => out_of_stock, otherwise available. Kept only as the exported shape
+// helper — actual status writes now flow through applyInventoryEvent (Inventory
+// Engine), which projects availability from the belief state.
 const statusForQty = (qty: number): 'available' | 'out_of_stock' =>
   qty > 0 ? 'available' : 'out_of_stock';
 
@@ -82,6 +85,21 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
   const catalog = createCatalogService(prisma, redis);
   const invalidate = (shopId: string) => catalog.invalidateShopCache(shopId);
   const processImage = deps.processImage ?? defaultProcessImage;
+
+  const actorTypeOf = (auth: AuthCtx): 'seller' | 'admin' => (auth.role === 'admin' ? 'admin' : 'seller');
+
+  // Every numeric stock write is a `seller_count` belief event through the
+  // single writer (Inventory Engine): state + event + status projection +
+  // legacy stockQty mirror, one transaction.
+  async function recordSellerCount(productId: string, shopId: string, qty: number, auth: AuthCtx) {
+    const cfg = await getInventoryConfig(prisma);
+    return prisma.$transaction(async (tx) =>
+      applyInventoryEvent(tx as never, {
+        productId, shopId, eventType: 'seller_count', qty,
+        actorType: actorTypeOf(auth), actorId: auth.userId,
+      }, cfg),
+    );
+  }
 
   async function assertShopOwner(shopId: string, auth: AuthCtx): Promise<void> {
     if (auth.role === 'admin') return;
@@ -115,8 +133,9 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
     await assertShopOwner(input.shopId, auth);
     if (input.categoryId) await assertCategoryInShop(input.categoryId, input.shopId);
 
-    // Numeric stock is opt-in: only set stockQty (and derive status from it) when
-    // the seller provides one. Otherwise the product is status-only (untracked).
+    // Numeric stock is opt-in: a provided stockQty makes the product TRACKED
+    // (belief event through the single writer). Otherwise it is binary — a
+    // default inventory_state row is created so the reservation CAS finds it.
     const data: Prisma.ProductUncheckedCreateInput = {
       shopId:      input.shopId,
       name:        input.name,
@@ -126,10 +145,6 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
       categoryId:  input.categoryId ?? null,
       description: input.description ?? null,
     };
-    if (input.stockQty != null) {
-      data.stockQty    = input.stockQty;
-      data.stockStatus = statusForQty(input.stockQty);
-    }
     if (input.barcode) {
       if (!isValidEan(input.barcode)) throw new ValidationError('Invalid barcode (failed GS1 check digit)');
       data.barcode = input.barcode;
@@ -139,6 +154,11 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
       data.images = { create: { url: input.imageUrl, sortOrder: 0 } };
     }
     const product = await prisma.product.create({ data });
+    if (input.stockQty != null) {
+      await recordSellerCount(product.id, input.shopId, input.stockQty, auth);
+    } else {
+      await ensureInventoryState(prisma as never, product.id);
+    }
     await invalidate(input.shopId);
     return product;
   }
@@ -162,7 +182,6 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
       };
       if (input.masterId)   data.master   = { connect: { id: input.masterId } };
       if (input.categoryId) data.category = { connect: { id: input.categoryId } };
-      if (input.stockQty != null) { data.stockQty = input.stockQty; data.stockStatus = statusForQty(input.stockQty); }
       await prisma.product.update({ where: { id: existing.id }, data });
       if (input.imageUrl) await prisma.productImage.create({ data: { productId: existing.id, url: input.imageUrl, sortOrder: 0 } });
       productId = existing.id;
@@ -172,10 +191,14 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
         name: input.name, price: input.pricePaise, mrpPaise: input.mrpPaise ?? null,
         unit: input.unit ?? null, categoryId: input.categoryId ?? null,
       };
-      if (input.stockQty != null) { data.stockQty = input.stockQty; data.stockStatus = statusForQty(input.stockQty); }
       if (input.imageUrl) data.images = { create: { url: input.imageUrl, sortOrder: 0 } };
       const created = await prisma.product.create({ data });
       productId = created.id;
+    }
+    if (input.stockQty != null) {
+      await recordSellerCount(productId, input.shopId, input.stockQty, auth);
+    } else {
+      await ensureInventoryState(prisma as never, productId);
     }
     await invalidate(input.shopId);
     return { id: productId, created: !existing };
@@ -194,16 +217,15 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
     if (input.categoryId  !== undefined) {
       data.category = input.categoryId ? { connect: { id: input.categoryId } } : { disconnect: true };
     }
-    if (input.stockQty !== undefined) {
-      data.stockQty    = input.stockQty;
-      data.stockStatus = statusForQty(input.stockQty);
-    }
     // MRP must stay >= effective price.
     const effPrice = input.pricePaise ?? existing.price;
     const effMrp   = input.mrpPaise !== undefined ? input.mrpPaise : existing.mrpPaise;
     if (effMrp != null && effMrp < effPrice) throw new ValidationError('MRP must be greater than or equal to price');
 
     const updated = await prisma.product.update({ where: { id: productId }, data });
+    if (input.stockQty !== undefined && input.stockQty != null) {
+      await recordSellerCount(productId, existing.shopId, input.stockQty, auth);
+    }
     if (input.imageUrl) {
       await prisma.productImage.create({ data: { productId, url: input.imageUrl, sortOrder: 0 } });
     }
@@ -221,12 +243,53 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
 
   async function setStockQty(productId: string, stockQty: number, auth: AuthCtx) {
     const existing = await loadOwnedProduct(productId, auth);
-    const updated = await prisma.product.update({
-      where: { id: productId },
-      data:  { stockQty, stockStatus: statusForQty(stockQty) },
-    });
+    const result = await recordSellerCount(productId, existing.shopId, stockQty, auth);
     await invalidate(existing.shopId);
-    return { id: updated.id, stockQty: updated.stockQty, stockStatus: updated.stockStatus };
+    return { id: productId, stockQty: result.expectedQty, stockStatus: result.stockStatusTo };
+  }
+
+  // ── Shelf verification (Inventory Engine S5 — morning card / restock taps) ──
+  // Three states, seller-thumb sized: 'have' (बहुत है) / 'low' (थोड़ा है) /
+  // 'out' (नहीं है). An exact qty (head-list count) upgrades the bucket to a
+  // seller_count. Buckets never ask a shopkeeper to count — that's the design law.
+  async function verifyShelf(
+    productId: string,
+    state: 'have' | 'low' | 'out',
+    qty: number | undefined,
+    auth: AuthCtx,
+  ) {
+    const existing = await loadOwnedProduct(productId, auth);
+    const cfg = await getInventoryConfig(prisma);
+    const actorType = actorTypeOf(auth);
+
+    const result = await prisma.$transaction(async (tx) => {
+      if (state === 'out') {
+        return applyInventoryEvent(tx as never, {
+          productId, shopId: existing.shopId, eventType: 'seller_toggle_out',
+          actorType, actorId: auth.userId, reason: 'verify: नहीं है',
+        }, cfg);
+      }
+      if (qty != null) {
+        return applyInventoryEvent(tx as never, {
+          productId, shopId: existing.shopId, eventType: 'seller_count', qty,
+          actorType, actorId: auth.userId, reason: `verify: counted ${qty}`,
+        }, cfg);
+      }
+      return applyInventoryEvent(tx as never, {
+        productId, shopId: existing.shopId, eventType: 'seller_bucket',
+        qty: state === 'have' ? cfg.bucketLots : cfg.bucketSome,
+        actorType, actorId: auth.userId, reason: `verify: ${state === 'have' ? 'बहुत है' : 'थोड़ा है'}`,
+      }, cfg);
+    });
+
+    await invalidate(existing.shopId);
+    return {
+      id: productId,
+      stockQty: result.expectedQty,
+      stockStatus: result.stockStatusTo,
+      restocked: result.stockStatusChanged && result.stockStatusTo === 'available',
+      masterId: existing.masterId,
+    };
   }
 
   // ── Categories ──────────────────────────────────────────────────────────────
@@ -402,14 +465,11 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
           const data: Prisma.ProductUpdateInput = { price: pricePaise, mrpPaise, unit };
           if (barcode) data.barcode = barcode; // backfill/keep the join key
           if (categoryId) data.category = { connect: { id: categoryId } };
-          // Product-level stock only applies when this row isn't a variant row.
-          if (!variantName && stockQty != null) { data.stockQty = stockQty; data.stockStatus = statusForQty(stockQty); }
           await prisma.product.update({ where: { id: existing.id }, data });
           productId = existing.id;
           report.updated++;
         } else {
           const data: Prisma.ProductUncheckedCreateInput = { shopId, name, price: pricePaise, mrpPaise, unit, categoryId, barcode };
-          if (!variantName && stockQty != null) { data.stockQty = stockQty; data.stockStatus = statusForQty(stockQty); }
           // image_url is fetched → normalized → re-hosted to R2 (no hotlinking),
           // with provenance recorded. Failure is non-fatal: the product still
           // imports, just without an image, and the row is flagged.
@@ -424,6 +484,15 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
           const prod = await prisma.product.create({ data });
           productId = prod.id;
           report.created++;
+        }
+
+        // Product-level stock only applies when this row isn't a variant row —
+        // routed through the belief-event writer (Inventory Engine); rows
+        // without stock still get a binary state row for the reservation CAS.
+        if (!variantName && stockQty != null) {
+          await recordSellerCount(productId, shopId, stockQty, auth);
+        } else {
+          await ensureInventoryState(prisma as never, productId);
         }
 
         // Upsert variant by (productId, variant_name) when present.
@@ -445,7 +514,7 @@ export function createInventoryService(prisma: PrismaClient, redis: Redis, deps:
   }
 
   return {
-    createProduct, updateProduct, deleteProduct, setStockQty,
+    createProduct, updateProduct, deleteProduct, setStockQty, verifyShelf,
     upsertProductByBarcode,
     createCategory, updateCategory, deleteCategory,
     createVariant, updateVariant, deleteVariant,

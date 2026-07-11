@@ -138,6 +138,8 @@ describe('initiateRefund (admin)', () => {
       payment: { updateMany: paymentUpdateMany },
       orderStatusHistory: { create: historyCreate },
       transaction: { create: txnCreate },
+      // Inventory hook on → cancelled releases held reservations — none held here.
+      $queryRaw: vi.fn(async () => []),
       $transaction: vi.fn(),
     };
     prisma.$transaction.mockImplementation((fn: (tx: typeof prisma) => unknown) => fn(prisma));

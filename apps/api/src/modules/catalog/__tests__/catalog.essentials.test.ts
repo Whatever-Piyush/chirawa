@@ -5,7 +5,7 @@ import { pickDailyEssentials, DAILY_ESSENTIALS, type Essential, type AggTile } f
 // curated everyday SKUs from a live aggregated feed, in priority order. No DB.
 const tile = (productId: string, name: string, price = 1000): AggTile => ({
   masterId: null, productId, name, imageUrl: null,
-  pricePaise: price, mrpPaise: null, unit: null, brand: null, shopCount: 1,
+  pricePaise: price, mrpPaise: null, unit: null, brand: null, shopCount: 1, capQty: null,
 });
 
 describe('pickDailyEssentials', () => {

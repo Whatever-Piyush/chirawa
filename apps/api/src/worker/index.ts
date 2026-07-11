@@ -9,6 +9,10 @@ import { setupSchedules } from './scheduler';
 import { runDailySettlement, processSingleSellerSettle, runPayoutReconciliation } from './jobs/settlement.job';
 import { runPaymentReconciliation } from './jobs/reconciliation.job';
 import { runLocationCleanup, runOtpCleanup, runTokenCleanup, runCartCleanup } from './jobs/cleanup.job';
+import { sweepExpiredReservations } from '../modules/inventory/reservations.service';
+import { runInventoryReconciliation } from '../modules/inventory/reconcile.service';
+import { getInventoryConfig } from '../modules/inventory/inventory.config';
+import { runMorningCardPush } from './jobs/morning-card.job';
 import { processUnlockReferral } from './jobs/referral.job';
 import { processAssignBatch } from './jobs/assignment.job';
 import { runCatalogEnrichment } from './jobs/enrichment.job';
@@ -58,6 +62,11 @@ const reconciliationWorker = new Worker(
   QueueNames.RECONCILIATION,
   async (job) => {
     if (job.name === JobNames.PAYMENT_RECONCILE) await runPaymentReconciliation(prisma, redisForCleanup, sellerAcceptQueue);
+    if (job.name === JobNames.RESERVATION_SWEEP) {
+      await sweepExpiredReservations(prisma as never, await getInventoryConfig(prisma));
+    }
+    if (job.name === JobNames.INVENTORY_RECONCILE) await runInventoryReconciliation(prisma);
+    if (job.name === JobNames.MORNING_CARD_PUSH) await runMorningCardPush(prisma, redisForCleanup);
   },
   { connection: redisConnection, concurrency: 1 },
 );
