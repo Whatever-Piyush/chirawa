@@ -60,7 +60,9 @@ export const updateProductSchema = z
     categoryId:  uuid.nullable().optional(),
     description: z.string().trim().max(2000).nullable().optional(),
     stockQty:    z.number().int().min(0).max(1_000_000).optional(),
-    imageUrl:    z.string().url().max(500).optional(),
+    // Nullable so an edit can CLEAR the photo (null) — distinct from omitting the
+    // field (leave as-is). A URL replaces the primary image (Seller Sprint 1).
+    imageUrl:    z.string().url().max(500).nullable().optional(),
   })
   .refine((d) => Object.keys(d).length > 0, { message: 'No fields to update' });
 
@@ -71,6 +73,16 @@ export const setStockQtySchema = z.object({ stockQty: z.number().int().min(0).ma
 export const verifyShelfSchema = z.object({
   state: z.enum(['have', 'low', 'out']),
   qty:   z.number().int().min(0).max(1_000_000).optional(),
+});
+
+// Bulk stock-status update (Seller Sprint 4). productIds are uuid-validated (the
+// client only ever sends ids from its own loaded inventory, and this keeps a bad
+// value from erroring the whole `IN` query). stockStatus is a plain string so the
+// service can reject it with the SAME 'Invalid stock status' message as the single
+// endpoint (behavioural parity), rather than a zod enum message.
+export const bulkStockSchema = z.object({
+  productIds:  z.array(uuid).min(1).max(1000),
+  stockStatus: z.string(),
 });
 
 // ── Category ────────────────────────────────────────────────────────────────
@@ -135,6 +147,7 @@ export type CreateProductInput  = z.infer<typeof createProductSchema>;
 export type StockThisInput      = z.infer<typeof stockThisSchema>;
 export type UpdateProductInput  = z.infer<typeof updateProductSchema>;
 export type SetStockQtyInput    = z.infer<typeof setStockQtySchema>;
+export type BulkStockInput      = z.infer<typeof bulkStockSchema>;
 export type CreateCategoryInput = z.infer<typeof createCategorySchema>;
 export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
 export type CreateVariantInput  = z.infer<typeof createVariantSchema>;

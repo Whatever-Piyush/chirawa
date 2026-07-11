@@ -1,7 +1,10 @@
 import { env } from '../../config/env';
+import { serviceLogger } from '../../shared/observability/logger';
+
+const log = serviceLogger('fcm');
 
 // Lazy-initialize Firebase Admin SDK
-// If FCM_SERVICE_ACCOUNT_JSON is empty/invalid → dev mode (console.log only)
+// If FCM_SERVICE_ACCOUNT_JSON is empty/invalid → dev mode (logged only)
 let _messaging: unknown = null;
 let _initialized       = false;
 
@@ -19,7 +22,7 @@ async function getMessaging(): Promise<unknown> {
   _initialized = true;
 
   if (!isFcmConfigured()) {
-    console.warn('⚠️  FCM not configured — notifications will be logged only (dev mode)');
+    log.warn('FCM not configured — notifications will be logged only (dev mode)');
     return null;
   }
 
@@ -33,7 +36,7 @@ async function getMessaging(): Promise<unknown> {
 
     _messaging = admin.messaging();
   } catch (err) {
-    console.error('Failed to initialize Firebase Admin:', err);
+    log.error({ err }, 'Failed to initialize Firebase Admin');
   }
 
   return _messaging;
@@ -56,11 +59,11 @@ export async function sendPush(payload: FcmPayload): Promise<void> {
   const messaging = await getMessaging();
 
   if (!messaging) {
-    // Dev mode — print what would be sent
-    console.log(`\n📱 [DEV FCM] → ${payload.token.slice(0, 20)}...`);
-    console.log(`   Title: ${payload.title}`);
-    console.log(`   Body:  ${payload.body}`);
-    if (payload.data) console.log(`   Data:  ${JSON.stringify(payload.data)}`);
+    // Dev mode — log what would be sent
+    log.info(
+      { token: `${payload.token.slice(0, 20)}...`, title: payload.title, body: payload.body, data: payload.data },
+      '[DEV FCM] push (not sent — FCM unconfigured)',
+    );
     return;
   }
 
@@ -94,16 +97,19 @@ export async function sendPush(payload: FcmPayload): Promise<void> {
         },
       },
     });
-    console.log(`✅ FCM sent  "${payload.title}"  → ${payload.token.slice(0, 16)}…  (msg ${messageId.split('/').pop()})`);
+    log.info(
+      { title: payload.title, token: `${payload.token.slice(0, 16)}…`, messageId: messageId.split('/').pop() },
+      'FCM sent',
+    );
   } catch (err: unknown) {
     const error = err as { code?: string; message?: string };
     // Token invalid/expired — log but don't crash
     if (error.code === 'messaging/invalid-registration-token' ||
         error.code === 'messaging/registration-token-not-registered') {
-      console.warn(`⚠️  FCM token invalid (${error.code}) — token will need re-registration. Payload: ${payload.title}`);
+      log.warn({ code: error.code, title: payload.title }, 'FCM token invalid — token will need re-registration');
       return;
     }
-    console.error(`❌ FCM send failed  code=${error.code ?? 'unknown'}  msg=${error.message ?? '(no message)'}  title="${payload.title}"`);
+    log.error({ code: error.code ?? 'unknown', err, title: payload.title }, 'FCM send failed');
   }
 }
 
@@ -120,7 +126,13 @@ export async function sendPushMulti(
 
   await Promise.allSettled(
     tokens.map((token) =>
-      sendPush({ token, title, body, data, channel }),
+      // Spread optional fields conditionally — exactOptionalPropertyTypes rejects
+      // an explicit `undefined` for FcmPayload's optional properties.
+      sendPush({
+        token, title, body,
+        ...(data ? { data } : {}),
+        ...(channel ? { channel } : {}),
+      }),
     ),
   );
 }

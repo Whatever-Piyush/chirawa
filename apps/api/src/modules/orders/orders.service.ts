@@ -1,6 +1,6 @@
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
-import type { PlaceOrderInput } from './orders.schema';
+import type { PlaceOrderInput, ListOrdersQuery } from './orders.schema';
 import { calculateDeliveryFee, getActiveFeeRuleVersion } from '../pricing/pricing.service';
 import { validatePromo, resolveAutoPromo, type ValidatedPromo } from '../promotions/promotions.service';
 import { createResolverService, type AggLine } from '../orders/resolver.service';
@@ -8,6 +8,8 @@ import { refundCapturedOrderPayment, refundOrderLine } from '../payments/payment
 import { createCatalogService } from '../catalog/catalog.service';
 import { computeAndPersistEta, etaResponse } from './eta.service';
 import { ORDER_TRANSITIONS, assertTransition, transitionOrderStatus } from './order-status';
+import { serviceLogger } from '../../shared/observability/logger';
+import { onlinePaymentsEnabled } from '../../config/features';
 import {
   NotFoundError, ForbiddenError,
   ValidationError, BusinessRuleError, AppError,
@@ -27,6 +29,8 @@ import {
   ReservationConflictError,
   type ReserveLineInput, type ReservationTx,
 } from '../inventory/reservations.service';
+
+const log = serviceLogger('orders');
 
 interface CartData {
   cartId: string; shopId: string; shopName: string; subtotal: number;
@@ -80,10 +84,13 @@ interface ReleasePrisma {
  * makes the order disappear from the rider's /delivery/active.
  */
 export async function releaseOrderAssignment(
-  prisma: ReleasePrisma,
+  // Real client or minimal test fake — see decrementStockOrThrow for why the
+  // union + cast is required under strict structural variance.
+  client: ReleasePrisma | PrismaClient,
   orderId: string,
   batchId: string | null,
 ): Promise<void> {
+  const prisma = client as ReleasePrisma;
   await prisma.$transaction(async (tx) => {
     await tx.deliveryAssignment.updateMany({
       where: { orderId, isActive: true },
@@ -105,6 +112,14 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   const resolver = createResolverService(prisma);
 
   async function placeOrder(userId: string, input: PlaceOrderInput) {
+    // COD-only launch (Phase 5): non-COD methods are rejected server-side while
+    // PAYMENTS_ONLINE_ENABLED is off. First check on purpose — a config-level
+    // rejection that depends on nothing else (the app shows the option as
+    // "coming soon"; this is the boundary that actually enforces it).
+    if (input.paymentMethod !== 'cod' && !onlinePaymentsEnabled()) {
+      throw new BusinessRuleError('Online payment jald aa rahi hai — abhi Cash on Delivery se order karein');
+    }
+
     // Operating-hours gate — Bringly delivers 9 AM – 8 PM IST.
     if (!isWithinOperatingHours()) {
       throw new AppError(
@@ -196,9 +211,13 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       for (const sid of shopIds) {
         const shop = await prisma.shop.findUnique({
           where:  { id: sid },
-          select: { isActive: true, name: true, sellerId: true, isFeatured: true },
+          select: { isActive: true, isOpen: true, name: true, sellerId: true, isFeatured: true },
         });
-        if (!shop || !shop.isActive) throw new BusinessRuleError('Yeh dukaan abhi available nahi hai');
+        // Direct/pinned (Chirawa Special) lines bypass the aggregation resolver —
+        // which is the only place isOpen is enforced for aggregated items — so a
+        // paused shop (isOpen=false) must be rejected HERE too, else a pinned order
+        // to a closed shop slips through.
+        if (!shop || !shop.isActive || !shop.isOpen) throw new BusinessRuleError('Yeh dukaan abhi available nahi hai');
 
         const shopItems = lineItems.filter((i) => (i.shopId ?? cart.shopId) === sid);
         const subtotal  = shopItems.reduce((s, i) => s + i.subtotal, 0);
@@ -366,14 +385,13 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       const plan = plans.find((p) => p.shopId === o.shopId)!;
       if (o.sellerUserId) {
         emitNewOrderForSeller({
-          orderId: o.orderId, shopId: o.shopId, sellerId: o.sellerUserId,
+          orderId: o.orderId, shopId: o.shopId, sellerUserId: o.sellerUserId,
           items: plan.items.map((i) => ({ productName: i.productName, quantity: i.quantity, unitPrice: i.unitPrice })),
           totalAmount: o.total, paymentMethod: input.paymentMethod, deliveryLocality: address.locality,
         });
       }
       emitOrderStatusChanged({
-        orderId: o.orderId, status: initStatus, shopId: o.shopId,
-        sellerId: o.sellerUserId ?? '', riderId: null, customerId: userId,
+        orderId: o.orderId, status: initStatus, shopId: o.shopId, customerId: userId,
       });
       // Initial ETA at placement (ETA MVP Phase 1) — post-commit, best-effort.
       await computeAndPersistEta(prisma, o.orderId);
@@ -469,7 +487,10 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     return { ...order, rider, eta, refund };
   }
 
-  async function getMyOrders(userId: string, role: string, riderProfileId: string) {
+  async function getMyOrders(
+    userId: string, role: string, riderProfileId: string,
+    opts?: ListOrdersQuery,
+  ) {
     let where: Record<string, unknown> = {};
 
     if (role === 'customer') {
@@ -486,10 +507,17 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       where = { shopId: sellerProfile.shop.id };
     }
 
+    // A4-impl-1: honor page/limit so history isn't capped at the newest 50.
+    // Param-less calls keep the legacy contract (page 1 × 50). The clamps are a
+    // service-level backstop — the route schema already rejects out-of-range input.
+    const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 50);
+    const page  = Math.max(opts?.page ?? 1, 1);
+
     return prisma.order.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      take:    50,
+      skip:    (page - 1) * limit,
+      take:    limit,
       // id + verificationFlag + fulfillmentStatus feed the seller accept-screen
       // chips (Inventory Engine S2); additive for the other roles.
       include: {
@@ -565,8 +593,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     await computeAndPersistEta(prisma, orderId);
 
     emitOrderStatusChanged({
-      orderId, status: newStatus, shopId: order.shopId,
-      sellerId: '', riderId: order.riderId, customerId: order.customerId,
+      orderId, status: newStatus, shopId: order.shopId, customerId: order.customerId,
       ...(refundedPaise != null ? { refundedPaise } : {}),
     });
   }
@@ -859,8 +886,8 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     // Notify the seller in real time (service → event bus → socket plugin)
     emitOrderCancelledForSeller({
       orderId,
-      sellerId: order.shop.seller.userId,
-      reason:   reason ?? '',
+      sellerUserId: order.shop.seller.userId,
+      reason:       reason ?? '',
     });
 
     // Free the rider/batch AFTER the cancel emit so the rider still gets the
@@ -893,7 +920,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     // client-supplied amountPaise is advisory only and is never written.
     const amountDue = order.totalAmount;
     if (amountPaise != null && amountPaise !== amountDue) {
-      console.warn(`COD amount mismatch (ignored) order=${orderId} sent=${amountPaise} due=${amountDue}`);
+      log.warn({ orderId, sentPaise: amountPaise, duePaise: amountDue }, 'COD amount mismatch (ignored)');
     }
 
     // Single enforcement point (transitionOrderStatus): assertTransition + atomic
@@ -915,7 +942,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     if (credited) {
       emitOrderStatusChanged({
         orderId, status: 'delivered',
-        shopId: order.shopId, sellerId: '', riderId: riderProfileId, customerId: order.customerId,
+        shopId: order.shopId, customerId: order.customerId,
       });
     }
     return { message: 'Cash collection confirm ho gaya' };
@@ -946,7 +973,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     if (delivered) {
       emitOrderStatusChanged({
         orderId, status: 'delivered',
-        shopId: order.shopId, sellerId: '', riderId: riderProfileId, customerId: order.customerId,
+        shopId: order.shopId, customerId: order.customerId,
       });
     }
     return { message: 'Order delivered confirm ho gaya' };
@@ -1139,15 +1166,11 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
   };
 }
 
-export async function enqueueReferralUnlock(
-  prisma: PrismaClient,
-  redis: Redis,
-  orderId: string,
-  customerId: string,
-): Promise<void> {
-  const redemption = await prisma.referralRedemption.findUnique({
-    where: { referredUserId: customerId },
-  });
-  if (!redemption || redemption.refereeCreditStatus === 'credited') return;
-  console.log(`[Referral] Unlock queued for order ${orderId}`);
-}
+// Referral unlock scaffolding removed (P2-8 / Phase 3 7/7): v1 launches with
+// growth loops HIDDEN (customer-app FEATURES.growthLoops=false — rewards are
+// not funded). The old enqueueReferralUnlock was a stub that logged "Unlock
+// queued" while queueing nothing, and no delivered-path ever called it.
+// Signup still generates codes and records redemptions (data continuity), so
+// rewards can be honored retroactively when the feature is funded — rebuild
+// the unlock worker from git history (worker/jobs/referral.job.ts) and wire
+// it on the 'delivered' transition, atomically and idempotently per side.

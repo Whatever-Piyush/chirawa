@@ -32,7 +32,7 @@ async function dispatchPlugin(app: FastifyInstance): Promise<void> {
         await app.queues.assignment.add(
           JobNames.ASSIGN_BATCH,
           { batchId, attempt: 1 } satisfies AssignBatchPayload,
-          { delay, removeOnComplete: true, removeOnFail: true },
+          { delay }, // retries/retention from DEFAULT_JOB_OPTIONS (P1-8)
         );
         app.log.info({ orderId: payload.orderId, batchId, action, delay }, '🛵 Batch scheduled for assignment');
       } catch (err) {

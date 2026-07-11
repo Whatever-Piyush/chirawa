@@ -1,4 +1,7 @@
 import { env } from '../../config/env';
+import { serviceLogger } from '../../shared/observability/logger';
+
+const log = serviceLogger('sms');
 
 function isSmsConfigured(): boolean {
   return env.FAST2SMS_API_KEY !== 'placeholder';
@@ -7,11 +10,23 @@ function isSmsConfigured(): boolean {
 // ── Send transactional SMS ────────────────────────────────────────────────────
 // Used ONLY for critical events: delivery confirmed, refund issued
 // Routine notifications use FCM (free) — SMS costs ₹0.20 each
+//
+// DLT readiness (Phase 5): route 'q' (quick) below is the PRE-DLT route — fine
+// for testing, not TRAI-compliant for production transactional traffic. Once
+// DLT registration completes (entity → sender-ID header → content templates,
+// then upload to Fast2SMS "DLT Manager" for message IDs — see
+// docs/PRODUCTION_READINESS_CHECKLIST.md §5), swap this call per the verified
+// Fast2SMS bulkV2 contract (docs.fast2sms.com/reference/dlt-sms):
+//   route: 'dlt', sender_id: '<approved 3-6 letter header>',
+//   message: '<approved Message ID>', variables_values: 'a|b|c' (pipe-sep)
+// The SmsTemplates below must be registered VERBATIM (variables as {#var#});
+// each then sends its template ID + variables instead of rendered text.
+// OTP login is unaffected: otp.service uses route 'otp', which rides
+// Fast2SMS's own DLT-approved template — no customer registration needed.
 
 export async function sendSms(phone: string, message: string): Promise<void> {
   if (!isSmsConfigured()) {
-    console.log(`\n📨 [DEV SMS] → ${phone}`);
-    console.log(`   Message: ${message}`);
+    log.info({ phone, message }, '[DEV SMS] not sent — Fast2SMS unconfigured');
     return;
   }
 
@@ -32,11 +47,11 @@ export async function sendSms(phone: string, message: string): Promise<void> {
     });
 
     if (!response.ok) {
-      console.error('Fast2SMS error:', await response.text());
+      log.error({ status: response.status, body: await response.text() }, 'Fast2SMS error');
     }
   } catch (err) {
     // SMS failure is NEVER fatal — FCM is the primary channel
-    console.error('SMS send failed (non-fatal):', err);
+    log.error({ err }, 'SMS send failed (non-fatal)');
   }
 }
 

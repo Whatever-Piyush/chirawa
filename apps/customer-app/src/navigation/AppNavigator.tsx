@@ -48,7 +48,9 @@ import OrderPlacedScreen from '../screens/orders/OrderPlacedScreen';
 export type RootStackParamList = {
   // Auth
   OtpLogin: undefined;
-  VerifyOtp: { phone: string };
+  // expiresInSeconds: OTP validity from the send-otp response — drives the
+  // verify screen's "code valid for m:ss" countdown (defaults to 5 min).
+  VerifyOtp: { phone: string; expiresInSeconds?: number };
   SetupProfile: undefined; // 🔴 NEW: Added to routing params
   // Main
   MainTabs: NavigatorScreenParams<TabParamList> | undefined;
@@ -67,6 +69,8 @@ export type RootStackParamList = {
   OrderTracking: { orderId: string; groupId?: string };
   OrderPlaced: {
     orderId: string;
+    // Discount from the checkout preview — renders the "You saved ₹X" recap.
+    savedPaise?: number;
     groupId?: string;
     shops?: Array<{ orderId: string; shopName: string; total: number }>;
     totalAmount?: number;

@@ -1,8 +1,30 @@
+import type { JobsOptions } from 'bullmq';
+
+// ── Standard job policy (P1-8) ────────────────────────────────────────────────
+// Applied as defaultJobOptions on EVERY queue (worker/index.ts +
+// shared/plugins/queue.plugin.ts). Before this, jobs ran with attempts: 1 and
+// several producers set removeOnFail: true — a transient Redis/DB blip turned
+// into a lost auto-accept or an unassigned batch with no trace to debug.
+//
+//   attempts 5 × exponential from 5s → 5s, 10s, 20s, 40s, 80s (~2.5 min total):
+//     rides out restarts/blips; every processor here is idempotent (CAS
+//     transitions, SET NX claims), so re-runs are safe.
+//   removeOnComplete: bounded history for inspection, then gone.
+//   removeOnFail: KEEP failures 7 days — failed jobs are evidence, not litter.
+//
+// Per-add overrides still apply for special cases (e.g. auto-accept's
+// removeOnComplete: true, which frees its deterministic jobId for re-arming).
+export const DEFAULT_JOB_OPTIONS = {
+  attempts: 5,
+  backoff:  { type: 'exponential', delay: 5_000 },
+  removeOnComplete: { age: 24 * 3600, count: 500 },
+  removeOnFail:     { age: 7 * 24 * 3600, count: 1000 },
+} as const satisfies JobsOptions;
+
 export const QueueNames = {
   SETTLEMENT:      'chirawa-settlement',
   RECONCILIATION:  'chirawa-reconciliation',
   CLEANUP:         'chirawa-cleanup',
-  REFERRAL:        'chirawa-referral',
   NOTIFICATION:    'chirawa-notification',
   ORDER_ASSIGNMENT: 'chirawa-order-assignment',
   SELLER_ACCEPT:    'chirawa-seller-accept',
@@ -20,7 +42,6 @@ export const JobNames = {
   OTP_CLEANUP:           'otp-cleanup',
   CART_CLEANUP:          'cart-cleanup',
   TOKEN_CLEANUP:         'token-cleanup',
-  UNLOCK_REFERRAL:       'unlock-referral',
   SEND_PUSH:             'send-push',
   SEND_SMS:              'send-sms',
   CATALOG_ENRICH:        'catalog-enrich',
@@ -51,11 +72,6 @@ export interface SingleSellerSettlePayload {
   sellerProfileId: string;
   shopId:          string;
   periodDate:      string;
-}
-
-export interface UnlockReferralPayload {
-  orderId:        string;
-  referredUserId: string;
 }
 
 export interface SendPushPayload {

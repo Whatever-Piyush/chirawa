@@ -3,6 +3,9 @@ import type Redis from 'ioredis';
 import type { PrismaClient } from '@prisma/client';
 import { env } from '../../config/env';
 import { ValidationError, BusinessRuleError } from '../../shared/errors/app-errors';
+import { serviceLogger } from '../../shared/observability/logger';
+
+const log = serviceLogger('otp');
 
 // Redis key helpers — consistent naming prevents typos
 const keys = {
@@ -153,11 +156,13 @@ export function createOtpService(redis: Redis, prisma: PrismaClient) {
   async function dispatchOtp(phone: string, code: string): Promise<void> {
     if (env.NODE_ENV !== 'production') {
       // Dev mode — log OTP so you can test without SMS credits
-      console.warn(`\n🔐 DEV OTP for ${phone}: ${code}\n`);
+      log.warn({ phone, code }, 'DEV OTP (not sent — non-production)');
       return;
     }
 
-    // Production — Fast2SMS
+    // Production — Fast2SMS. Route 'otp' rides Fast2SMS's OWN DLT-approved
+    // template ("Your OTP: {#var#}"), so OTP login needs no DLT registration
+    // of ours (Phase 5 §5) — unlike sms.service's transactional templates.
     try {
       const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
         method: 'POST',
@@ -173,11 +178,11 @@ export function createOtpService(redis: Redis, prisma: PrismaClient) {
       });
 
       if (!response.ok) {
-        console.error('Fast2SMS error:', await response.text());
+        log.error({ status: response.status, body: await response.text() }, 'Fast2SMS error');
       }
     } catch (err) {
       // SMS failure should NOT fail login — log and continue
-      console.error('SMS dispatch failed (non-fatal):', err);
+      log.error({ err }, 'SMS dispatch failed (non-fatal)');
     }
   }
 

@@ -1,7 +1,9 @@
-import { envSchema, type Env } from './env.schema';
+import { envSchema, collectProductionWarnings, type Env } from './env.schema';
 
 export type { Env };
 
+// console (not pino) on purpose: this runs while env is still being parsed and
+// every logger (shared/observability/logger.ts) imports the parsed env.
 function validateEnv(): Env {
   const result = envSchema.safeParse(process.env);
 
@@ -13,6 +15,13 @@ function validateEnv(): Env {
     });
     console.error('\nFix these in apps/api/.env then restart.\n');
     process.exit(1);
+  }
+
+  // Degraded-but-bootable config: warn on every boot so it can't be forgotten.
+  if (result.data.NODE_ENV === 'production') {
+    for (const warning of collectProductionWarnings(result.data)) {
+      console.warn(`⚠️  [env] ${warning}`);
+    }
   }
 
   return result.data;

@@ -24,11 +24,6 @@
       "package": "com.chirawa.customer",
       "versionCode": 1,
       "googleServicesFile": "./google-services.json",
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyBN1U2Krej0cXtPdLmED6APAi2h7xF0f2I"
-        }
-      },
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",

@@ -52,3 +52,6 @@ ecosystem.config.js.backup
 
 # External AI-tooling configs
 .codex/
+# Load-test run artifacts (Phase 6) — evidence snapshots are copied into docs/perf
+scripts/loadtest/results/
+scripts/smoke/results/

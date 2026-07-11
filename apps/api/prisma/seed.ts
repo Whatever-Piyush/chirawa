@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { assertSeedableEnvironment } from './seed-guard';
 import { seedSearchAliases } from './seeds/search-aliases';
 import { seedShops } from './seeds/shops';
 import { seedZones } from './seeds/zones';
@@ -7,6 +8,7 @@ import { seedRiders } from './seeds/riders';
 const prisma = new PrismaClient();
 
 async function main(): Promise<void> {
+  assertSeedableEnvironment('db:seed'); // Phase 5 — dev demo data must never reach production
   console.log('🌱 Seeding database...');
 
   // ── Fee Rule v1 ────────────────────────────────────────────────────────────
@@ -130,9 +132,11 @@ async function main(): Promise<void> {
   });
   console.log('  ✅ Promo seeded (FIRSTORDER — free first delivery)');
 
-  // ── Founder admin ──────────────────────────────────────────────────────────
+  // ── Founder admin (DEV ONLY — this seed refuses to run in production) ──────
   // One admin account for the live-ops / dispatch view. Logs in via OTP like any
-  // user (dev bypass 123456). Update the phone before launch.
+  // user (dev bypass 123456). The PRODUCTION founder admin is created with the
+  // founder's real phone via: pnpm --filter @chirawa/api admin:create -- --phone <number>
+  // (scripts/create-admin.ts — Phase 5).
   await prisma.user.upsert({
     where:  { phone: '9999900001' },
     update: { role: 'admin', isActive: true },

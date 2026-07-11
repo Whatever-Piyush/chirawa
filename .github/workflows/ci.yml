@@ -3,8 +3,10 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
+  # Called by deploy.yml as the deploy gate on every push to main (audit P0-6:
+  # deploys must not proceed when CI is red). No separate `push: main` trigger —
+  # that would run everything twice.
+  workflow_call:
 
 jobs:
   test:
@@ -38,10 +40,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
+      - name: Setup pnpm (version from package.json "packageManager")
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -67,5 +67,7 @@ jobs:
           JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY_TEST }}
           JWT_PUBLIC_KEY:  ${{ secrets.JWT_PUBLIC_KEY_TEST }}
 
+      # The image is the contingency deploy artifact (ADR 004) — keep it
+      # buildable even though the active deploy path is PM2 + dist from git.
       - name: Build Docker image (verify it builds)
         run: docker build -t chirawa-api:test .

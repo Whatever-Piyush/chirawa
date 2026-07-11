@@ -2,6 +2,9 @@
 
 Go to: GitHub repo → Settings → Secrets and variables → Actions → New secret
 
+Used by `deploy.yml`/`rollback.yml` (SSH release) and `ci.yml` (tests).
+Deployment flow: `docs/DEPLOYMENT.md`.
+
 ## Required secrets
 
 | Secret name | What it is | How to get |
@@ -29,5 +32,7 @@ Go to: GitHub repo → Settings → Secrets and variables → Actions → New se
 ```
 
 ## GITHUB_TOKEN
-This is automatic — GitHub provides it. No setup needed.
-It's used to push Docker images to GitHub Container Registry.
+Automatic — GitHub provides it; no setup needed. Since the Phase 2 pipeline rework the
+deploy no longer pushes Docker images to a registry (the image is a CI-verified
+contingency artifact only — see `docs/adr/004-deploy-pipeline.md`), so no registry
+credentials are required anywhere.

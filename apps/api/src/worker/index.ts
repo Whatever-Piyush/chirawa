@@ -4,7 +4,7 @@ import { Worker, Queue } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import Redis from 'ioredis';
 import { env } from '../config/env';
-import { QueueNames, JobNames } from './queues';
+import { QueueNames, JobNames, DEFAULT_JOB_OPTIONS } from './queues';
 import { setupSchedules } from './scheduler';
 import { runDailySettlement, processSingleSellerSettle, runPayoutReconciliation } from './jobs/settlement.job';
 import { runPaymentReconciliation } from './jobs/reconciliation.job';
@@ -13,12 +13,13 @@ import { sweepExpiredReservations } from '../modules/inventory/reservations.serv
 import { runInventoryReconciliation } from '../modules/inventory/reconcile.service';
 import { getInventoryConfig } from '../modules/inventory/inventory.config';
 import { runMorningCardPush } from './jobs/morning-card.job';
-import { processUnlockReferral } from './jobs/referral.job';
 import { processAssignBatch } from './jobs/assignment.job';
 import { runCatalogEnrichment } from './jobs/enrichment.job';
 import { createOffDumpSource } from '../services/off-source';
 import { closeEventBus } from '../shared/events/event-bus';
 import { initSentry, captureError, flushSentry } from '../shared/observability/sentry';
+import { logger } from './logger';
+import { startWorkerHeartbeat } from './heartbeat';
 
 initSentry('worker'); // no-op without SENTRY_DSN (4.1)
 
@@ -34,15 +35,14 @@ const redisForCleanup = new Redis(env.REDIS_URL, {
 
 const prisma = new PrismaClient();
 
-const settlementQueue     = new Queue(QueueNames.SETTLEMENT,     { connection: redisConnection });
-const reconciliationQueue = new Queue(QueueNames.RECONCILIATION, { connection: redisConnection });
-const cleanupQueue        = new Queue(QueueNames.CLEANUP,        { connection: redisConnection });
-const referralQueue       = new Queue(QueueNames.REFERRAL,       { connection: redisConnection });
-const assignmentQueue     = new Queue(QueueNames.ORDER_ASSIGNMENT, { connection: redisConnection });
+const settlementQueue     = new Queue(QueueNames.SETTLEMENT, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
+const reconciliationQueue = new Queue(QueueNames.RECONCILIATION, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
+const cleanupQueue        = new Queue(QueueNames.CLEANUP, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
+const assignmentQueue     = new Queue(QueueNames.ORDER_ASSIGNMENT, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
 // Reconciliation (worker) enqueues seller auto-accept here; the API-tier worker
 // in seller-timeout.plugin consumes it (0.4).
-const sellerAcceptQueue   = new Queue(QueueNames.SELLER_ACCEPT,   { connection: redisConnection });
-const enrichmentQueue     = new Queue(QueueNames.ENRICHMENT,      { connection: redisConnection });
+const sellerAcceptQueue   = new Queue(QueueNames.SELLER_ACCEPT, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
+const enrichmentQueue     = new Queue(QueueNames.ENRICHMENT, { connection: redisConnection, defaultJobOptions: DEFAULT_JOB_OPTIONS });
 
 // OFF bulk-dump source for catalog image enrichment (Phase 2). No dump configured
 // → the worker marks items needs_manual; never touches the live OFF API for bulk.
@@ -83,13 +83,6 @@ const cleanupWorker = new Worker(
   { connection: redisConnection, concurrency: 2 },
 );
 
-const referralWorker = new Worker(
-  QueueNames.REFERRAL,
-  async (job) => {
-    if (job.name === JobNames.UNLOCK_REFERRAL) await processUnlockReferral(job, prisma);
-  },
-  { connection: redisConnection, concurrency: 5 },
-);
 
 const assignmentWorker = new Worker(
   QueueNames.ORDER_ASSIGNMENT,
@@ -110,27 +103,35 @@ const enrichmentWorker = new Worker(
   { connection: redisConnection, concurrency: 1 },
 );
 
-const workers = [settlementWorker, reconciliationWorker, cleanupWorker, referralWorker, assignmentWorker, enrichmentWorker];
+const workers = [settlementWorker, reconciliationWorker, cleanupWorker, assignmentWorker, enrichmentWorker];
 
 workers.forEach((worker) => {
-  worker.on('completed', (job) => console.log(`✅ Job completed: ${job.name}`));
+  worker.on('completed', (job) => logger.info({ jobName: job.name, jobId: job.id }, `✅ Job completed: ${job.name}`));
+  // 'failed' fires per ATTEMPT (P1-8). Distinguish will-retry from final so
+  // logs tell the truth and Sentry only pages when BullMQ has actually given
+  // up — not 5 times for one flaky Redis blip.
   worker.on('failed',    (job, err) => {
-    console.error(`❌ Job failed: ${job?.name}:`, err.message);
-    captureError(err, { jobName: job?.name, jobId: job?.id });
+    const attemptsMade  = job?.attemptsMade ?? 0;
+    const attemptsTotal = job?.opts.attempts ?? 1;
+    if (job && attemptsMade < attemptsTotal) {
+      logger.warn({ jobName: job.name, jobId: job.id, attemptsMade, attemptsTotal, err: err.message },
+        `⚠️ Job failed, retrying (${attemptsMade}/${attemptsTotal}): ${job.name}`);
+      return;
+    }
+    logger.error({ jobName: job?.name, jobId: job?.id, attemptsMade, attemptsTotal, err },
+      `❌ Job FAILED permanently (${attemptsMade}/${attemptsTotal} attempts): ${job?.name}`);
+    captureError(err, { jobName: job?.name, jobId: job?.id, attemptsMade });
   });
-  worker.on('error',     (err) => { console.error('Worker error:', err.message); captureError(err); });
+  worker.on('error',     (err) => { logger.error({ err }, 'Worker error'); captureError(err); });
 });
 
 async function start(): Promise<void> {
   await prisma.$connect();
 
-  console.log('🔧 Chirawa Worker started');
-  console.log('   Settlement worker  : ready');
-  console.log('   Reconciliation     : ready');
-  console.log('   Cleanup worker     : ready');
-  console.log('   Referral worker    : ready');
-  console.log('   Assignment worker  : ready');
-  console.log('   Enrichment worker  : ready');
+  logger.info({ workers: ['settlement', 'reconciliation', 'cleanup', 'assignment', 'enrichment'] }, '🔧 Chirawa Worker started');
+
+  // Liveness dead-man's switch (P1-9): pings stop ⇒ the monitor pages.
+  startWorkerHeartbeat(env.WORKER_HEARTBEAT_URL, logger);
 
   await setupSchedules({
     settlement:     settlementQueue,
@@ -145,11 +146,11 @@ let isShuttingDown = false;
 async function shutdown(): Promise<void> {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  console.log('Worker shutting down...');
+  logger.info('Worker shutting down...');
   try {
     await Promise.all(workers.map((w) => w.close()));
     await Promise.all([
-      settlementQueue, reconciliationQueue, cleanupQueue, referralQueue, assignmentQueue, sellerAcceptQueue, enrichmentQueue,
+      settlementQueue, reconciliationQueue, cleanupQueue, assignmentQueue, sellerAcceptQueue, enrichmentQueue,
     ].map((q) => q.close()));
     await closeEventBus();
     await flushSentry();
@@ -164,6 +165,6 @@ process.on('SIGTERM', () => void shutdown());
 process.on('SIGINT',  () => void shutdown());
 
 void start().catch((err) => {
-  console.error('Worker startup failed:', err);
+  logger.error({ err }, 'Worker startup failed');
   process.exit(1);
 });

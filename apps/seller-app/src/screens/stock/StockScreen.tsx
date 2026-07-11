@@ -1,25 +1,45 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
-  View, Text, FlatList, Switch, StyleSheet, ActivityIndicator, Alert,
-  Modal, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform,
+  View, Text, SectionList, Switch, StyleSheet, ActivityIndicator, Alert,
+  Modal, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Image, Linking,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
-import { SellerApi, type ProductInput, type StockThisInput } from '../../services/api.service';
+import { SellerApi, UploadError, type ProductInput, type StockThisInput } from '../../services/api.service';
 import { saveStockThis, flushQueue } from '../../services/offline-queue';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // mirrors the API's 5 MB upload cap
+
+// Per-shop AsyncStorage key for remembered category collapse state (Sprint 3).
+const collapseKey = (shopId: string) => `stock:collapsed:${shopId}`;
+
 interface Product {
   id: string; name: string; stockStatus: string;
   price: number; mrpPaise: number | null; unit: string | null;
-  categoryId?: string | null;
+  categoryId?: string | null; imageUrl?: string | null;
 }
-interface Category { id: string; name: string; products: Product[] }
+interface Category { id: string; name: string; sortOrder?: number; products: Product[] }
 interface ShopData  { id: string; name: string; categories: Category[] }
+
+// SectionList shapes (Sprint 3). Each category is one section; every row carries
+// its category id so edit/long-press keep working on the grouped rows.
+type RowItem = Product & { categoryId: string };
+interface StockSection {
+  id: string; name: string;
+  total: number;        // products shown under this section (matches during search)
+  outOfStock: number;   // of those, how many are out of stock
+  collapsed: boolean;
+  data: RowItem[];      // [] when collapsed → header still renders (sticky)
+  memberIds: string[];  // ids shown under this section regardless of collapse — drives
+                        // tri-state section selection + search-scoped Select All (Sprint 4)
+}
 
 // Form state for add/edit. Strings (rupees) — converted to paise on save.
 interface FormState {
@@ -28,15 +48,37 @@ interface FormState {
   // Set when the add originated from a barcode scan → save() routes to the
   // idempotent stock-this upsert (offline-tolerant) instead of plain create.
   barcode: string | null; masterId: string | null;
+  // Photo (Seller Sprint 1). imageUrl = the RESOLVED, uploaded URL (or null when
+  // cleared). localUri = the on-device file shown as an instant preview and kept
+  // for retry. imageTouched marks the field as changed, so save() sends the URL /
+  // null only on edit when the seller actually touched the photo (else omit).
+  imageUrl: string | null; localUri: string | null;
+  uploading: boolean; uploadFailed: boolean; imageTouched: boolean;
 }
-const EMPTY_FORM: FormState = { name: '', priceRupees: '', mrpRupees: '', unit: '', stockQty: '', categoryId: null, barcode: null, masterId: null };
+const EMPTY_FORM: FormState = {
+  name: '', priceRupees: '', mrpRupees: '', unit: '', stockQty: '', categoryId: null, barcode: null, masterId: null,
+  imageUrl: null, localUri: null, uploading: false, uploadFailed: false, imageTouched: false,
+};
 
 export default function StockScreen() {
   const { state }               = useAuth();
   const navigation              = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [shop, setShop]         = useState<ShopData | null>(null);
   const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState(false);
   const [updating, setUpdating] = useState<string | null>(null);
+  // Inventory search (Sprint 2). Own state — loadShop() never touches it, so the
+  // query survives a refresh / stock toggle / offline-sync reload untouched.
+  const [query, setQuery]       = useState('');
+  // Category collapse state (Sprint 3): the set of COLLAPSED category ids. Empty =
+  // all expanded (categories are expanded by default). Persisted per shop in
+  // AsyncStorage; own state, so a loadShop() refresh never clobbers it.
+  const [collapsedSet, setCollapsedSet] = useState<Set<string>>(new Set());
+  // Bulk selection mode (Sprint 4). selectedIds = product ids ticked for a bulk
+  // stock action. Selection persists across search/collapse; cleared on exit.
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy]           = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -46,21 +88,28 @@ export default function StockScreen() {
   const [importing, setImporting] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [lookingUp, setLookingUp]     = useState(false);
+  const uploadAbortRef = useRef<AbortController | null>(null);
 
   const loadShop = useCallback(async () => {
-    if (!state.token || !state.userId) return;
+    if (!state.token) return;
+    setError(false);
     try {
-      const orders = await SellerApi.getOrders(state.token) as Array<{ shopId: string }>;
-      const shopId = orders[0]?.shopId;
-      if (!shopId) { setLoading(false); return; }
-      const data = await SellerApi.getShopProducts(shopId, state.token) as ShopData;
+      // Resolve the shop from the seller's profile — NOT from the first order.
+      // A newly provisioned seller (zero orders) still gets their shop, so
+      // adding products works immediately (Seller Sprint 0 P0-1).
+      const myShop = await SellerApi.getMyShop(state.token);
+      const data = await SellerApi.getShopProducts(myShop.id, state.token) as ShopData;
       setShop(data);
-    } catch (e) {
-      console.error('Load shop failed:', e);
+    } catch {
+      // Never silently fall through to "no shop" on a network failure —
+      // surface an error the seller can retry (Seller Sprint 0 P0-3).
+      setError(true);
     } finally {
       setLoading(false);
     }
-  }, [state.token, state.userId]);
+  }, [state.token]);
+
+  const retry = useCallback(() => { setLoading(true); void loadShop(); }, [loadShop]);
 
   useEffect(() => { void loadShop(); }, [loadShop]);
 
@@ -69,6 +118,34 @@ export default function StockScreen() {
     if (!state.token) return;
     void flushQueue(state.token).then(({ synced }) => { if (synced > 0) void loadShop(); }).catch(() => {});
   }, [state.token, loadShop]);
+
+  // Restore remembered category collapse state for this shop (Sprint 3). Keyed on
+  // shop id, so a loadShop() refresh (new object, same id) does NOT reload/clobber
+  // the in-memory set; an app restart remounts the screen → reload from storage.
+  useEffect(() => {
+    const shopId = shop?.id;
+    if (!shopId) return;
+    let cancelled = false;
+    void AsyncStorage.getItem(collapseKey(shopId)).then((raw) => {
+      if (cancelled || !raw) return;
+      try {
+        const ids = JSON.parse(raw) as unknown;
+        if (Array.isArray(ids)) setCollapsedSet(new Set(ids as string[]));
+      } catch { /* ignore a corrupt cache entry */ }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [shop?.id]);
+
+  // Tap a category header to collapse/expand; persist the set per shop (Sprint 3).
+  const toggleCategory = useCallback((catId: string) => {
+    setCollapsedSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(catId)) next.delete(catId); else next.add(catId);
+      const shopId = shop?.id;
+      if (shopId) void AsyncStorage.setItem(collapseKey(shopId), JSON.stringify([...next])).catch(() => {});
+      return next;
+    });
+  }, [shop?.id]);
 
   // Scan → look up the master → open the add sheet prefilled. Lookup failure
   // (offline) still opens it with the barcode so the seller can fill manually.
@@ -81,14 +158,12 @@ export default function StockScreen() {
       const m = res.master;
       setEditingId(null);
       setForm({
-        name:        m?.name ?? '',
-        priceRupees: '',
-        mrpRupees:   m?.mrpPaise != null ? String(Math.round(m.mrpPaise / 100)) : '',
-        unit:        m?.unit ?? '',
-        stockQty:    '',
-        categoryId:  null,
+        ...EMPTY_FORM,
+        name:     m?.name ?? '',
+        mrpRupees: m?.mrpPaise != null ? String(Math.round(m.mrpPaise / 100)) : '',
+        unit:     m?.unit ?? '',
         barcode,
-        masterId:    m?.id ?? null,
+        masterId: m?.id ?? null,
       });
       setNewCategory('');
       setModalOpen(true);
@@ -101,6 +176,89 @@ export default function StockScreen() {
       setLookingUp(false);
     }
   }
+
+  // ── Product photo (Seller Sprint 1) ────────────────────────────────────────
+  // Upload happens ON PICK, not on Save: the seller sees progress + can cancel/
+  // retry immediately, and save() only sends the already-resolved URL.
+  function choosePhoto() {
+    Alert.alert('Product ki photo', 'Photo kahan se lein?', [
+      { text: '📷 Camera',  onPress: () => void pickFrom('camera') },
+      { text: '🖼️ Gallery', onPress: () => void pickFrom('gallery') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
+  async function pickFrom(source: 'camera' | 'gallery') {
+    const perm = source === 'camera'
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!perm.granted) {
+      // Message + Open Settings (only when the OS won't re-ask) + fallback to the
+      // other source (§9 permission-denied).
+      const other: 'camera' | 'gallery' = source === 'camera' ? 'gallery' : 'camera';
+      const buttons: Array<{ text: string; style?: 'cancel'; onPress?: () => void }> = [];
+      if (!perm.canAskAgain) buttons.push({ text: 'Settings kholein', onPress: () => void Linking.openSettings() });
+      buttons.push({ text: other === 'camera' ? '📷 Camera try karein' : '🖼️ Gallery try karein', onPress: () => void pickFrom(other) });
+      buttons.push({ text: 'Cancel', style: 'cancel' });
+      Alert.alert(
+        source === 'camera' ? 'Camera permission chahiye' : 'Gallery permission chahiye',
+        source === 'camera' ? 'Photo lene ke liye camera ki permission dein.' : 'Photo chunne ke liye gallery ki permission dein.',
+        buttons,
+      );
+      return;
+    }
+
+    const result = source === 'camera'
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.6 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.6 });
+    if (result.canceled || !result.assets?.[0]) return; // seller backed out
+    const asset = result.assets[0];
+
+    // Reject oversize BEFORE the round trip (quality 0.6 + crop usually keeps it
+    // small; the picker doesn't always report fileSize, so the server 400 is the
+    // backstop — see startUpload).
+    if (asset.fileSize != null && asset.fileSize > MAX_IMAGE_BYTES) {
+      Alert.alert('Photo bahut badi hai', 'Photo bahut badi hai — chhoti photo chunein');
+      return;
+    }
+    await startUpload(asset.uri);
+  }
+
+  async function startUpload(uri: string) {
+    if (!state.token) return;
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
+    // Show the local file instantly as the preview; keep it for retry.
+    setForm((f) => ({ ...f, localUri: uri, uploading: true, uploadFailed: false }));
+    try {
+      const { url } = await SellerApi.uploadProductImage(uri, state.token, controller.signal);
+      setForm((f) => ({ ...f, imageUrl: url, localUri: uri, uploading: false, uploadFailed: false, imageTouched: true }));
+    } catch (e: unknown) {
+      if (controller.signal.aborted) { // seller cancelled — not a failure
+        setForm((f) => ({ ...f, uploading: false, uploadFailed: false, localUri: null }));
+        return;
+      }
+      if (e instanceof UploadError && e.status === 400) { // oversize / bad type — re-pick, no retry
+        setForm((f) => ({ ...f, uploading: false, uploadFailed: false, localUri: null }));
+        Alert.alert('Photo bahut badi hai', 'Photo bahut badi hai — chhoti photo chunein');
+        return;
+      }
+      // Network failure — keep localUri so Retry can re-send the same file.
+      setForm((f) => ({ ...f, uploading: false, uploadFailed: true }));
+    } finally {
+      if (uploadAbortRef.current === controller) uploadAbortRef.current = null;
+    }
+  }
+
+  function cancelUpload() { uploadAbortRef.current?.abort(); }
+  function retryUpload()  { if (form.localUri) void startUpload(form.localUri); }
+  function removePhoto() {
+    uploadAbortRef.current?.abort();
+    setForm((f) => ({ ...f, imageUrl: null, localUri: null, uploading: false, uploadFailed: false, imageTouched: true }));
+  }
+
+  function closeSheet() { uploadAbortRef.current?.abort(); setModalOpen(false); }
 
   async function toggleStock(productId: string, currentStatus: string) {
     if (!state.token) return;
@@ -146,14 +304,13 @@ export default function StockScreen() {
   function openEdit(p: Product) {
     setEditingId(p.id);
     setForm({
+      ...EMPTY_FORM,
       name: p.name,
       priceRupees: String(Math.round(p.price / 100)),
       mrpRupees:   p.mrpPaise != null ? String(Math.round(p.mrpPaise / 100)) : '',
       unit:        p.unit ?? '',
-      stockQty:    '',
       categoryId:  p.categoryId ?? null,
-      barcode:     null,  // editing an existing row → normal update path
-      masterId:    null,
+      imageUrl:    p.imageUrl ?? null, // existing photo — untouched until changed
     });
     setNewCategory(''); setModalOpen(true);
   }
@@ -169,6 +326,7 @@ export default function StockScreen() {
       Alert.alert('Galti', 'MRP price se kam nahi ho sakta'); return;
     }
     const qty = form.stockQty.trim() === '' ? undefined : Number(form.stockQty);
+    if (form.uploading) { Alert.alert('Ruko', 'Photo upload hone dein, phir save karein'); return; }
 
     setSaving(true);
     try {
@@ -187,7 +345,10 @@ export default function StockScreen() {
         ...(qty !== undefined ? { stockQty: qty } : {}),
       };
       if (editingId) {
-        await SellerApi.updateProduct(editingId, base, state.token);
+        // Photo: send the resolved URL / null (clear) only if the seller touched
+        // it; otherwise omit so the existing image is left as-is (Seller Sprint 1).
+        const updatePayload = { ...base, ...(form.imageTouched ? { imageUrl: form.imageUrl } : {}) };
+        await SellerApi.updateProduct(editingId, updatePayload, state.token);
       } else if (form.barcode) {
         // Scanned add → idempotent stock-this upsert, queued if offline.
         const stockInput: StockThisInput = {
@@ -196,6 +357,7 @@ export default function StockScreen() {
           ...(form.unit.trim() ? { unit: form.unit.trim() } : {}),
           ...(categoryId ? { categoryId } : {}),
           ...(qty !== undefined ? { stockQty: qty } : {}),
+          ...(form.imageUrl ? { imageUrl: form.imageUrl } : {}),
           ...(form.masterId ? { masterId: form.masterId } : {}),
         };
         const result = await saveStockThis(stockInput, state.token);
@@ -203,7 +365,11 @@ export default function StockScreen() {
           Alert.alert('Offline — queue mein daala 📥', 'Internet aane par apne aap sync ho jayega.');
         }
       } else {
-        await SellerApi.createProduct({ shopId: shop.id, ...base } as ProductInput, state.token);
+        // New product: include the photo URL only when one was set (never null).
+        await SellerApi.createProduct(
+          { shopId: shop.id, ...base, ...(form.imageUrl ? { imageUrl: form.imageUrl } : {}) } as ProductInput,
+          state.token,
+        );
       }
       setModalOpen(false);
       await loadShop();
@@ -214,10 +380,12 @@ export default function StockScreen() {
     }
   }
 
-  function productActions(p: Product) {
-    Alert.alert(p.name, undefined, [
-      { text: 'Galat image report karein', onPress: () => void reportImage(p.id) },
-      { text: 'Product hatayein', style: 'destructive', onPress: () => void doDelete(p.id) },
+  // Single-product report/delete. Long-press now enters selection mode (Sprint 4),
+  // so these actions moved to the edit sheet's "⋯" — reachable via tap → edit → ⋯.
+  function productActions(productId: string, name: string) {
+    Alert.alert(name, undefined, [
+      { text: 'Galat image report karein', onPress: () => void reportImage(productId) },
+      { text: 'Product hatayein', style: 'destructive', onPress: () => void doDelete(productId) },
       { text: 'Cancel', style: 'cancel' },
     ]);
   }
@@ -232,6 +400,7 @@ export default function StockScreen() {
   }
   async function doDelete(productId: string) {
     if (!state.token) return;
+    setModalOpen(false); // invoked from the edit sheet's ⋯ — close it as the row disappears
     try { await SellerApi.deleteProduct(productId, state.token); await loadShop(); }
     catch (e: unknown) { Alert.alert('Error', e instanceof Error ? e.message : 'Delete nahi hua'); }
   }
@@ -240,78 +409,372 @@ export default function StockScreen() {
     c.products.map((p) => ({ ...p, categoryId: c.id })),
   ) ?? [];
 
+  // Client-side inventory search (Sprint 2): case-insensitive, whitespace-trimmed,
+  // matches product name OR unit.
+  const normalizedQuery = query.trim().toLowerCase();
+  const isSearching     = normalizedQuery !== '';
+
+  // ── Category sections (Sprint 3) ────────────────────────────────────────────
+  // One SectionList section per category, in server sortOrder; products keep their
+  // server order inside each. Collapsed → empty `data` (the sticky header still
+  // shows). While searching we force-expand and drop non-matching categories; the
+  // remembered collapse set is never mutated, so it returns when search clears.
+  const sections = useMemo<StockSection[]>(() => {
+    const cats = [...(shop?.categories ?? [])].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    const q = normalizedQuery;
+    const matches = (p: RowItem) =>
+      p.name.toLowerCase().includes(q) || (p.unit ?? '').toLowerCase().includes(q);
+
+    return cats
+      .map((c) => {
+        const rows: RowItem[] = c.products.map((p) => ({ ...p, categoryId: c.id }));
+        const shown     = isSearching ? rows.filter(matches) : rows;
+        const collapsed = isSearching ? false : collapsedSet.has(c.id);
+        return {
+          id:         c.id,
+          name:       c.name,
+          total:      shown.length,
+          outOfStock: shown.filter((p) => p.stockStatus === 'out_of_stock').length,
+          collapsed,
+          data:       collapsed ? [] : shown,
+          memberIds:  shown.map((p) => p.id),   // regardless of collapse (Sprint 4 selection)
+        };
+      })
+      // While searching, hide categories with no match; otherwise keep every
+      // category (empty ones stay visible with a "0 products" header).
+      .filter((s) => !isSearching || s.total > 0);
+  }, [shop, isSearching, normalizedQuery, collapsedSet]);
+
+  const searchResultCount = isSearching ? sections.reduce((n, s) => n + s.total, 0) : 0;
+
+  // ── Bulk selection (Sprint 4) ───────────────────────────────────────────────
+  // Every product id currently visible (search-scoped) — the reach of "Select All".
+  const visibleMemberIds = useMemo(() => sections.flatMap((s) => s.memberIds), [sections]);
+  const allInViewSelected = visibleMemberIds.length > 0 && visibleMemberIds.every((id) => selectedIds.has(id));
+
+  const sectionSelectState = (section: StockSection): 'checked' | 'indeterminate' | 'unchecked' => {
+    const ids = section.memberIds;
+    if (ids.length === 0) return 'unchecked';
+    const sel = ids.reduce((n, id) => n + (selectedIds.has(id) ? 1 : 0), 0);
+    return sel === 0 ? 'unchecked' : sel === ids.length ? 'checked' : 'indeterminate';
+  };
+
+  function enterSelection(preselectId?: string) {
+    setSelectionMode(true);
+    if (preselectId) setSelectedIds(new Set([preselectId]));
+  }
+  function exitSelection() { setSelectionMode(false); setSelectedIds(new Set()); }
+  function toggleProduct(id: string) {
+    setSelectedIds((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  }
+  // Tri-state: if the section is fully selected, clear it; otherwise select all its members.
+  function toggleSection(section: StockSection) {
+    const ids = section.memberIds;
+    const allSel = ids.length > 0 && ids.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => (allSel ? next.delete(id) : next.add(id)));
+      return next;
+    });
+  }
+  // Global Select All — scoped to the active search (visibleMemberIds already is).
+  function toggleSelectAll() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      visibleMemberIds.forEach((id) => (allInViewSelected ? next.delete(id) : next.add(id)));
+      return next;
+    });
+  }
+
+  // Bulk stock write — one call to the parity endpoint (== N single toggles).
+  async function runBulkStock(stockStatus: 'available' | 'out_of_stock') {
+    if (!state.token || selectedIds.size === 0) return;
+    setBulkBusy(true);
+    try {
+      const res = await SellerApi.bulkUpdateStock([...selectedIds], stockStatus, state.token);
+      exitSelection();
+      await loadShop();
+      if (res.skippedIds.length > 0) {
+        Alert.alert('Ho gaya', `${res.updatedIds.length} update hue, ${res.skippedIds.length} skip hue`);
+      }
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Bulk update nahi hua');
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  const photoPreview = form.localUri ?? form.imageUrl; // on-device file first, else the uploaded URL
+
   if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.accent} size="large" /></View>;
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Inventory</Text>
-          <Text style={styles.headerSub}>
-            {allProducts.filter((p) => p.stockStatus === 'available').length}/{allProducts.length} available
-          </Text>
-        </View>
-        {shop && (
-          <View style={styles.headerBtns}>
-            <Pressable style={styles.importBtn} onPress={() => void handleImport()} disabled={importing}>
-              {importing ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.importBtnText}>⬆ CSV</Text>}
+        {selectionMode ? (
+          // ── Selection app bar (Sprint 4) ──────────────────────────────────
+          <View style={styles.selectionBar}>
+            <Pressable onPress={exitSelection} hitSlop={10} accessibilityRole="button" accessibilityLabel="Selection band karein">
+              <Text style={styles.selectionClose} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">✕</Text>
             </Pressable>
-            <Pressable style={styles.scanBtn} onPress={() => setScannerOpen(true)} disabled={lookingUp}>
-              {lookingUp ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.scanBtnText}>📷 Scan</Text>}
-            </Pressable>
-            <Pressable style={styles.addBtn} onPress={openAdd}>
-              <Text style={styles.addBtnText}>+ Add</Text>
+            <Text style={styles.selectionCount}>{selectedIds.size} selected</Text>
+            <Pressable onPress={toggleSelectAll} hitSlop={10} accessibilityRole="button">
+              <Text style={styles.selectionAction}>{allInViewSelected ? 'Clear all' : 'Select all'}</Text>
             </Pressable>
           </View>
+        ) : (
+          <>
+            <View>
+              <Text style={styles.headerTitle}>Inventory</Text>
+              <Text style={styles.headerSub}>
+                {allProducts.filter((p) => p.stockStatus === 'available').length}/{allProducts.length} available
+              </Text>
+            </View>
+            {shop && (
+              <View style={styles.headerBtns}>
+                {allProducts.length > 0 && (
+                  <Pressable style={styles.selectBtn} onPress={() => enterSelection()} accessibilityRole="button" accessibilityLabel="Select mode">
+                    <Text style={styles.selectBtnText}>Select</Text>
+                  </Pressable>
+                )}
+                <Pressable style={styles.importBtn} onPress={() => void handleImport()} disabled={importing}>
+                  {importing ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.importBtnText}>⬆ CSV</Text>}
+                </Pressable>
+                <Pressable style={styles.scanBtn} onPress={() => setScannerOpen(true)} disabled={lookingUp}>
+                  {lookingUp ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.scanBtnText}>📷 Scan</Text>}
+                </Pressable>
+                <Pressable style={styles.addBtn} onPress={openAdd}>
+                  <Text style={styles.addBtnText}>+ Add</Text>
+                </Pressable>
+              </View>
+            )}
+          </>
         )}
       </View>
 
-      {/* Morning verification card entry (Inventory Engine S5) */}
-      {shop && (
-        <Pressable style={styles.morningBanner} onPress={() => navigation.navigate('MorningCard')}>
-          <Text style={styles.morningBannerText}>☀️ आज का स्टॉक चेक — 1 मिनट</Text>
-          <Text style={styles.morningBannerArrow}>→</Text>
-        </Pressable>
-      )}
-
-      {!shop
-        ? <View style={styles.center}><Text style={styles.noShop}>Koi shop nahi mili</Text></View>
-        : <FlatList
-            data={allProducts}
-            keyExtractor={(p) => p.id}
-            contentContainerStyle={{ padding: Spacing.lg, gap: Spacing.sm }}
-            ListEmptyComponent={<Text style={styles.empty}>Abhi koi product nahi. "+ Add" dabayein.</Text>}
-            renderItem={({ item }) => (
-              <Pressable style={styles.productRow} onPress={() => openEdit(item)} onLongPress={() => productActions(item)}>
-                <View style={styles.productInfo}>
-                  <Text style={styles.productName}>{item.name}</Text>
-                  <Text style={styles.productPrice}>
-                    ₹{Math.round(item.price / 100)}
-                    {item.mrpPaise ? <Text style={styles.mrp}>  ₹{Math.round(item.mrpPaise / 100)}</Text> : null}
-                    {item.unit ? ` / ${item.unit}` : ''}
-                  </Text>
+      {error || !shop
+        ? <View style={styles.center}>
+            <Text style={styles.errorEmoji}>📡</Text>
+            <Text style={styles.errorText}>Shop load nahi hui</Text>
+            <Text style={styles.errorSub}>Internet check karein aur dobara koshish karein</Text>
+            <Pressable style={styles.retryBtn} onPress={retry}>
+              <Text style={styles.retryBtnText}>🔄 Retry</Text>
+            </Pressable>
+          </View>
+        : <View style={styles.body}>
+            {/* Morning verification card entry (Inventory Engine S5) */}
+            <Pressable style={styles.morningBanner} onPress={() => navigation.navigate('MorningCard')}>
+              <Text style={styles.morningBannerText}>☀️ आज का स्टॉक चेक — 1 मिनट</Text>
+              <Text style={styles.morningBannerArrow}>→</Text>
+            </Pressable>
+            {/* Persistent inventory search — client-side, matches name + unit (Sprint 2).
+                Shown while there is anything to search, or while a query is active so
+                the seller can always clear it. */}
+            {(allProducts.length > 0 || isSearching) && (
+              <View style={styles.searchWrap}>
+                <View style={styles.searchBar}>
+                  <Text style={styles.searchIcon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">🔍</Text>
+                  <TextInput
+                    style={styles.searchInput}
+                    value={query}
+                    onChangeText={setQuery}
+                    placeholder="Product ya unit dhundein…"
+                    placeholderTextColor={Colors.textMuted}
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                    returnKeyType="search"
+                    clearButtonMode="never"
+                  />
+                  {query.length > 0 && (
+                    <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Search saaf karein">
+                      <Text style={styles.searchClear} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">✕</Text>
+                    </Pressable>
+                  )}
                 </View>
-                {updating === item.id
-                  ? <ActivityIndicator color={Colors.accent} />
-                  : <Switch
-                      value={item.stockStatus === 'available'}
-                      onValueChange={() => void toggleStock(item.id, item.stockStatus)}
-                      trackColor={{ false: Colors.border, true: Colors.success }}
-                      thumbColor={Colors.white}
-                    />
-                }
-              </Pressable>
+                {isSearching && (
+                  <Text style={styles.resultCount}>
+                    {searchResultCount} {searchResultCount === 1 ? 'result' : 'results'}
+                  </Text>
+                )}
+              </View>
             )}
-          />
+            <SectionList<RowItem, StockSection>
+              style={styles.list}
+              sections={sections}
+              keyExtractor={(item) => item.id}
+              stickySectionHeadersEnabled
+              contentContainerStyle={styles.listContent}
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={
+                isSearching
+                  ? <View style={styles.noResults}>
+                      <Text style={styles.noResultsEmoji} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">🔍</Text>
+                      <Text style={styles.noResultsText}>Kuch nahi mila</Text>
+                      <Text style={styles.noResultsSub}>"{query.trim()}" se koi product match nahi hua</Text>
+                    </View>
+                  : <Text style={styles.empty}>Abhi koi product nahi. "+ Add" dabayein.</Text>
+              }
+              renderSectionHeader={({ section }) => (
+                <Pressable
+                  style={styles.sectionHeader}
+                  onPress={() => toggleCategory(section.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: !section.collapsed }}
+                  accessibilityLabel={
+                    `${section.name}, ${section.total} ${section.total === 1 ? 'product' : 'products'}` +
+                    (section.outOfStock > 0 ? `, ${section.outOfStock} out of stock` : '')
+                  }
+                >
+                  {selectionMode && (
+                    <Pressable
+                      onPress={() => toggleSection(section)}
+                      hitSlop={6}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: sectionSelectState(section) === 'checked' }}
+                      accessibilityLabel={`${section.name} — poori category select karein`}
+                    >
+                      <SelectBox state={sectionSelectState(section)} />
+                    </Pressable>
+                  )}
+                  <Text style={styles.sectionChevron} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{section.collapsed ? '▸' : '▾'}</Text>
+                  <Text style={styles.sectionIcon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">🗂️</Text>
+                  <Text style={styles.sectionName} numberOfLines={1}>{section.name}</Text>
+                  <View style={styles.sectionMeta}>
+                    <Text style={styles.sectionCount}>{section.total} {section.total === 1 ? 'product' : 'products'}</Text>
+                    {section.outOfStock > 0 && <Text style={styles.sectionOOS}>{section.outOfStock} out of stock</Text>}
+                  </View>
+                </Pressable>
+              )}
+              renderSectionFooter={({ section }) => (
+                // Expanded but empty → the "no products" hint. Collapsed empties show
+                // only the "0 products" count in the header above.
+                !section.collapsed && section.total === 0
+                  ? <Text style={styles.emptyCatRow}>No products in this category yet.</Text>
+                  : null
+              )}
+              renderItem={({ item }) => {
+                const selected = selectedIds.has(item.id);
+                return (
+                  <Pressable
+                    style={[styles.productRow, selectionMode && selected && styles.productRowSelected]}
+                    // In selection mode: tap toggles the tick, long-press just toggles too.
+                    // Normal mode: tap edits, long-press ENTERS selection with this row ticked.
+                    onPress={() => (selectionMode ? toggleProduct(item.id) : openEdit(item))}
+                    onLongPress={() => (selectionMode ? toggleProduct(item.id) : enterSelection(item.id))}
+                    accessibilityRole={selectionMode ? 'checkbox' : 'button'}
+                    accessibilityState={selectionMode ? { checked: selected } : undefined}
+                  >
+                    {item.imageUrl
+                      ? <Image source={{ uri: item.imageUrl }} style={styles.rowThumb} accessibilityLabel={`${item.name} ki photo`} />
+                      : <View style={[styles.rowThumb, styles.rowThumbPlaceholder]}><Text style={styles.rowThumbIcon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">📦</Text></View>}
+                    <View style={styles.productInfo}>
+                      <Text style={styles.productName}>{item.name}</Text>
+                      <Text style={styles.productPrice}>
+                        ₹{Math.round(item.price / 100)}
+                        {item.mrpPaise ? <Text style={styles.mrp}>  ₹{Math.round(item.mrpPaise / 100)}</Text> : null}
+                        {item.unit ? ` / ${item.unit}` : ''}
+                      </Text>
+                    </View>
+                    {selectionMode
+                      ? <SelectBox state={selected ? 'checked' : 'unchecked'} />
+                      : updating === item.id
+                        ? <ActivityIndicator color={Colors.accent} />
+                        : <Switch
+                            value={item.stockStatus === 'available'}
+                            onValueChange={() => void toggleStock(item.id, item.stockStatus)}
+                            trackColor={{ false: Colors.border, true: Colors.success }}
+                            thumbColor={Colors.white}
+                          />
+                    }
+                  </Pressable>
+                );
+              }}
+            />
+            {/* Bottom action bar (Sprint 4) — bulk stock write over the selection. */}
+            {selectionMode && (
+              <View style={styles.actionBar}>
+                <Pressable
+                  style={[styles.actionBtn, styles.actionBtnAvail, (selectedIds.size === 0 || bulkBusy) && styles.actionBtnDisabled]}
+                  disabled={selectedIds.size === 0 || bulkBusy}
+                  onPress={() => void runBulkStock('available')}
+                  accessibilityRole="button"
+                >
+                  {bulkBusy ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.actionBtnText}>✓ Available</Text>}
+                </Pressable>
+                <Pressable
+                  style={[styles.actionBtn, styles.actionBtnOut, (selectedIds.size === 0 || bulkBusy) && styles.actionBtnDisabled]}
+                  disabled={selectedIds.size === 0 || bulkBusy}
+                  onPress={() => void runBulkStock('out_of_stock')}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.actionBtnText}>✕ Out of stock</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
       }
 
       {/* ── Add / Edit product modal ───────────────────────────────────────── */}
-      <Modal visible={modalOpen} animationType="slide" transparent onRequestClose={() => setModalOpen(false)}>
+      <Modal visible={modalOpen} animationType="slide" transparent onRequestClose={closeSheet}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalRoot}>
           <View style={styles.sheet}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>{editingId ? 'Product Edit' : 'Naya Product'}</Text>
+            <View style={styles.sheetTitleRow}>
+              <Text style={styles.sheetTitle}>{editingId ? 'Product Edit' : 'Naya Product'}</Text>
+              {editingId && (
+                // Report / delete relocated here — long-press now enters selection (Sprint 4).
+                <Pressable onPress={() => productActions(editingId, form.name.trim() || 'Product')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Aur options">
+                  <Text style={styles.sheetMore} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">⋯</Text>
+                </Pressable>
+              )}
+            </View>
             <ScrollView keyboardShouldPersistTaps="handled">
+              {/* Photo — upload-on-pick with preview / progress / cancel / retry / remove */}
+              <Text style={styles.fieldLabel}>Photo</Text>
+              <View style={styles.photoRow}>
+                {photoPreview
+                  ? <Image source={{ uri: photoPreview }} style={styles.photoPreview} accessibilityLabel="Product ki photo preview" />
+                  : <View style={[styles.photoPreview, styles.photoPlaceholder]}><Text style={styles.photoPlaceholderIcon}>📷</Text></View>}
+                <View style={styles.photoActions}>
+                  {form.uploading ? (
+                    <>
+                      <View style={styles.photoStatusRow}>
+                        <ActivityIndicator color={Colors.accent} />
+                        <Text style={styles.photoStatus}>Upload ho rahi hai…</Text>
+                      </View>
+                      <Pressable style={styles.photoBtnGhost} onPress={cancelUpload}>
+                        <Text style={styles.photoBtnGhostText}>Cancel</Text>
+                      </Pressable>
+                    </>
+                  ) : form.uploadFailed ? (
+                    <>
+                      <Text style={styles.photoError}>Upload fail hui</Text>
+                      <View style={styles.photoBtnRow}>
+                        <Pressable style={styles.photoBtn} onPress={retryUpload}>
+                          <Text style={styles.photoBtnText}>🔄 Retry</Text>
+                        </Pressable>
+                        <Pressable style={styles.photoBtnGhost} onPress={removePhoto}>
+                          <Text style={styles.photoBtnGhostText}>Hatayein</Text>
+                        </Pressable>
+                      </View>
+                    </>
+                  ) : photoPreview ? (
+                    <View style={styles.photoBtnRow}>
+                      <Pressable style={styles.photoBtn} onPress={choosePhoto}>
+                        <Text style={styles.photoBtnText}>Photo badlein</Text>
+                      </Pressable>
+                      <Pressable style={styles.photoBtnGhost} onPress={removePhoto}>
+                        <Text style={styles.photoBtnGhostText}>Hatayein</Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Pressable style={styles.photoBtn} onPress={choosePhoto}>
+                      <Text style={styles.photoBtnText}>📷 Photo add karein</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+
               <Field label="Naam *" value={form.name} onChangeText={(name) => setForm((f) => ({ ...f, name }))} placeholder="e.g. Aashirvaad Atta" />
               <View style={styles.row}>
                 <View style={styles.flex1}><Field label="Price ₹ *" value={form.priceRupees} onChangeText={(priceRupees) => setForm((f) => ({ ...f, priceRupees }))} keyboardType="numeric" placeholder="285" /></View>
@@ -336,7 +799,7 @@ export default function StockScreen() {
             </ScrollView>
 
             <View style={styles.sheetActions}>
-              <Pressable style={[styles.btn, styles.btnGhost]} onPress={() => setModalOpen(false)} disabled={saving}>
+              <Pressable style={[styles.btn, styles.btnGhost]} onPress={closeSheet} disabled={saving}>
                 <Text style={styles.btnGhostText}>Cancel</Text>
               </Pressable>
               <Pressable style={[styles.btn, styles.btnPrimary]} onPress={() => void save()} disabled={saving}>
@@ -376,6 +839,20 @@ function Field(props: {
   );
 }
 
+// Tri-state checkbox (Sprint 4). Decorative glyph — the parent Pressable carries
+// the accessibilityRole="checkbox" + checked state, so the glyph is SR-hidden.
+function SelectBox({ state }: { state: 'checked' | 'indeterminate' | 'unchecked' }) {
+  return (
+    <View style={[styles.checkbox, state !== 'unchecked' && styles.checkboxOn]}>
+      {state !== 'unchecked' && (
+        <Text style={styles.checkboxGlyph} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          {state === 'checked' ? '✓' : '–'}
+        </Text>
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   center:    { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -392,7 +869,6 @@ const styles = StyleSheet.create({
   importBtnText: { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
   scanBtn:     { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.md, minWidth: 72, alignItems: 'center' },
   scanBtnText: { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
-  noShop:      { fontSize: FontSize.lg, color: Colors.textMuted },
   // Morning card banner (Inventory Engine S5)
   morningBanner: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -403,15 +879,67 @@ const styles = StyleSheet.create({
   morningBannerText:  { color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
   morningBannerArrow: { color: Colors.white, fontWeight: '900', fontSize: FontSize.lg },
   empty:       { textAlign: 'center', color: Colors.textMuted, marginTop: Spacing.xl, fontSize: FontSize.md },
+  // inventory search (Sprint 2)
+  body:        { flex: 1 },
+  list:        { flex: 1 },
+  listContent: { paddingBottom: Spacing.xl },
+  // category sections (Sprint 3)
+  sectionHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
+    backgroundColor: Colors.background,       // opaque — the sticky header sits over rows
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  sectionChevron: { fontSize: FontSize.sm, color: Colors.textMuted, width: 14, textAlign: 'center' },
+  sectionIcon:    { fontSize: FontSize.md },
+  sectionName:    { flex: 1, fontSize: FontSize.md, fontWeight: '800', color: Colors.text },
+  sectionMeta:    { alignItems: 'flex-end' },
+  sectionCount:   { fontSize: FontSize.sm, color: Colors.textMuted, fontWeight: '600' },
+  sectionOOS:     { fontSize: FontSize.sm, color: Colors.error, fontWeight: '700', marginTop: 1 },
+  emptyCatRow:    { marginHorizontal: Spacing.lg, marginTop: Spacing.sm, color: Colors.textMuted, fontStyle: 'italic', fontSize: FontSize.sm },
+  searchWrap:  { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md },
+  searchBar:   { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, backgroundColor: Colors.card, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: Spacing.md },
+  searchIcon:  { fontSize: FontSize.md, color: Colors.textMuted },
+  searchInput: { flex: 1, paddingVertical: Spacing.sm, fontSize: FontSize.md, color: Colors.text },
+  searchClear: { fontSize: FontSize.md, color: Colors.textMuted, fontWeight: '800', paddingHorizontal: Spacing.xs },
+  resultCount: { fontSize: FontSize.sm, color: Colors.textMuted, marginTop: Spacing.sm, marginLeft: Spacing.xs },
+  noResults:      { alignItems: 'center', marginTop: Spacing.xl, paddingHorizontal: Spacing.xl },
+  noResultsEmoji: { fontSize: 48 },
+  noResultsText:  { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text, marginTop: Spacing.sm },
+  noResultsSub:   { fontSize: FontSize.sm, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.xs },
+  errorEmoji:  { fontSize: 56 },
+  errorText:   { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text, marginTop: Spacing.md },
+  errorSub:    { fontSize: FontSize.sm, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.xs, paddingHorizontal: Spacing.xl },
+  retryBtn:    { backgroundColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, marginTop: Spacing.lg },
+  retryBtnText:{ color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
   productRow: {
     backgroundColor: Colors.card, borderRadius: Radius.md,
-    padding: Spacing.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: Spacing.lg, marginHorizontal: Spacing.lg, marginTop: Spacing.sm,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     ...Shadow.card,
   },
   productInfo:  { flex: 1 },
   productName:  { fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
   productPrice: { fontSize: FontSize.sm, color: Colors.textMuted },
   mrp:          { textDecorationLine: 'line-through', color: Colors.textMuted },
+  // row thumbnail
+  rowThumb:            { width: 44, height: 44, borderRadius: Radius.sm, marginRight: Spacing.md, backgroundColor: Colors.background },
+  rowThumbPlaceholder: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.border },
+  rowThumbIcon:        { fontSize: 20 },
+  // photo control (add/edit sheet)
+  photoRow:          { flexDirection: 'row', gap: Spacing.md, alignItems: 'center', marginBottom: Spacing.md },
+  photoPreview:      { width: 72, height: 72, borderRadius: Radius.md, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border },
+  photoPlaceholder:  { alignItems: 'center', justifyContent: 'center' },
+  photoPlaceholderIcon: { fontSize: 28 },
+  photoActions:      { flex: 1, gap: Spacing.sm },
+  photoStatusRow:    { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  photoStatus:       { fontSize: FontSize.sm, color: Colors.textMuted },
+  photoError:        { fontSize: FontSize.sm, color: Colors.error, fontWeight: '600' },
+  photoBtnRow:       { flexDirection: 'row', gap: Spacing.sm },
+  photoBtn:          { backgroundColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, alignItems: 'center' },
+  photoBtnText:      { color: Colors.white, fontWeight: '800', fontSize: FontSize.sm },
+  photoBtnGhost:     { backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, alignItems: 'center' },
+  photoBtnGhostText: { color: Colors.text, fontWeight: '700', fontSize: FontSize.sm },
   // modal
   modalRoot:  { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet:      { backgroundColor: Colors.background, borderTopLeftRadius: Radius.lg, borderTopRightRadius: Radius.lg, padding: Spacing.lg, maxHeight: '88%' },
@@ -433,4 +961,30 @@ const styles = StyleSheet.create({
   btnGhostText:{ color: Colors.text, fontWeight: '700', fontSize: FontSize.md },
   btnPrimary:  { backgroundColor: Colors.primary },
   btnPrimaryText: { color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
+  // sheet title row: title + the relocated ⋯ (report/delete moved here since
+  // long-press now enters selection — Sprint 4).
+  sheetTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sheetMore:     { fontSize: FontSize.xxl, color: Colors.textMuted, fontWeight: '800', marginBottom: Spacing.md, paddingHorizontal: Spacing.xs },
+  // ── Bulk selection mode (Sprint 4) ──────────────────────────────────────────
+  // "Select" entry button — a header secondary action, like ⬆ CSV / 📷 Scan.
+  selectBtn:      { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.md, minWidth: 64, alignItems: 'center' },
+  selectBtnText:  { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
+  // Selection app bar — replaces the title/actions in the header while selecting.
+  selectionBar:    { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  selectionClose:  { color: Colors.white, fontSize: FontSize.xl, fontWeight: '700' },
+  selectionCount:  { flex: 1, textAlign: 'center', marginHorizontal: Spacing.md, color: Colors.white, fontSize: FontSize.lg, fontWeight: '800' },
+  selectionAction: { color: Colors.white, fontSize: FontSize.md, fontWeight: '700' },
+  // Selected-row highlight — a light primary tint + border over the white card.
+  productRowSelected: { borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: '#FFF0F4' },
+  // Tri-state checkbox — same glyph in the row (right) and the section header (left).
+  checkbox:      { width: 24, height: 24, borderRadius: Radius.sm, borderWidth: 2, borderColor: Colors.border, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
+  checkboxOn:    { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  checkboxGlyph: { color: Colors.white, fontSize: FontSize.sm, fontWeight: '900' },
+  // Bottom action bar — the bulk stock write over the current selection.
+  actionBar:         { flexDirection: 'row', gap: Spacing.md, padding: Spacing.lg, backgroundColor: Colors.card, borderTopWidth: 1, borderTopColor: Colors.border },
+  actionBtn:         { flex: 1, flexDirection: 'row', gap: Spacing.sm, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
+  actionBtnAvail:    { backgroundColor: Colors.success },
+  actionBtnOut:      { backgroundColor: Colors.error },
+  actionBtnDisabled: { opacity: 0.5 },
+  actionBtnText:     { color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
 });

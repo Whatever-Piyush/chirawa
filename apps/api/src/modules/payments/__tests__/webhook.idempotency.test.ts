@@ -25,7 +25,9 @@ function makePrisma(opts: { seen?: boolean; updateThrows?: boolean } = {}) {
 const svc = (p: ReturnType<typeof makePrisma>) => createPaymentsService(p.prisma as never);
 
 describe('processWebhook — process-then-record idempotency (Phase 1.8)', () => {
-  beforeEach(() => vi.clearAllMocks());
+  // Braced body — vi.clearAllMocks() returns VitestUtils, which newer vitest
+  // types reject as a hook return value.
+  beforeEach(() => { vi.clearAllMocks(); });
 
   it('processes a new event then records it (in that order)', async () => {
     const p = makePrisma();

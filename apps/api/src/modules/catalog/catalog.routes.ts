@@ -7,6 +7,7 @@ import { createAggregationService } from './aggregation.service';
 import { createRequestsService } from './requests.service';
 import {
   createProductSchema, updateProductSchema, setStockQtySchema, verifyShelfSchema, stockThisSchema,
+  bulkStockSchema,
   createCategorySchema, updateCategorySchema,
   createVariantSchema, updateVariantSchema, createRequestSchema,
 } from './catalog.schema';
@@ -29,11 +30,15 @@ function parse<T extends z.ZodTypeAny>(schema: T, body: unknown): z.infer<T> {
 
 export default async function catalogRoutes(app: FastifyInstance): Promise<void> {
   const catalogService   = createCatalogService(app.prisma, app.redis);
-  const inventoryService = createInventoryService(app.prisma, app.redis);
   // Master lookup with a live OFF fallback (the only place we hit the live API).
   const masterService    = createMasterService(app.prisma, { offLive: createOffLiveSource() });
   const aggregationService = createAggregationService(app.prisma, app.redis);
   const requestsService    = createRequestsService(app.prisma, app.redis);
+  // notifyRestock injected so the bulk stock endpoint fires the SAME restock
+  // re-gate as the single PATCH /products/:id/stock handler (Sprint 4 parity).
+  const inventoryService = createInventoryService(app.prisma, app.redis, {
+    notifyRestock: (masterId) => requestsService.notifyRestock(masterId),
+  });
 
   // Seller + admin may write inventory; ownership is enforced in the service.
   const writeGuard = { preHandler: [authenticate, requireRole('seller', 'admin')] };
@@ -131,16 +136,14 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
   });
 
   // PATCH /api/v1/catalog/products/:id/stock — seller only
-  app.patch(
+  // Route generics instead of an annotated request param — see writeGuard note.
+  app.patch<{
+    Params: { id: string };
+    Body:   { stockStatus: 'available' | 'out_of_stock' | 'hidden' };
+  }>(
     '/products/:id/stock',
     { preHandler: [authenticate, requireRole('seller', 'admin')] },
-    async (
-      request: FastifyRequest<{
-        Params: { id: string };
-        Body:   { stockStatus: 'available' | 'out_of_stock' | 'hidden' };
-      }>,
-      reply,
-    ) => {
+    async (request, reply) => {
       const { stockStatus } = request.body as { stockStatus: 'available' | 'out_of_stock' | 'hidden' };
       if (!['available', 'out_of_stock', 'hidden'].includes(stockStatus)) {
         throw new ValidationError('Invalid stock status');
@@ -202,6 +205,15 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
       return reply.send({ id: product.id, stockStatus: newStatus, message: 'Stock update ho gaya' });
     },
   );
+
+  // PATCH /api/v1/catalog/products/bulk-stock — seller/admin. Bulk stock-status
+  // update; behaviourally identical to N single /products/:id/stock calls, with
+  // not-found / not-owned products skipped (returned in skippedIds), not failed.
+  // Static path → Fastify matches it before the parametric /products/:id.
+  app.patch('/products/bulk-stock', writeGuard, async (request, reply) => {
+    const input = parse(bulkStockSchema, request.body);
+    return reply.send(await inventoryService.bulkSetProductStock(input.productIds, input.stockStatus, authCtx(request)));
+  });
 
   // ── Inventory CRUD (Phase 1.1–1.3, 1.5) — seller owns shop, admin any ───────
 

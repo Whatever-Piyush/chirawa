@@ -1,5 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
-import { NotFoundError } from '../../shared/errors/app-errors';
+import type { Redis } from 'ioredis';
+import { NotFoundError, ValidationError } from '../../shared/errors/app-errors';
+import { createCatalogService } from '../catalog/catalog.service';
 
 // Order statuses that represent a real sale (exclude pending_payment + cancelled).
 const SOLD_STATUSES = [
@@ -7,7 +9,7 @@ const SOLD_STATUSES = [
   'picked_up', 'out_for_delivery', 'delivered',
 ] as const;
 
-export function createSellersService(prisma: PrismaClient) {
+export function createSellersService(prisma: PrismaClient, redis: Redis) {
   // Resolve the shop owned by the authenticated seller user.
   async function resolveShop(userId: string) {
     const profile = await prisma.sellerProfile.findUnique({
@@ -16,6 +18,39 @@ export function createSellersService(prisma: PrismaClient) {
     });
     if (!profile?.shop) throw new NotFoundError('Shop');
     return { sellerId: profile.id, shopId: profile.shop.id, shopName: profile.shop.name };
+  }
+
+  // ── The seller's own shop (Seller Sprint 0 P0-1) ──────────────────────────
+  // Authoritative shop identity from the seller PROFILE — not inferred from the
+  // first order. A freshly provisioned seller with zero orders resolves their
+  // shop here, so inventory (add product) works from day one.
+  async function getMyShop(userId: string) {
+    const profile = await prisma.sellerProfile.findUnique({
+      where:  { userId },
+      select: {
+        shop: {
+          select: { id: true, name: true, isOpen: true, openTime: true, closeTime: true },
+        },
+      },
+    });
+    if (!profile?.shop) throw new NotFoundError('Shop');
+    return profile.shop;
+  }
+
+  // ── Seller-controlled open / close (Seller Sprint 0 P0-2) ─────────────────
+  // Flips Shop.isOpen — the manual hard gate that computeIsOpen() and the order
+  // resolver already honour (a closed shop is excluded from ordering). Reuses
+  // the existing shop-cache invalidation so the customer feed reflects it.
+  async function setShopOpen(userId: string, isOpen: boolean) {
+    if (typeof isOpen !== 'boolean') throw new ValidationError('isOpen must be a boolean');
+    const { shopId } = await resolveShop(userId);
+    const updated = await prisma.shop.update({
+      where:  { id: shopId },
+      data:   { isOpen },
+      select: { id: true, name: true, isOpen: true, openTime: true, closeTime: true },
+    });
+    await createCatalogService(prisma, redis).invalidateShopCache(shopId);
+    return updated;
   }
 
   // ── Sales summary (Task 8.4) ──────────────────────────────────────────────
@@ -103,5 +138,5 @@ export function createSellersService(prisma: PrismaClient) {
     };
   }
 
-  return { getSalesSummary, getSettlements };
+  return { getMyShop, setShopOpen, getSalesSummary, getSettlements };
 }

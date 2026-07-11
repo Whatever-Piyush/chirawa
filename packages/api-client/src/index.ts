@@ -23,6 +23,8 @@ import type {
   SearchSuggestResponse,
   SearchFilters,
   LoyaltyResponse,
+  MeResponse,
+  UpdateMyProfileRequest,
 } from '@chirawa/types';
 
 export class ApiError extends Error {
@@ -43,11 +45,19 @@ export type TokenStorage = {
   clearTokens: () => Promise<void>;
 };
 
+// Abort in-flight requests after this long — mobile radios routinely black-hole
+// a request without ever erroring, which froze screens awaiting a fetch that
+// would never settle.
+const REQUEST_TIMEOUT_MS = 15_000;
+
 export class ChirawaApiClient {
   private readonly baseUrl: string;
   private tokenStorage: TokenStorage;
   private isRefreshing = false;
-  private refreshSubscribers: Array<(token: string) => void> = [];
+  // Resolved with the new token on refresh success, or null on failure — a
+  // failed refresh must still settle every queued request (they previously
+  // hung forever because failure dropped the subscribers without resolving).
+  private refreshSubscribers: Array<(token: string | null) => void> = [];
 
   // Invoked once the session is unrecoverable (refresh failed / still 401 after retry).
   // Apps wire this to signOut() so the navigator returns to the login screen.
@@ -59,6 +69,23 @@ export class ChirawaApiClient {
   }
 
   // ─── Core Request Handler ────────────────────────────────────────────────
+
+  // fetch with an abort timeout. RN's fetch never times out on its own; a
+  // black-holed request otherwise leaves the screen waiting forever.
+  private async fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (err) {
+      if ((err as Error)?.name === 'AbortError') {
+        throw new ApiError(0, 'Request timed out. Check your connection and try again.', 'NETWORK_TIMEOUT');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   private async request<T>(
     method: string,
@@ -79,7 +106,7 @@ export class ChirawaApiClient {
 
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
-    const response = await fetch(`${this.baseUrl}${path}`, init);
+    const response = await this.fetchWithTimeout(`${this.baseUrl}${path}`, init);
 
     // Handle 401 — try refresh, then retry original request
     if (response.status === 401 && requiresAuth) {
@@ -88,7 +115,7 @@ export class ChirawaApiClient {
         headers['Authorization'] = `Bearer ${newToken}`;
         const retryInit: RequestInit = { method, headers };
         if (body !== undefined) retryInit.body = JSON.stringify(body);
-        const retryResponse = await fetch(`${this.baseUrl}${path}`, retryInit);
+        const retryResponse = await this.fetchWithTimeout(`${this.baseUrl}${path}`, retryInit);
         if (retryResponse.status === 401) {
           // Retry with fresh token still rejected — treat as session expired
           await this.tokenStorage.clearTokens();
@@ -130,7 +157,7 @@ export class ChirawaApiClient {
 
   private async refreshAccessToken(): Promise<string | null> {
     if (this.isRefreshing) {
-      // Queue this request until refresh completes
+      // Queue this request until refresh completes (resolves with null on failure)
       return new Promise((resolve) => {
         this.refreshSubscribers.push(resolve);
       });
@@ -138,27 +165,30 @@ export class ChirawaApiClient {
 
     this.isRefreshing = true;
 
+    let newToken: string | null = null;
     try {
       const refreshToken = await this.tokenStorage.getRefreshToken();
-      if (!refreshToken) return null;
-
-      const response = await this.request<RefreshTokenResponse>(
-        'POST',
-        '/auth/refresh',
-        { refreshToken } satisfies RefreshTokenRequest,
-        false,
-      );
-
-      await this.tokenStorage.setTokens(response.tokens);
-      this.refreshSubscribers.forEach((cb) => cb(response.tokens.accessToken));
-      this.refreshSubscribers = [];
-      return response.tokens.accessToken;
+      if (refreshToken) {
+        const response = await this.request<RefreshTokenResponse>(
+          'POST',
+          '/auth/refresh',
+          { refreshToken } satisfies RefreshTokenRequest,
+          false,
+        );
+        await this.tokenStorage.setTokens(response.tokens);
+        newToken = response.tokens.accessToken;
+      }
     } catch {
-      this.refreshSubscribers = [];
-      return null;
+      newToken = null;
     } finally {
+      // ALWAYS settle every queued waiter — success or failure — so no request
+      // hangs on a failed refresh. Snapshot first: a callback could re-enter.
+      const waiters = this.refreshSubscribers;
+      this.refreshSubscribers = [];
       this.isRefreshing = false;
+      waiters.forEach((cb) => cb(newToken));
     }
+    return newToken;
   }
 
   // ─── Auth ────────────────────────────────────────────────────────────────
@@ -322,6 +352,16 @@ export class ChirawaApiClient {
     orderId: string,
   ): Promise<{ location: { lat: number; lng: number; ageMs: number } | null }> {
     return this.request('GET', `/delivery/orders/${orderId}/rider-location`);
+  }
+
+  // ─── Profile ─────────────────────────────────────────────────────────────
+
+  async getMe(): Promise<MeResponse> {
+    return this.request<MeResponse>('GET', '/users/me');
+  }
+
+  async updateMyProfile(data: UpdateMyProfileRequest): Promise<MeResponse> {
+    return this.request<MeResponse>('PUT', '/users/me', data);
   }
 
   // ─── Loyalty ─────────────────────────────────────────────────────────────

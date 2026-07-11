@@ -13,7 +13,7 @@ import {
   type OrderItemUnavailablePayload,
   type OrderEtaChangedPayload,
 } from '../events/event-bus';
-import { isAuthorizedForOrderRoom, emitToOrderAndUser } from './realtime.helpers';
+import { isAuthorizedForOrderRoom, emitToOrderAndUser, parseRiderLocation } from './realtime.helpers';
 
 // Extend Fastify to expose Socket.io instance to routes
 declare module 'fastify' {
@@ -41,7 +41,14 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
       methods:     ['GET', 'POST'],
       credentials: true,
     },
-    transports:          ['websocket', 'polling'],
+    // WebSocket ONLY (audit P0-2). PM2 cluster round-robins connections across
+    // instances with no session affinity, and Engine.IO long-polling REQUIRES
+    // affinity — a polling client gets "Session ID unknown" 400s and never
+    // connects. Every client (customer/rider/seller apps, test-realtime.mjs)
+    // already forces transports: ['websocket']; disabling polling server-side
+    // makes the broken mode unreachable. Clients on WS-blocking networks fall
+    // back to the apps' REST polling (e.g. OrderTracking's poll loop).
+    transports:          ['websocket'],
     pingTimeout:         20000,
     pingInterval:        25000,
     upgradeTimeout:      10000,
@@ -125,42 +132,73 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
     });
 
     // ── Rider location push (every 8 seconds) ──────────────────────────────
-    // Only riders can send location. Server writes to Redis + broadcasts.
-    socket.on(
-      'rider:location',
-      async (data: { orderId: string; lat: number; lng: number; timestamp: number }) => {
-        if (role !== 'rider') return;
-        if (!data?.orderId || !data?.lat || !data?.lng) return;
+    // Only THE ASSIGNED rider may broadcast into an order room (audit P0-5) —
+    // previously any rider could push coordinates into ANY order room and
+    // insert unbounded RiderLocation rows. The assignment check is memoized
+    // per socket (30s TTL) so the steady-state path costs no DB read, and a
+    // released/cancelled assignment stops broadcasting within the TTL.
+    const riderOrderAuthz = new Map<string, number>();       // orderId → authorized-until (ms)
+    const riderLocDbWrite = new Map<string, number>();       // orderId → last DB persist (ms)
+    const RIDER_AUTHZ_TTL_MS    = 30_000;
+    const RIDER_DB_WRITE_MIN_MS = 10_000;
 
-        // Write to Redis — 30s TTL auto-expires if rider disconnects
-        // Key format: rider:{riderId}:location
-        await app.redis.setex(
-          `rider:${userId}:location`,
-          30,
-          JSON.stringify({ lat: data.lat, lng: data.lng, ts: data.timestamp }),
-        ).catch(() => {}); // Non-blocking, never fail the socket event
+    socket.on('rider:location', async (data: unknown) => {
+      if (role !== 'rider') return;
+      const loc = parseRiderLocation(data);                  // validates orderId/lat/lng bounds
+      if (!loc) return;
 
-        // Broadcast to all subscribers of this order room (customer + seller)
-        io.to(`order:${data.orderId}`).emit('order:location', {
-          riderId:   userId,
-          orderId:   data.orderId,
-          lat:       data.lat,
-          lng:       data.lng,
-          timestamp: data.timestamp,
-        });
+      const now = Date.now();
+      if ((riderOrderAuthz.get(loc.orderId) ?? 0) < now) {
+        try {
+          // Order.riderId / DeliveryAssignment.riderId store RiderProfile.id,
+          // which is this socket's profileId for riders.
+          const assignment = await app.prisma.deliveryAssignment.findFirst({
+            where:  { orderId: loc.orderId, riderId: profileId, isActive: true },
+            select: { id: true },
+          });
+          if (!assignment) {
+            app.log.debug(`🚫 rider:location DENIED — ${userId} → order:${loc.orderId}`);
+            return;
+          }
+          riderOrderAuthz.set(loc.orderId, now + RIDER_AUTHZ_TTL_MS);
+        } catch (err) {
+          app.log.error({ err }, `rider:location authz check failed for order:${loc.orderId}`);
+          return; // fail-closed
+        }
+      }
 
-        // Write to DB for support dispute records (7-day retention)
-        // Fire and forget — never block location broadcasting
+      // Write to Redis — 30s TTL auto-expires if rider disconnects
+      // Key format: rider:{riderId}:location
+      await app.redis.setex(
+        `rider:${userId}:location`,
+        30,
+        JSON.stringify({ lat: loc.lat, lng: loc.lng, ts: loc.timestamp }),
+      ).catch(() => {}); // Non-blocking, never fail the socket event
+
+      // Broadcast to all subscribers of this order room (customer + seller)
+      io.to(`order:${loc.orderId}`).emit('order:location', {
+        riderId:   userId,
+        orderId:   loc.orderId,
+        lat:       loc.lat,
+        lng:       loc.lng,
+        timestamp: loc.timestamp,
+      });
+
+      // Persist for support dispute records (7-day retention), throttled to one
+      // row per order per 10s so a hot client can't amplify inserts — the live
+      // broadcast above stays at full rate. Fire and forget.
+      if (now - (riderLocDbWrite.get(loc.orderId) ?? 0) >= RIDER_DB_WRITE_MIN_MS) {
+        riderLocDbWrite.set(loc.orderId, now);
         app.prisma.riderLocation.create({
           data: {
             riderId: userId,
-            orderId: data.orderId,
-            lat:     data.lat,
-            lng:     data.lng,
+            orderId: loc.orderId,
+            lat:     loc.lat,
+            lng:     loc.lng,
           },
         }).catch(() => {});
-      },
-    );
+      }
+    });
 
     // ── Rider availability toggle ───────────────────────────────────────────
     socket.on('rider:availability', async (status: 'online' | 'offline') => {
@@ -226,7 +264,7 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
   eventBus.on(Events.NEW_ORDER_FOR_SELLER, (payload: NewOrderForSellerPayload) => {
     // Full-screen modal trigger for seller app
     // The seller app shows an audible alarm until Accept/Reject is tapped
-    io.to(`seller:${payload.sellerId}`).emit('order:new', {
+    io.to(`seller:${payload.sellerUserId}`).emit('order:new', {
       orderId:          payload.orderId,
       items:            payload.items,
       totalAmount:      payload.totalAmount,
@@ -235,23 +273,23 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
       timestamp:        new Date().toISOString(),
     });
 
-    app.log.debug(`🔔 New order alert sent to seller: ${payload.sellerId}`);
+    app.log.debug(`🔔 New order alert sent to seller: ${payload.sellerUserId}`);
   });
 
   eventBus.on(Events.ORDER_CANCELLED_FOR_SELLER, (payload: OrderCancelledForSellerPayload) => {
     // Customer cancelled — tell the seller so their queue updates + alarm closes
-    io.to(`seller:${payload.sellerId}`).emit('order:cancelled', {
+    io.to(`seller:${payload.sellerUserId}`).emit('order:cancelled', {
       orderId:   payload.orderId,
       reason:    payload.reason,
       timestamp: new Date().toISOString(),
     });
 
-    app.log.debug(`❌ Order ${payload.orderId} cancelled → seller ${payload.sellerId}`);
+    app.log.debug(`❌ Order ${payload.orderId} cancelled → seller ${payload.sellerUserId}`);
   });
 
   eventBus.on(Events.ORDER_ASSIGNED_TO_RIDER, (payload: OrderAssignedToRiderPayload) => {
     // 60-second accept window starts on client when this arrives
-    io.to(`rider:${payload.riderId}`).emit('order:assigned', {
+    io.to(`rider:${payload.riderUserId}`).emit('order:assigned', {
       orderId:          payload.orderId,
       shopName:         payload.shopName,
       shopAddress:      payload.shopAddress,
@@ -261,7 +299,7 @@ async function realtimePlugin(app: FastifyInstance): Promise<void> {
       timestamp:        new Date().toISOString(),
     });
 
-    app.log.debug(`🚴 Order assigned to rider: ${payload.riderId}`);
+    app.log.debug(`🚴 Order assigned to rider: ${payload.riderUserId}`);
   });
 
   eventBus.on(Events.ORDER_ITEM_UNAVAILABLE, (payload: OrderItemUnavailablePayload) => {

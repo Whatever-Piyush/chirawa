@@ -223,7 +223,10 @@ export function createCartService(prisma: PrismaClient, redis: Redis) {
       subtotal:    unitPrice * input.quantity,
       shopId:      product.shopId,
       shopName:    product.shop.name,
-      ...(variantId ? { variantId, variantName } : {}),
+      // variantName is always set alongside variantId (both assigned in the
+      // variant branch above); the non-null assertion satisfies
+      // exactOptionalPropertyTypes without widening CartItem.
+      ...(variantId ? { variantId, variantName: variantName! } : {}),
       ...(product.masterId ? { masterId: product.masterId, aggregated } : {}),
     };
 

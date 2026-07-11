@@ -1,0 +1,255 @@
+{
+  "runId": "2026-07-02T19-37-59",
+  "config": {
+    "scenario": "all",
+    "durationMs": 30000,
+    "users": 60,
+    "port": 3100
+  },
+  "host": {
+    "platform": "darwin",
+    "node": "v24.3.0",
+    "cpus": 10
+  },
+  "scenarios": {
+    "browse": {
+      "measured_seconds": 30,
+      "total_requests": 35365,
+      "total_rps": 1178.8,
+      "errors": {},
+      "ops": {
+        "GET /catalog/categories": {
+          "count": 3470,
+          "rps": 115.7,
+          "p50_ms": 46.8,
+          "p95_ms": 72.4,
+          "p99_ms": 99,
+          "mean_ms": 48.8,
+          "max_ms": 176.8
+        },
+        "GET /catalog/products?category": {
+          "count": 7222,
+          "rps": 240.7,
+          "p50_ms": 48.2,
+          "p95_ms": 75.3,
+          "p99_ms": 104.3,
+          "mean_ms": 50.1,
+          "max_ms": 222.2
+        },
+        "GET /catalog/feed": {
+          "count": 12344,
+          "rps": 411.5,
+          "p50_ms": 15.9,
+          "p95_ms": 35.9,
+          "p99_ms": 61,
+          "mean_ms": 18.4,
+          "max_ms": 137.2
+        },
+        "GET /catalog/shops": {
+          "count": 3593,
+          "rps": 119.8,
+          "p50_ms": 15.7,
+          "p95_ms": 36.1,
+          "p99_ms": 57.6,
+          "mean_ms": 18,
+          "max_ms": 130.1
+        },
+        "GET /catalog/products/:id": {
+          "count": 8736,
+          "rps": 291.2,
+          "p50_ms": 74.5,
+          "p95_ms": 113.7,
+          "p99_ms": 152.6,
+          "mean_ms": 76.7,
+          "max_ms": 307.8
+        }
+      },
+      "resources": {
+        "samples": 34,
+        "api_cpu_avg_pct": 253.8,
+        "api_cpu_max_pct": 286,
+        "api_rss_max_mb": 438,
+        "worker_cpu_avg_pct": 0,
+        "worker_cpu_max_pct": 0.5,
+        "worker_rss_max_mb": 163,
+        "redis_ops_per_sec_avg": 527.1,
+        "redis_ops_per_sec_max": 612,
+        "redis_mem_max_mb": 3,
+        "pg_commits_per_sec": 2969.4,
+        "pg_cache_hit_pct": 100,
+        "pg_active_backends_max": 6
+      }
+    },
+    "search": {
+      "measured_seconds": 30,
+      "total_requests": 10421,
+      "total_rps": 347.3,
+      "errors": {},
+      "ops": {
+        "GET /search": {
+          "count": 8334,
+          "rps": 277.8,
+          "p50_ms": 77.9,
+          "p95_ms": 147.1,
+          "p99_ms": 217.3,
+          "mean_ms": 85.6,
+          "max_ms": 377.2
+        },
+        "GET /search?sort=rating": {
+          "count": 2087,
+          "rps": 69.6,
+          "p50_ms": 81.9,
+          "p95_ms": 161.7,
+          "p99_ms": 250,
+          "mean_ms": 90.9,
+          "max_ms": 391.7
+        }
+      },
+      "resources": {
+        "samples": 35,
+        "api_cpu_avg_pct": 56.9,
+        "api_cpu_max_pct": 77.7,
+        "api_rss_max_mb": 375,
+        "worker_cpu_avg_pct": 0,
+        "worker_cpu_max_pct": 0.4,
+        "worker_rss_max_mb": 72,
+        "redis_ops_per_sec_avg": 686,
+        "redis_ops_per_sec_max": 820,
+        "redis_mem_max_mb": 3,
+        "pg_commits_per_sec": 691.1,
+        "pg_cache_hit_pct": 100,
+        "pg_active_backends_max": 22
+      }
+    },
+    "checkout": {
+      "measured_seconds": 30,
+      "total_requests": 32186,
+      "total_rps": 1072.7,
+      "errors": {},
+      "ops": {
+        "GET /cart": {
+          "count": 10730,
+          "rps": 357.6,
+          "p50_ms": 10.6,
+          "p95_ms": 18.1,
+          "p99_ms": 25.4,
+          "mean_ms": 11.6,
+          "max_ms": 208
+        },
+        "POST /cart/items": {
+          "count": 10729,
+          "rps": 357.6,
+          "p50_ms": 30.4,
+          "p95_ms": 47.7,
+          "p99_ms": 61.5,
+          "mean_ms": 31.7,
+          "max_ms": 291.9
+        },
+        "POST /pricing/preview": {
+          "count": 10727,
+          "rps": 357.5,
+          "p50_ms": 24.2,
+          "p95_ms": 39,
+          "p99_ms": 54.6,
+          "mean_ms": 26.1,
+          "max_ms": 304.5
+        }
+      },
+      "resources": {
+        "samples": 34,
+        "api_cpu_avg_pct": 184.5,
+        "api_cpu_max_pct": 214.5,
+        "api_rss_max_mb": 337,
+        "worker_cpu_avg_pct": 0.6,
+        "worker_cpu_max_pct": 17.9,
+        "worker_rss_max_mb": 105,
+        "redis_ops_per_sec_avg": 1469.2,
+        "redis_ops_per_sec_max": 1883,
+        "redis_mem_max_mb": 4,
+        "pg_commits_per_sec": 2381.4,
+        "pg_cache_hit_pct": 100,
+        "pg_active_backends_max": 12
+      }
+    },
+    "orders": {
+      "measured_seconds": 30,
+      "total_requests": 5980,
+      "total_rps": 199.3,
+      "errors": {},
+      "ops": {
+        "POST /cart/items": {
+          "count": 2991,
+          "rps": 99.7,
+          "p50_ms": 25.8,
+          "p95_ms": 43,
+          "p99_ms": 62.6,
+          "mean_ms": 27.3,
+          "max_ms": 182.3
+        },
+        "POST /orders (COD place)": {
+          "count": 2989,
+          "rps": 99.6,
+          "p50_ms": 87.9,
+          "p95_ms": 135.6,
+          "p99_ms": 225.5,
+          "mean_ms": 92.8,
+          "max_ms": 348.7
+        }
+      },
+      "resources": {
+        "samples": 35,
+        "api_cpu_avg_pct": 207.9,
+        "api_cpu_max_pct": 252,
+        "api_rss_max_mb": 342,
+        "worker_cpu_avg_pct": 36.3,
+        "worker_cpu_max_pct": 50.1,
+        "worker_rss_max_mb": 173,
+        "redis_ops_per_sec_avg": 3817.9,
+        "redis_ops_per_sec_max": 4669,
+        "redis_mem_max_mb": 8,
+        "pg_commits_per_sec": 2074.3,
+        "pg_cache_hit_pct": 100,
+        "pg_active_backends_max": 11
+      }
+    },
+    "rider_assignment": {
+      "orders_placed": 2989,
+      "assigned": 3330,
+      "unassigned": 38,
+      "batch_window_ms": 2000,
+      "confirm_to_assign_ms": {
+        "p50": 726,
+        "p95": 2161,
+        "p99": 2240,
+        "max": 2519
+      }
+    },
+    "sockets": {
+      "target_sockets": 300,
+      "connected": 300,
+      "failures": 0,
+      "ramp_seconds": 0.1,
+      "handshake_ms": {
+        "p50": 5,
+        "p95": 26,
+        "p99": 27,
+        "max": 38
+      },
+      "resources": {
+        "samples": 10,
+        "api_cpu_avg_pct": 0.3,
+        "api_cpu_max_pct": 2.5,
+        "api_rss_max_mb": 184,
+        "worker_cpu_avg_pct": 0,
+        "worker_cpu_max_pct": 0,
+        "worker_rss_max_mb": 132,
+        "redis_ops_per_sec_avg": 6.5,
+        "redis_ops_per_sec_max": 25,
+        "redis_mem_max_mb": 8,
+        "pg_commits_per_sec": 1.6,
+        "pg_cache_hit_pct": 100,
+        "pg_active_backends_max": 1
+      }
+    }
+  }
+}

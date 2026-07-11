@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import {
   View,
   Text,
+  TextInput,
   FlatList,
   TouchableOpacity,
   StyleSheet,
@@ -32,6 +33,8 @@ import { useCart } from '../../context/CartContext';
 import { type RazorpaySuccess } from '../../components/payment/RazorpayCheckout';
 import ProductCard, { type ProductCardData } from '../../components/product/ProductCard';
 import BrandedLoader from '../../components/BrandedLoader';
+import { useToast } from '../../components/ui';
+import { FEATURES } from '../../config/features';
 import LocationSheet from '../../components/location/LocationSheet';
 import { useAddresses } from '../../context/AddressContext';
 import { fetchProducts, toProductCard } from '../../services/catalog';
@@ -151,13 +154,33 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   const [pricing, setPricing] = useState<PricingPreviewResponse | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
+  // Promo code (A3): `appliedCode` is the user-typed code the bill is priced
+  // with (the auto FIRSTORDER promo needs none). State drives the UI; the ref
+  // feeds refreshPricing so every re-price path carries the code without
+  // recreating the callback chain on apply/remove.
+  const [promoInput, setPromoInput]         = useState('');
+  const [appliedCode, setAppliedCodeState] = useState<string | null>(null);
+  const [promoApplying, setPromoApplying]   = useState(false);
+  const appliedCodeRef = useRef<string | null>(null);
+  const setAppliedCode = useCallback((code: string | null) => {
+    appliedCodeRef.current = code;
+    setAppliedCodeState(code);
+  }, []);
+
+  // Pricing-preview transport state (A3): failures are no longer silent — the
+  // bill shows a retry row and Place Order stays gated until pricing exists.
+  const [pricingError, setPricingError] = useState(false);
+  const [repricing, setRepricing]       = useState(false);
+
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PaymentMethod.COD);
   const [placing,       setPlacing]       = useState(false);
+  const toast = useToast();
 
   // Razorpay checkout (online payment). Non-null = the sheet is open for this order.
   const [rzpData, setRzpData] = useState<{
     orderId: string; keyId: string; razorpayOrderId: string; amountPaise: number;
-    // Multi-shop breakdown carried through payment so OrderPlaced can show it.
+    // Savings + multi-shop breakdown carried through payment for OrderPlaced.
+    savedPaise?: number;
     groupId?: string; shops?: Array<{ orderId: string; shopName: string; total: number }>; totalAmount?: number;
   } | null>(null);
   const [verifying, setVerifying] = useState(false);
@@ -201,18 +224,38 @@ export default function CheckoutScreen({ navigation, route }: Props) {
 
   useEffect(() => { void loadCart(); }, [loadCart]);
 
-  // Single pricing-preview entry point.
-  const fetchPricing = useCallback(
-    (cartId: string, addrId: string) =>
-      api.getPricingPreview({ cartId, addressId: addrId }),
+  // Single pricing-preview entry point — carries the applied promo code (via
+  // the ref, so every re-price path includes it) and owns the loading/error
+  // flags. Returns the response so callers can react to promoError.
+  const refreshPricing = useCallback(
+    async (cartId: string, addrId: string): Promise<PricingPreviewResponse | null> => {
+      setRepricing(true);
+      try {
+        const data = await api.getPricingPreview({
+          cartId,
+          addressId: addrId,
+          ...(appliedCodeRef.current ? { promoCode: appliedCodeRef.current } : {}),
+        });
+        setPricing(data);
+        setPricingError(false);
+        return data;
+      } catch {
+        // Keep any previous bill; surface the failure so the retry row shows
+        // and Place Order stays gated on !!pricing.
+        setPricingError(true);
+        return null;
+      } finally {
+        setRepricing(false);
+      }
+    },
     [],
   );
 
   const handleSelectSavedAddress = useCallback(async (addr: AddressResponse) => {
     setAddressId(addr.id);
     if (!cart) return;
-    try { setPricing(await fetchPricing(cart.cartId, addr.id)); } catch { /* tolerate */ }
-  }, [cart, fetchPricing]);
+    await refreshPricing(cart.cartId, addr.id);
+  }, [cart, refreshPricing]);
 
   // Sync the active address from the global context, and re-price on every switch
   // (or when the cart finishes loading).
@@ -223,10 +266,8 @@ export default function CheckoutScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     if (!cart || !addressId || pricing) return;
-    void (async () => {
-      try { setPricing(await fetchPricing(cart.cartId, addressId)); } catch { /* tolerate */ }
-    })();
-  }, [cart, addressId, pricing, fetchPricing]);
+    void refreshPricing(cart.cartId, addressId);
+  }, [cart, addressId, pricing, refreshPricing]);
 
   // Returning from the add-address page (ss/2.jpeg): select the new address and
   // remember a "Someone else" receiver, then clear the params so it fires once.
@@ -248,9 +289,9 @@ export default function CheckoutScreen({ navigation, route }: Props) {
     }
     setCart(data);
     if (addrId) {
-      try { setPricing(await fetchPricing(data.cartId, addrId)); } catch { /* tolerate */ }
+      await refreshPricing(data.cartId, addrId);
     }
-  }, [navigation, t, fetchPricing]);
+  }, [navigation, t, refreshPricing]);
 
   // Keep the bill in sync with cart writes that don't update this screen's local
   // `cart`/`pricing` directly. The "You might also like" rail AND the in-list qty
@@ -283,6 +324,26 @@ export default function CheckoutScreen({ navigation, route }: Props) {
     }
   }, [setQuantity]);
 
+  // ── Promo apply / remove (A3) ───────────────────────────────────────────
+  const applyPromo = useCallback(async () => {
+    const code = promoInput.trim().toUpperCase();
+    if (!code || !cart || !addressId || promoApplying) return;
+    setPromoApplying(true);
+    setAppliedCode(code);
+    const result = await refreshPricing(cart.cartId, addressId);
+    // Rejected (or transport failure): drop the code so later re-prices don't
+    // resend it. result.promoError stays on screen via the pricing state.
+    if (!result || result.promoError) setAppliedCode(null);
+    setPromoApplying(false);
+  }, [promoInput, cart, addressId, promoApplying, refreshPricing, setAppliedCode]);
+
+  const removePromo = useCallback(async () => {
+    if (!cart || !addressId) return;
+    setAppliedCode(null);
+    setPromoInput('');
+    await refreshPricing(cart.cartId, addressId); // the auto promo may return
+  }, [cart, addressId, refreshPricing, setAppliedCode]);
+
   const pulseAndPlace = () => {
     // Claim the submit synchronously BEFORE the animation starts; a rapid second
     // tap returns here instead of queuing a second handlePlaceOrder.
@@ -308,7 +369,13 @@ export default function CheckoutScreen({ navigation, route }: Props) {
 
       const result = await api.placeOrder({
         cartId: cart.cartId, addressId, paymentMethod,
+        // Only a user-typed code travels; the auto FIRSTORDER promo is
+        // re-resolved server-side at creation (same rules as the preview).
+        ...(appliedCodeRef.current ? { promoCode: appliedCodeRef.current } : {}),
       });
+
+      // "You saved ₹X" recap on the success screen — from the previewed bill.
+      const savedPaise = pricing && pricing.discount > 0 ? pricing.discount : 0;
 
       // "Someone else" receiver (from the add-address page) → attach to the order.
       // Best-effort: a failure here must never block a placed order.
@@ -327,7 +394,11 @@ export default function CheckoutScreen({ navigation, route }: Props) {
         : null;
 
       if (paymentMethod === PaymentMethod.COD) {
-        navigation.replace('OrderPlaced', { orderId: result.orderId, ...(groupExtras ?? {}) });
+        navigation.replace('OrderPlaced', {
+          orderId: result.orderId,
+          ...(savedPaise > 0 ? { savedPaise } : {}),
+          ...(groupExtras ?? {}),
+        });
         return;
       }
 
@@ -338,18 +409,26 @@ export default function CheckoutScreen({ navigation, route }: Props) {
           keyId:           result.razorpayKeyId,
           razorpayOrderId: result.razorpayOrderId,
           amountPaise:     result.amountPaise ?? result.totalAmount,
+          ...(savedPaise > 0 ? { savedPaise } : {}),
           ...(groupExtras ?? {}),
         });
       } else {
         Alert.alert(t('common.error'), t('checkout.paymentInitFailed'));
       }
     } catch (err: unknown) {
+      // A typed code can die between preview and placement (expired / used up /
+      // limit hit). Re-price to reconcile the bill: if the code now soft-fails,
+      // drop it — the promo section surfaces promoError with the reason.
+      if (appliedCodeRef.current && cart && addressId) {
+        const p = await refreshPricing(cart.cartId, addressId);
+        if (p?.promoError) setAppliedCode(null);
+      }
       Alert.alert(t('common.error'), err instanceof Error ? err.message : t('common.error'));
     } finally {
       setPlacing(false);
       submittingRef.current = false;
     }
-  }, [cart, addressId, paymentMethod, receiver, navigation, t, flushPendingMutations]);
+  }, [cart, addressId, paymentMethod, receiver, pricing, navigation, t, flushPendingMutations, refreshPricing, setAppliedCode]);
 
   // Razorpay returned a successful payment → re-verify server-side, then go to
   // tracking. The order already exists (pending_payment); verify flips it to paid.
@@ -366,6 +445,7 @@ export default function CheckoutScreen({ navigation, route }: Props) {
       });
       navigation.replace('OrderPlaced', {
         orderId: data.orderId,
+        ...(data.savedPaise ? { savedPaise: data.savedPaise } : {}),
         ...(data.groupId && data.shops ? { groupId: data.groupId, shops: data.shops, totalAmount: data.totalAmount } : {}),
       });
     } catch (err: unknown) {
@@ -391,12 +471,20 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   const itemCount      = cart ? cart.items.reduce((s, i) => s + i.quantity, 0) : 0;
   const nudge          = cart ? deliveryNudge(cart.subtotal, t) : null;
   const selectedAddr   = ctxAddresses.find((a) => a.id === addressId) ?? null;
+  const discountRupees = pricing ? Math.round(pricing.discount / 100) : 0;
+  // The discount already covers the delivery fee → "reduce your fee" nudges
+  // would contradict the bill; suppress them.
+  const feeFree = !!pricing && pricing.discount > 0 && pricing.discount >= pricing.deliveryFee;
 
   const withinHours   = isOpenNow();
   // Block checkout while a cart write is still in flight (e.g. a just-tapped YMAL
   // add) so Place Order can't consume a pre-add cart. handlePlaceOrder also awaits
   // flushPendingMutations as a belt-and-suspenders for the sub-tap-timing window.
-  const canPlaceOrder = !!addressId && !placing && !!cart && withinHours && pendingMutations === 0;
+  // A3: also require a loaded, settled pricing preview — the button total and
+  // the charged total must never diverge (previously a failed preview still
+  // allowed placement with a subtotal-only total on the button).
+  const canPlaceOrder = !!addressId && !placing && !!cart && withinHours && pendingMutations === 0
+    && !!pricing && !repricing;
 
   const ListHeader = (
     <>
@@ -418,7 +506,7 @@ export default function CheckoutScreen({ navigation, route }: Props) {
       </View>
 
       {/* ── Best deal on your cart — delivery savings nudge ──────────────── */}
-      {nudge && (
+      {nudge && !feeFree && (
         <View style={styles.section}>
           <Text style={styles.cardTitle}>{t('checkout.bestDeal')}</Text>
           <View style={[styles.nudgeBox, nudge.done && styles.nudgeBoxDone]}>
@@ -465,6 +553,73 @@ export default function CheckoutScreen({ navigation, route }: Props) {
         </View>
       )}
 
+      {/* ── Promo code (A3) ──────────────────────────────────────────────── */}
+      <View style={styles.section}>
+        <Text style={styles.cardTitle}>{t('checkout.promoTitle')}</Text>
+
+        {pricing?.appliedPromoCode ? (
+          appliedCode ? (
+            // User-typed code — show the win + a Remove affordance.
+            <View style={styles.promoAppliedRow}>
+              <Ionicons name="pricetag" size={18} color={Colors.success} />
+              <Text style={styles.promoAppliedText}>
+                {pricing.appliedPromoCode} {t('checkout.promoApplied')} · −₹{discountRupees}
+              </Text>
+              <TouchableOpacity
+                onPress={() => void removePromo()}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={t('checkout.promoRemove')}
+              >
+                <Text style={styles.promoRemove}>{t('checkout.promoRemove')}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            // Auto-applied FIRSTORDER — celebrate it; nothing to remove.
+            <View style={styles.promoAppliedRow}>
+              <Ionicons name="gift" size={18} color={Colors.success} />
+              <Text style={styles.promoAppliedText}>{t('checkout.firstOrderApplied')}</Text>
+            </View>
+          )
+        ) : (
+          <>
+            <View style={styles.promoRow}>
+              <TextInput
+                style={styles.promoInput}
+                value={promoInput}
+                onChangeText={(v) => setPromoInput(v.replace(/\s/g, '').toUpperCase())}
+                placeholder={t('checkout.promoPlaceholder')}
+                placeholderTextColor={Colors.textMuted}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                maxLength={30}
+                editable={!promoApplying}
+                accessibilityLabel={t('checkout.promoTitle')}
+              />
+              <TouchableOpacity
+                style={[styles.promoApplyBtn, (!promoInput.trim() || promoApplying) && styles.placeBtnDisabled]}
+                onPress={() => void applyPromo()}
+                disabled={!promoInput.trim() || promoApplying}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={t('checkout.apply')}
+                accessibilityState={{ disabled: !promoInput.trim() || promoApplying, busy: promoApplying }}
+              >
+                {promoApplying
+                  ? <ActivityIndicator color={Colors.white} size="small" />
+                  : <Text style={styles.promoApplyText}>{t('checkout.apply')}</Text>}
+              </TouchableOpacity>
+            </View>
+            {/* Server's soft-fail reason (expired / min-cart / used up) */}
+            {pricing?.promoError ? (
+              <Text style={styles.promoError} accessibilityLiveRegion="polite">
+                {pricing.promoError}
+              </Text>
+            ) : null}
+          </>
+        )}
+      </View>
+
       {/* ── Bill details ─────────────────────────────────────────────────── */}
       <View style={styles.section}>
         <Text style={styles.cardTitle}>{t('checkout.billDetails')}</Text>
@@ -488,28 +643,73 @@ export default function CheckoutScreen({ navigation, route }: Props) {
               ? <Text style={styles.billFree}>FREE</Text>
               : <Text style={styles.billValue}>₹{deliveryRupees}</Text>}
         </View>
-        {nudge && !nudge.done && <Text style={styles.billNudge}>{nudge.text}</Text>}
+        {/* Server's fee explanation (Hindi) — why the fee is what it is */}
+        {pricing?.breakdownText ? <Text style={styles.billBreakdown}>{pricing.breakdownText}</Text> : null}
+        {nudge && !nudge.done && !feeFree && <Text style={styles.billNudge}>{nudge.text}</Text>}
+
+        {/* Discount — the line that makes the total add up (A3) */}
+        {pricing && pricing.discount > 0 && (
+          <View style={styles.billRow}>
+            <View style={styles.billLabelWrap}>
+              <Ionicons name="pricetag-outline" size={16} color={Colors.success} />
+              <Text style={styles.billDiscountLabel}>
+                {t('checkout.discount')}{pricing.appliedPromoCode ? ` (${pricing.appliedPromoCode})` : ''}
+              </Text>
+            </View>
+            <Text style={styles.billDiscountValue}>−₹{discountRupees}</Text>
+          </View>
+        )}
+
+        {/* Preview failed — Place Order stays disabled until this resolves */}
+        {pricingError && !pricing && (
+          <TouchableOpacity
+            style={styles.billErrorRow}
+            onPress={() => { if (cart && addressId) void refreshPricing(cart.cartId, addressId); }}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`${t('checkout.pricingFailed')} — ${t('tracking.retry')}`}
+          >
+            <Ionicons name="alert-circle-outline" size={16} color={Colors.error} />
+            <Text style={styles.billErrorText}>{t('checkout.pricingFailed')} · {t('tracking.retry')}</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.billDivider} />
         <View style={styles.billTotalRow}>
           <Text style={styles.billTotalLabel}>{t('checkout.grandTotal')}</Text>
-          <Text style={styles.billTotalValue}>₹{totalRupees}</Text>
+          <View style={styles.billTotalWrap}>
+            {repricing && <ActivityIndicator size="small" color={Colors.primary} />}
+            <Text style={styles.billTotalValue}>₹{totalRupees}</Text>
+          </View>
         </View>
+        {pricing && pricing.discount > 0 && (
+          <View style={styles.savedStrip}>
+            <Text style={styles.savedStripText}>
+              {t('cart.saved')}{discountRupees}{t('cart.savedSuffix')} 🎉
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* ── Payment Method ───────────────────────────────────────────────── */}
       <View style={styles.section}>
         <Text style={styles.cardTitle}>{t('checkout.paymentMethod')}</Text>
         {([
-          { method: PaymentMethod.COD, icon: 'cash-outline',  title: t('checkout.cod'),       hint: t('checkout.codHint') },
-          { method: PaymentMethod.UPI, icon: 'card-outline',  title: t('checkout.payOnline'), hint: t('checkout.onlineHint') },
+          // COD-only launch (Phase 5): "Pay Online" stays VISIBLE as a coming-soon
+          // option (hiding it would look broken) but can't be selected — a tap
+          // explains via toast. The API rejects non-COD orders regardless.
+          { method: PaymentMethod.COD, icon: 'cash-outline',  title: t('checkout.cod'),       hint: t('checkout.codHint'),    comingSoon: false },
+          { method: PaymentMethod.UPI, icon: 'card-outline',  title: t('checkout.payOnline'), hint: t('checkout.onlineHint'), comingSoon: !FEATURES.onlinePayments },
         ] as const).map((opt) => {
           const selected = paymentMethod === opt.method;
           return (
             <TouchableOpacity
               key={opt.method}
-              style={[styles.payOption, selected && styles.payOptionSelected]}
-              onPress={() => setPaymentMethod(opt.method)}
+              style={[styles.payOption, selected && styles.payOptionSelected, opt.comingSoon && styles.payOptionComingSoon]}
+              onPress={() => {
+                if (opt.comingSoon) { toast.show(t('checkout.comingSoon'), 'info'); return; }
+                setPaymentMethod(opt.method);
+              }}
               activeOpacity={0.8}
             >
               <Ionicons name={opt.icon} size={22} color={selected ? Colors.primary : Colors.textSecondary} />
@@ -517,9 +717,15 @@ export default function CheckoutScreen({ navigation, route }: Props) {
                 <Text style={styles.payOptionTitle}>{opt.title}</Text>
                 <Text style={styles.payOptionHint}>{opt.hint}</Text>
               </View>
-              <View style={[styles.payRadio, selected && styles.payRadioSelected]}>
-                {selected && <View style={styles.payRadioDot} />}
-              </View>
+              {opt.comingSoon ? (
+                <View style={styles.comingSoonBadge}>
+                  <Text style={styles.comingSoonBadgeText}>{t('common.comingSoon')}</Text>
+                </View>
+              ) : (
+                <View style={[styles.payRadio, selected && styles.payRadioSelected]}>
+                  {selected && <View style={styles.payRadioDot} />}
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
@@ -920,6 +1126,9 @@ const makeStyles = (Colors: ColorPalette) =>
     backgroundColor: Colors.surface, marginTop: Spacing.md,
   },
   payOptionSelected: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight, ...Shadow.xs },
+  // COD-only launch: the online option is visible but dimmed, with a badge in
+  // place of the radio (comingSoonBadge below) — deliberately not "broken grey".
+  payOptionComingSoon: { opacity: 0.6 },
   payOptionTitle: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
   payOptionHint:  { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 1 },
   payRadio: {
@@ -950,6 +1159,19 @@ const makeStyles = (Colors: ColorPalette) =>
   promoHint: { fontSize: FontSize.sm, color: Colors.textMuted, fontStyle: 'italic' },
   promoError: { fontSize: FontSize.sm, color: Colors.error, fontWeight: '700' },
   promoAutoNote: { fontSize: FontSize.sm, color: Colors.success, fontWeight: '800' },
+
+  // Bill transparency (A3): discount / savings / fee-explanation / error rows
+  billBreakdown: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: -6 },
+  billDiscountLabel: { fontSize: FontSize.md, color: Colors.success, fontWeight: '700' },
+  billDiscountValue: { fontSize: FontSize.md, color: Colors.success, fontWeight: '800' },
+  billErrorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
+  billErrorText: { fontSize: FontSize.sm, color: Colors.error, fontWeight: '700' },
+  billTotalWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  savedStrip: {
+    backgroundColor: Colors.successLight, borderRadius: Radius.md,
+    paddingVertical: Spacing.sm, alignItems: 'center', marginTop: 2,
+  },
+  savedStripText: { color: Colors.success, fontWeight: '800', fontSize: FontSize.sm },
 
   // Phase B — "you might also like". Lives at the page margin (16px sides, no
   // card padding) so the 3-up compact-card math lines up exactly — same as the

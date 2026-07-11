@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { sendPush } from './fcm.service';
 import { sendSms, SmsTemplates } from './sms.service';
 import { CustomerNotifications, SellerNotifications, RiderNotifications } from './notification.templates';
+import { resolveOrderPartyUserIds } from './party-ids';
 import {
   eventBus, Events,
   type OrderStatusChangedPayload,
@@ -40,13 +41,19 @@ async function notificationsPlugin(app: FastifyInstance): Promise<void> {
     body?: string,
   ): Promise<void> {
     await app.prisma.notification.create({
-      data: { userId, channel, eventType, title, body },
+      // Coalesce to null — Prisma's optional columns are `string | null`, and
+      // exactOptionalPropertyTypes rejects passing an explicit `undefined`.
+      data: { userId, channel, eventType, title: title ?? null, body: body ?? null },
     }).catch(() => {}); // Non-blocking
   }
 
   // ── ORDER STATUS CHANGED ──────────────────────────────────────────────────
+  // Seller/rider USER ids are resolved from the order here (P1-3) — the payload
+  // deliberately doesn't carry them; emit sites used to pass ''/profile ids and
+  // those pushes silently vanished. Resolution is lazy: only the branches that
+  // actually push to seller/rider pay the lookup.
   eventBus.on(Events.ORDER_STATUS_CHANGED, async (payload: OrderStatusChangedPayload) => {
-    const { orderId, status, customerId, sellerId, riderId } = payload;
+    const { orderId, status, customerId } = payload;
 
     try {
       switch (status) {
@@ -113,8 +120,9 @@ async function notificationsPlugin(app: FastifyInstance): Promise<void> {
           }
 
           // Also notify seller via FCM (earnings update)
-          if (sellerId) {
-            const sellerToken = await getToken(sellerId);
+          const { sellerUserId } = await resolveOrderPartyUserIds(app.prisma, orderId);
+          if (sellerUserId) {
+            const sellerToken = await getToken(sellerUserId);
             if (sellerToken) {
               await sendPush({
                 token: sellerToken,
@@ -144,18 +152,19 @@ async function notificationsPlugin(app: FastifyInstance): Promise<void> {
             await sendSms(phone, SmsTemplates.orderCancelled());
           }
 
-          // Notify seller
-          if (sellerId) {
-            const sellerToken = await getToken(sellerId);
+          // Notify seller + rider — resolved USER ids (P1-3: riders used to
+          // drive to cancelled orders because this looked up a profile id).
+          const { sellerUserId, riderUserId } = await resolveOrderPartyUserIds(app.prisma, orderId);
+          if (sellerUserId) {
+            const sellerToken = await getToken(sellerUserId);
             if (sellerToken) {
               const sellerNotif = SellerNotifications.orderCancelled(orderId);
               await sendPush({ token: sellerToken, ...sellerNotif, data: { orderId } });
             }
           }
 
-          // Notify rider if assigned
-          if (riderId) {
-            const riderToken = await getToken(riderId);
+          if (riderUserId) {
+            const riderToken = await getToken(riderUserId);
             if (riderToken) {
               const riderNotif = RiderNotifications.orderCancelled();
               await sendPush({ token: riderToken, ...riderNotif, data: { orderId } });
@@ -166,11 +175,12 @@ async function notificationsPlugin(app: FastifyInstance): Promise<void> {
 
         // ── Paid → notify seller to prepare ─────────────────────────────────
         case 'paid': {
-          if (sellerId) {
+          const { sellerUserId } = await resolveOrderPartyUserIds(app.prisma, orderId);
+          if (sellerUserId) {
             const order = await app.prisma.order.findUnique({
               where: { id: orderId }, select: { totalAmount: true },
             });
-            const sellerToken = await getToken(sellerId);
+            const sellerToken = await getToken(sellerUserId);
             if (sellerToken) {
               const notif = SellerNotifications.newOrder(order?.totalAmount ?? 0);
               await sendPush({
@@ -179,7 +189,7 @@ async function notificationsPlugin(app: FastifyInstance): Promise<void> {
                 data:    { orderId, screen: 'OrderQueue' },
                 channel: 'chirawa_alerts', // High-priority channel
               });
-              await logNotification(sellerId, 'fcm', 'new_order', notif.title, notif.body);
+              await logNotification(sellerUserId, 'fcm', 'new_order', notif.title, notif.body);
             }
           }
           break;
@@ -194,7 +204,7 @@ async function notificationsPlugin(app: FastifyInstance): Promise<void> {
   // ── NEW ORDER FOR SELLER ──────────────────────────────────────────────────
   eventBus.on(Events.NEW_ORDER_FOR_SELLER, async (payload: NewOrderForSellerPayload) => {
     try {
-      const token = await getToken(payload.sellerId);
+      const token = await getToken(payload.sellerUserId);
       if (!token) return;
 
       const notif = SellerNotifications.newOrder(payload.totalAmount);
@@ -205,7 +215,7 @@ async function notificationsPlugin(app: FastifyInstance): Promise<void> {
         channel: 'chirawa_alerts', // Uses alarm sound on Android
       });
 
-      await logNotification(payload.sellerId, 'fcm', 'new_order', notif.title, notif.body);
+      await logNotification(payload.sellerUserId, 'fcm', 'new_order', notif.title, notif.body);
     } catch (err) {
       app.log.error({ err }, 'Seller notification failed');
     }
@@ -214,7 +224,7 @@ async function notificationsPlugin(app: FastifyInstance): Promise<void> {
   // ── ORDER ASSIGNED TO RIDER ───────────────────────────────────────────────
   eventBus.on(Events.ORDER_ASSIGNED_TO_RIDER, async (payload: OrderAssignedToRiderPayload) => {
     try {
-      const token = await getToken(payload.riderId);
+      const token = await getToken(payload.riderUserId);
       if (!token) return;
 
       const notif = RiderNotifications.newAssignment(
@@ -230,7 +240,7 @@ async function notificationsPlugin(app: FastifyInstance): Promise<void> {
         channel: 'chirawa_alerts',
       });
 
-      await logNotification(payload.riderId, 'fcm', 'order_assigned', notif.title, notif.body);
+      await logNotification(payload.riderUserId, 'fcm', 'order_assigned', notif.title, notif.body);
     } catch (err) {
       app.log.error({ err }, 'Rider notification failed');
     }

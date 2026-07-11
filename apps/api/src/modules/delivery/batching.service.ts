@@ -2,7 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import { NotFoundError } from '../../shared/errors/app-errors';
 import { haversineMeters, type LatLng } from '../../shared/utils/geo';
-import { pickZone, pickBestRider, type ZoneLite, type RiderCandidate } from './dispatch.service';
+import { pickZone, pickBestRider, loadRiderCandidates, type ZoneLite, type RiderCandidate } from './dispatch.service';
 import { emitOrderAssignedToRider } from '../../shared/events/event-bus';
 
 // Orders within this radius of the batch anchor may join the same batch (Task 5.4).
@@ -94,15 +94,7 @@ export function createBatchingService(prisma: PrismaClient, redis: Redis) {
     }
     if (riderIds.length === 0) riderIds = [...onlineIds];
 
-    const candidates: RiderCandidate[] = [];
-    for (const rid of riderIds) {
-      const [profile, activeCount] = await Promise.all([
-        prisma.riderProfile.findUnique({ where: { id: rid }, select: { userId: true } }),
-        prisma.deliveryAssignment.count({ where: { riderId: rid, isActive: true } }),
-      ]);
-      if (profile) candidates.push({ riderProfileId: rid, userId: profile.userId, activeCount });
-    }
-    return pickBestRider(candidates);
+    return pickBestRider(await loadRiderCandidates(prisma, riderIds)); // 2 queries, not 2×N (P1-11)
   }
 
   // Close an open batch and assign all its orders to one rider (Task 5.4).
@@ -113,21 +105,38 @@ export function createBatchingService(prisma: PrismaClient, redis: Redis) {
       include: { orders: { select: { id: true, shopId: true, totalAmount: true, paymentMethod: true, deliveryLocality: true } } },
     });
     if (!batch) return { assigned: false, reason: 'not_found' };
+    // Fast path only — the AUTHORITATIVE open-check is the CAS inside the
+    // transaction below (P1-12): with worker concurrency 3 plus the manual
+    // admin trigger, two assigners could both pass this read-only check and
+    // double-assign the batch to two riders.
     if (batch.status !== 'open') return { assigned: false, reason: 'already_handled' };
     if (batch.orders.length === 0) {
-      await prisma.batch.update({ where: { id: batchId }, data: { status: 'cancelled' } });
+      // Conditional for the same reason — losing this race is fine, but never
+      // stomp a concurrent assigner's 'assigned' back to 'cancelled'.
+      await prisma.batch.updateMany({ where: { id: batchId, status: 'open' }, data: { status: 'cancelled' } });
       return { assigned: false, reason: 'empty' };
     }
 
     const rider = await findBestRiderForPoint({ lat: Number(batch.anchorLat), lng: Number(batch.anchorLng) });
-    if (!rider) return { assigned: false, reason: 'no_rider' };
+    if (!rider) return { assigned: false, reason: 'no_rider' }; // still 'open' — the retry/escalate loop may claim later
 
-    await prisma.$transaction([
-      ...batch.orders.map((o) =>
-        prisma.deliveryAssignment.create({ data: { orderId: o.id, riderId: rider.riderProfileId, isActive: true } })),
-      prisma.order.updateMany({ where: { batchId }, data: { riderId: rider.riderProfileId } }),
-      prisma.batch.update({ where: { id: batchId }, data: { status: 'assigned', riderId: rider.riderProfileId } }),
-    ]);
+    // Claim-then-write, atomically: the conditional update on status='open' IS
+    // the claim, and it runs FIRST so a lost claim performs no writes at all.
+    // The CAS loser (Postgres READ COMMITTED re-evaluates the predicate after
+    // the winner commits) sees count=0 and its transaction is a pure no-op.
+    const claimed = await prisma.$transaction(async (tx) => {
+      const cas = await tx.batch.updateMany({
+        where: { id: batchId, status: 'open' },
+        data:  { status: 'assigned', riderId: rider.riderProfileId },
+      });
+      if (cas.count === 0) return false;
+      await tx.deliveryAssignment.createMany({
+        data: batch.orders.map((o) => ({ orderId: o.id, riderId: rider.riderProfileId, isActive: true })),
+      });
+      await tx.order.updateMany({ where: { batchId }, data: { riderId: rider.riderProfileId } });
+      return true;
+    });
+    if (!claimed) return { assigned: false, reason: 'already_handled' };
 
     // One push to the rider for the whole batch (the batch delivery screen lists
     // every stop). Use the anchor order for the headline.
@@ -136,7 +145,7 @@ export function createBatchingService(prisma: PrismaClient, redis: Redis) {
     const totalAmount = batch.orders.reduce((s, o) => s + o.totalAmount, 0);
     emitOrderAssignedToRider({
       orderId:          anchor.id,
-      riderId:          rider.userId,
+      riderUserId:      rider.userId,
       shopName:         batch.orders.length > 1 ? `${shop?.name ?? 'Dukaan'} +${batch.orders.length - 1}` : (shop?.name ?? 'Dukaan'),
       shopAddress:      '',
       deliveryLocality: anchor.deliveryLocality,

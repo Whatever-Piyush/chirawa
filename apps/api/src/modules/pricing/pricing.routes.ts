@@ -1,18 +1,21 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { authenticate } from '../../shared/middleware/auth.middleware';
 import { pricingPreviewSchema, type PricingPreviewInput } from './pricing.schema';
 import { calculateDeliveryFee, getActiveFeeRuleVersion } from './pricing.service';
-import { validatePromo, resolveAutoPromo } from '../promotions/promotions.service';
+import { previewPromo } from '../promotions/promotions.service';
 import { ValidationError, NotFoundError, ForbiddenError } from '../../shared/errors/app-errors';
 
 export default async function pricingRoutes(app: FastifyInstance): Promise<void> {
 
   // POST /api/v1/pricing/preview
   // Called when customer selects/changes address at checkout
-  app.post(
+  // Route generics (<{ Body }>) instead of an annotated request param — an
+  // annotated handler alongside an inline options object pins the route generic
+  // and fails the exactOptionalPropertyTypes baseline (Fastify v4 TS docs).
+  app.post<{ Body: PricingPreviewInput }>(
     '/preview',
     { preHandler: [authenticate] },
-    async (request: FastifyRequest<{ Body: PricingPreviewInput }>, reply) => {
+    async (request, reply) => {
       const parsed = pricingPreviewSchema.safeParse(request.body);
       if (!parsed.success) {
         throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid input');
@@ -56,31 +59,18 @@ export default async function pricingRoutes(app: FastifyInstance): Promise<void>
         ruleVersion,
       });
 
-      // Promo preview — single-shop only (mirrors order creation). A typed code
-      // soft-fails (promoError) so the bill still renders; otherwise first-time
-      // customers see FIRSTORDER (free delivery) auto-applied.
-      let discount        = 0;
-      let appliedPromoCode: string | null = null;
-      let promoError:       string | null = null;
-      if (shopIds.length === 1) {
-        const promoCtx = {
-          userId:            request.auth!.userId,
-          cartSubtotalPaise: cart.subtotal,
-          deliveryFeePaise:  fee.feePaise,
-        };
-        if (parsed.data.promoCode) {
-          try {
-            const v = await validatePromo(app.prisma, { code: parsed.data.promoCode, ...promoCtx });
-            discount = v.discountPaise;
-            appliedPromoCode = v.code;
-          } catch (e) {
-            promoError = e instanceof Error ? e.message : 'Promo code valid nahi hai';
-          }
-        } else {
-          const auto = await resolveAutoPromo(app.prisma, promoCtx);
-          if (auto) { discount = auto.discountPaise; appliedPromoCode = auto.code; }
-        }
-      }
+      // Promo preview — mirrors order creation exactly (A3 parity fix): creation
+      // applies the promo at the whole-cart subtotal for ANY shop count, so the
+      // old single-shop gate here made multi-shop bills disagree with the charge.
+      // A typed code soft-fails (promoError) so the bill still renders; otherwise
+      // first-time customers see FIRSTORDER (free delivery) auto-applied.
+      const promo = await previewPromo(app.prisma, {
+        ...(parsed.data.promoCode ? { promoCode: parsed.data.promoCode } : {}),
+        userId:            request.auth!.userId,
+        cartSubtotalPaise: cart.subtotal,
+        deliveryFeePaise:  fee.feePaise,
+      });
+      const { discount, appliedPromoCode, promoError } = promo;
 
       return reply.send({
         deliveryFee:    fee.feePaise,

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { createOrdersService } from './orders.service';
 import { createPaymentsService } from '../payments/payments.service';
-import { placeOrderSchema, rateOrderSchema, codCollectedSchema, type PlaceOrderInput, type RateOrderInput } from './orders.schema';
+import { placeOrderSchema, rateOrderSchema, codCollectedSchema, listOrdersQuerySchema, type PlaceOrderInput, type RateOrderInput } from './orders.schema';
 import { authenticate, requireRole } from '../../shared/middleware/auth.middleware';
 import { ValidationError } from '../../shared/errors/app-errors';
 import { runIdempotent, readIdempotencyKey } from '../../shared/utils/idempotency';
@@ -48,9 +48,14 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
     return reply.status(result.status).send(result.body);
   });
 
-  // GET /api/v1/orders
-  app.get('/', async (request, reply) => {
-    const orders = await ordersService.getMyOrders(request.auth!.userId, request.auth!.role, request.auth!.profileId);
+  // GET /api/v1/orders?page=&limit= — params optional; absent = legacy newest-50
+  // (A4-impl-1: real pagination so order #51+ stays reachable).
+  app.get<{ Querystring: { page?: string; limit?: string } }>('/', async (request, reply) => {
+    const parsed = listOrdersQuerySchema.safeParse(request.query);
+    if (!parsed.success) throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid pagination');
+    const orders = await ordersService.getMyOrders(
+      request.auth!.userId, request.auth!.role, request.auth!.profileId, parsed.data,
+    );
     return reply.send(orders);
   });
 
@@ -83,9 +88,13 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
   // screen's per-line "है?" — [{ orderItemId, availableQty }]. availableQty 0 =
   // "नहीं" (line refunds), < ordered = "सिर्फ n" (line shrinks + residual
   // refunds), ≥ ordered = confirmed. Accept without a body stays 1-tap.
-  app.post('/:id/accept',
+  // Route generics (<{ Params; Body }> on the method) instead of annotating the
+  // request param — an annotated handler alongside an inline options object pins
+  // the route generic to RouteGenericInterface and fails the
+  // exactOptionalPropertyTypes baseline (Fastify v4 TypeScript docs, "Using Generics").
+  app.post<{ Params: { id: string }; Body: { lineOverrides?: Array<{ orderItemId: string; availableQty: number }> } }>('/:id/accept',
     { preHandler: [requireRole('seller')] },
-    async (request: FastifyRequest<{ Params: { id: string }; Body?: { lineOverrides?: Array<{ orderItemId: string; availableQty: number }> } }>, reply) => {
+    async (request, reply) => {
       const body = (request.body ?? {}) as { lineOverrides?: Array<{ orderItemId: string; availableQty: number }> };
       const overrides = Array.isArray(body.lineOverrides)
         ? body.lineOverrides.filter((o) => o && typeof o.orderItemId === 'string' && Number.isFinite(o.availableQty))
@@ -96,37 +105,37 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
   );
 
   // POST /api/v1/orders/:id/reject
-  app.post('/:id/reject',
+  app.post<{ Params: { id: string }; Body: { reason?: string } }>('/:id/reject',
     { preHandler: [requireRole('seller')] },
-    async (request: FastifyRequest<{ Params: { id: string }; Body: { reason: string } }>, reply) => {
-      const { reason } = request.body as { reason: string };
+    async (request, reply) => {
+      const { reason } = request.body ?? {};
       const result = await ordersService.sellerRejectOrder(request.params.id, request.auth!.userId, reason ?? 'Seller ne reject kiya');
       return reply.send(result);
     },
   );
 
   // POST /api/v1/orders/:id/preparing
-  app.post('/:id/preparing',
+  app.post<{ Params: { id: string } }>('/:id/preparing',
     { preHandler: [requireRole('seller')] },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    async (request, reply) => {
       const result = await ordersService.sellerMarkPreparing(request.params.id, request.auth!.userId);
       return reply.send(result);
     },
   );
 
   // POST /api/v1/orders/:id/ready
-  app.post('/:id/ready',
+  app.post<{ Params: { id: string } }>('/:id/ready',
     { preHandler: [requireRole('seller')] },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    async (request, reply) => {
       const result = await ordersService.sellerMarkReady(request.params.id, request.auth!.userId);
       return reply.send(result);
     },
   );
 
   // POST /api/v1/orders/:id/cod-collected
-  app.post('/:id/cod-collected',
+  app.post<{ Params: { id: string } }>('/:id/cod-collected',
     { preHandler: [requireRole('rider')] },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    async (request, reply) => {
       const parsed = codCollectedSchema.safeParse(request.body ?? {});
       if (!parsed.success) throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid input');
       const result = await ordersService.codCollected(request.params.id, request.auth!.profileId, parsed.data.amountPaise, request.auth!.userId);
@@ -136,9 +145,9 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
 
   // POST /api/v1/orders/:id/delivered — rider marks a non-COD (prepaid) order
   // delivered. COD orders use /cod-collected instead (records the cash).
-  app.post('/:id/delivered',
+  app.post<{ Params: { id: string } }>('/:id/delivered',
     { preHandler: [requireRole('rider')] },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    async (request, reply) => {
       const result = await ordersService.markDelivered(request.params.id, request.auth!.profileId, request.auth!.userId);
       return reply.send(result);
     },
@@ -147,9 +156,9 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
   // ── Customer post-delivery rating ─────────────────────────────────────────
 
   // POST /api/v1/orders/:id/rating
-  app.post('/:id/rating',
+  app.post<{ Params: { id: string }; Body: RateOrderInput }>('/:id/rating',
     { preHandler: [requireRole('customer')] },
-    async (request: FastifyRequest<{ Params: { id: string }; Body: RateOrderInput }>, reply) => {
+    async (request, reply) => {
       const parsed = rateOrderSchema.safeParse(request.body);
       if (!parsed.success) {
         throw new ValidationError(parsed.error.errors[0]?.message ?? 'Invalid rating');
@@ -167,9 +176,9 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
   // ── Customer: change delivery address (before pickup) ─────────────────────
 
   // PATCH /api/v1/orders/:id/delivery-address  { addressId }
-  app.patch('/:id/delivery-address',
+  app.patch<{ Params: { id: string }; Body: { addressId?: unknown } }>('/:id/delivery-address',
     { preHandler: [requireRole('customer')] },
-    async (request: FastifyRequest<{ Params: { id: string }; Body: { addressId?: unknown } }>, reply) => {
+    async (request, reply) => {
       const { addressId } = request.body;
       if (typeof addressId !== 'string' || !addressId) {
         throw new ValidationError('addressId is required');
@@ -182,9 +191,9 @@ export default async function ordersRoutes(app: FastifyInstance): Promise<void> 
   // ── Customer: update receiver contact (before pickup) ─────────────────────
 
   // PATCH /api/v1/orders/:id/receiver  { name, phone }
-  app.patch('/:id/receiver',
+  app.patch<{ Params: { id: string }; Body: { name?: unknown; phone?: unknown } }>('/:id/receiver',
     { preHandler: [requireRole('customer')] },
-    async (request: FastifyRequest<{ Params: { id: string }; Body: { name?: unknown; phone?: unknown } }>, reply) => {
+    async (request, reply) => {
       const { name, phone } = request.body;
       if (typeof name !== 'string' || typeof phone !== 'string') {
         throw new ValidationError('name and phone are required');

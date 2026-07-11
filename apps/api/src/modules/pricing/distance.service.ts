@@ -1,7 +1,11 @@
 import type Redis from 'ioredis';
 import { env } from '../../config/env';
+import { serviceLogger } from '../../shared/observability/logger';
+
+const log = serviceLogger('distance');
 
 const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days — roads don't change weekly
+const FETCH_TIMEOUT_MS = 3000;
 
 // Round to 4 decimal places (~11m precision) for cache key
 function round4(n: number): string {
@@ -33,46 +37,67 @@ export function haversineMetres(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ─── Google Maps Distance Matrix ──────────────────────────────────────────────
-async function fetchGoogleDistance(
+// ─── Mappls Distance Matrix (Phase 5 — replaces Google; founder decision) ─────
+// Contract verified against the official spec (github.com/mappls-api/
+// mappls-rest-apis → mappls-distance-matrix-api/readme.md, doc v1.0.0 2025-06):
+//   GET https://route.mappls.com/route/dm/distance_matrix/{profile}/{coords}
+//       ?access_token=<REST key>
+//   coords are LONGITUDE-FIRST pairs, semicolon-separated: "lng,lat;lng,lat".
+//   → { responseCode: 200, results: { code: "Ok",
+//        distances: [[0, metres, …]], durations: [[…]] } }   (metres/seconds;
+//     index 0 is source→source, so our single destination is distances[0][1].)
+// Profile 'biking' = two-wheeler routing — what our riders actually ride.
+// (region/rtype are unsupported with 'biking'; we need neither for India.)
+// Auth is the same MAPPLS_REST_KEY the geo proxy uses for rev_geocode.
+const MAPPLS_DM_URL = (srcLat: number, srcLng: number, dstLat: number, dstLng: number): string =>
+  `https://route.mappls.com/route/dm/distance_matrix/biking/` +
+  `${srcLng},${srcLat};${dstLng},${dstLat}` +
+  `?access_token=${encodeURIComponent(env.MAPPLS_REST_KEY)}`;
+
+interface MapplsDmResp {
+  responseCode?: number;
+  results?: { code?: string; distances?: number[][] };
+}
+
+export interface DistanceDeps { fetchImpl?: typeof fetch }
+
+async function fetchMapplsDistance(
   srcLat: number, srcLng: number,
   dstLat: number, dstLng: number,
+  deps: DistanceDeps,
 ): Promise<number> {
-  const url =
-    `https://maps.googleapis.com/maps/api/distancematrix/json` +
-    `?origins=${srcLat},${srcLng}` +
-    `&destinations=${dstLat},${dstLng}` +
-    `&key=${env.GOOGLE_MAPS_API_KEY}`;
-
+  const fetchImpl = deps.fetchImpl ?? fetch;
   const controller = new AbortController();
-  const timeout    = setTimeout(() => controller.abort(), 3000); // 3s timeout
+  const timeout    = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
-    const res  = await fetch(url, { signal: controller.signal });
-    const data = await res.json() as {
-      rows: Array<{ elements: Array<{ status: string; distance: { value: number } }> }>;
-    };
+    const res = await fetchImpl(MAPPLS_DM_URL(srcLat, srcLng, dstLat, dstLng), {
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Mappls distance_matrix HTTP ${res.status}`);
+    const data = (await res.json()) as MapplsDmResp;
 
-    const element = data.rows[0]?.elements[0];
-    if (element?.status === 'OK') {
-      return element.distance.value; // metres
+    const metres = data.results?.distances?.[0]?.[1];
+    if (data.results?.code?.toLowerCase() === 'ok' && typeof metres === 'number' && metres >= 0) {
+      return Math.round(metres);
     }
-    throw new Error(`Google Maps returned status: ${element?.status}`);
+    throw new Error(`Mappls distance_matrix returned code=${data.results?.code ?? data.responseCode}`);
   } finally {
     clearTimeout(timeout);
   }
 }
 
-// ─── Main export — cached Google Maps with haversine fallback ─────────────────
+// ─── Main export — cached Mappls road distance with haversine fallback ────────
 export interface DistanceResult {
   metres: number;
-  source: 'google_maps' | 'haversine_fallback' | 'cache';
+  source: 'mappls' | 'haversine_fallback' | 'cache';
 }
 
 export async function getRoadDistance(
   srcLat: number, srcLng: number,
   dstLat: number, dstLng: number,
   redis: Redis,
+  deps: DistanceDeps = {},
 ): Promise<DistanceResult> {
   const cacheKey = distanceCacheKey(srcLat, srcLng, dstLat, dstLng);
 
@@ -82,15 +107,15 @@ export async function getRoadDistance(
     return { metres: parseInt(cached, 10), source: 'cache' };
   }
 
-  // 2. Try Google Maps (skip if key is placeholder)
-  if (env.GOOGLE_MAPS_API_KEY !== 'placeholder') {
+  // 2. Try Mappls (skip if the REST key is a placeholder)
+  if (env.MAPPLS_REST_KEY !== 'placeholder') {
     try {
-      const metres = await fetchGoogleDistance(srcLat, srcLng, dstLat, dstLng);
+      const metres = await fetchMapplsDistance(srcLat, srcLng, dstLat, dstLng, deps);
       // Cache result for 7 days
       await redis.setex(cacheKey, CACHE_TTL_SECONDS, String(metres));
-      return { metres, source: 'google_maps' };
+      return { metres, source: 'mappls' };
     } catch (err) {
-      console.warn('Google Maps distance failed, using haversine fallback:', err);
+      log.warn({ err }, 'Mappls distance failed, using haversine fallback');
     }
   }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { isAuthorizedForOrderRoom, emitToOrderAndUser, type OrderAuthzView } from '../realtime.helpers';
+import { isAuthorizedForOrderRoom, emitToOrderAndUser, parseRiderLocation, type OrderAuthzView } from '../realtime.helpers';
 
 // Distinct ids so a profile-vs-user mixup (the rider IDOR class) is observable.
 const CUST_USER     = 'cust_user_1';
@@ -63,10 +63,17 @@ describe('isAuthorizedForOrderRoom — order:subscribe IDOR guard', () => {
 });
 
 describe('emitToOrderAndUser — single union emit (duplicate-emission fix)', () => {
+  // Explicit interface breaks the circular return-type inference that
+  // `vi.fn((): typeof chain => chain)` produced (TS2577 under tsc --noEmit).
+  interface EmitChain {
+    to: ReturnType<typeof vi.fn>;
+    emit: ReturnType<typeof vi.fn>;
+  }
   function mockIo() {
     const emit = vi.fn();
-    const chain = { to: vi.fn((): typeof chain => chain), emit };
-    const io = { to: vi.fn((): typeof chain => chain) };
+    const chain: EmitChain = { to: vi.fn(), emit };
+    chain.to.mockReturnValue(chain);
+    const io = { to: vi.fn(() => chain) };
     return { io, chain, emit };
   }
 
@@ -89,5 +96,38 @@ describe('emitToOrderAndUser — single union emit (duplicate-emission fix)', ()
     emitToOrderAndUser(io as never, 'o2', 'c2', 'order:eta', { secondsRemaining: 300 });
     expect(emit).toHaveBeenCalledTimes(1);
     expect(emit).toHaveBeenCalledWith('order:eta', { secondsRemaining: 300 });
+  });
+});
+
+describe('parseRiderLocation — rider:location payload validation (P0-5)', () => {
+  const valid = { orderId: 'o1', lat: 28.2, lng: 75.6, timestamp: 1000 };
+
+  it('accepts a well-formed payload', () => {
+    expect(parseRiderLocation(valid)).toEqual(valid);
+  });
+
+  it('accepts lat/lng of 0 (the old !lat check wrongly rejected these)', () => {
+    expect(parseRiderLocation({ ...valid, lat: 0, lng: 0 })).toEqual({ ...valid, lat: 0, lng: 0 });
+  });
+
+  it('falls back to server time for a missing/garbage timestamp', () => {
+    const before = Date.now();
+    const parsed = parseRiderLocation({ orderId: 'o1', lat: 1, lng: 2 });
+    expect(parsed).not.toBeNull();
+    expect(parsed!.timestamp).toBeGreaterThanOrEqual(before);
+  });
+
+  it.each([
+    ['null payload',        null],
+    ['non-object',          'hi'],
+    ['missing orderId',     { lat: 1, lng: 2 }],
+    ['empty orderId',       { orderId: '', lat: 1, lng: 2 }],
+    ['oversized orderId',   { orderId: 'x'.repeat(65), lat: 1, lng: 2 }],
+    ['lat out of range',    { orderId: 'o1', lat: 91, lng: 2 }],
+    ['lng out of range',    { orderId: 'o1', lat: 1, lng: -181 }],
+    ['NaN lat',             { orderId: 'o1', lat: NaN, lng: 2 }],
+    ['string lat',          { orderId: 'o1', lat: '28.2', lng: 2 }],
+  ])('rejects %s', (_name, payload) => {
+    expect(parseRiderLocation(payload)).toBeNull();
   });
 });

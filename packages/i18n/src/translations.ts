@@ -17,6 +17,15 @@ export const translations = {
     otpSentMessage:    { en: 'Enter the 6-digit code sent to',                                   hi: '6-अंकी OTP कोड डालें' },
     changeNumber:      { en: 'Change number?',                                                   hi: 'नंबर बदलें?' },
     wrongOtp:          { en: 'Invalid OTP',                                                      hi: 'गलत OTP है' },
+    // ── Milestone A2 — OTP & login polish ──────────────────────────────
+    resendIn:          { en: 'Resend OTP in {s}s',                                               hi: '{s} सेकंड में OTP दोबारा भेजें' },
+    otpSentAgain:      { en: 'New OTP sent ✓',                                                   hi: 'नया OTP भेज दिया गया ✓' },
+    otpValidFor:       { en: 'Code valid for {t}',                                               hi: 'कोड {t} तक मान्य है' },
+    otpExpired:        { en: 'That code has expired — tap Resend OTP to get a new one',          hi: 'कोड की समय-सीमा खत्म हो गई — नया OTP मंगाएं' },
+    noSmsHint:         { en: "Didn't get the SMS? It can take up to a minute to arrive.",        hi: 'SMS नहीं आया? आने में एक मिनट तक लग सकता है।' },
+    networkError:      { en: 'No connection. Check your internet and try again.',                hi: 'इंटरनेट नहीं है। कनेक्शन चेक करके दोबारा कोशिश करें।' },
+    tooManyRequests:   { en: 'Too many attempts. Please wait a few minutes and try again.',      hi: 'बहुत बार कोशिश हो गई। कुछ मिनट रुक कर दोबारा कोशिश करें।' },
+    invalidPhone:      { en: 'Enter a valid 10-digit mobile number',                             hi: 'सही 10 अंकों का मोबाइल नंबर डालें' },
   },
   home: {
     greeting:          { en: 'Hello',                                hi: 'नमस्ते' },
@@ -38,6 +47,10 @@ export const translations = {
     closedTitle:       { en: "We're closed for tonight", hi: 'आज रात के लिए हम बंद हैं' },
     closedSub:         { en: 'Browse now — order first thing tomorrow.', hi: 'अभी देखें — कल सुबह ऑर्डर करें।' },
     closedReopen:      { en: 'Opens 9 AM', hi: 'सुबह 9 बजे खुलेगा' },
+    // ── Milestone A1 — active-order strip on Home ─────────────────────
+    activeOrderTrack:   { en: 'Track',                               hi: 'ट्रैक करें' },
+    activeOrderShops:   { en: 'shops',                               hi: 'दुकानें' },
+    activeOrderViewAll: { en: 'View all active orders',              hi: 'सभी चालू ऑर्डर देखें' },
     tabOrders:         { en: 'Orders',                               hi: 'ऑर्डर' },
     tabProfile:        { en: 'Profile',                              hi: 'प्रोफाइल' },
     // ── HomeScreen redesign — Chunk 8 (bottom nav: 4 tabs) ───────────
@@ -206,6 +219,9 @@ export const translations = {
     promoRemove:       { en: 'Remove',                               hi: 'हटाएं' },
     discount:          { en: 'Discount',                             hi: 'छूट' },
     freeDelivery:      { en: 'Free delivery 🎉',                     hi: 'फ्री डिलीवरी 🎉' },
+    // ── Milestone A3 — pricing transparency ──────────────────────────
+    firstOrderApplied: { en: 'First-order treat: free delivery applied! 🎉', hi: 'पहले ऑर्डर का तोहफ़ा: डिलीवरी फ्री! 🎉' },
+    pricingFailed:     { en: "Couldn't calculate the delivery fee",   hi: 'डिलीवरी फीस निकाल नहीं पाए' },
   },
   tracking: {
     title:           { en: 'Order Tracking',                    hi: 'ऑर्डर ट्रैकिंग' },
@@ -285,6 +301,10 @@ export const translations = {
     byTime:          { en: 'by',                                   hi: 'तक' },
     etaEstimate:     { en: 'estimate',                             hi: 'अनुमान' },
     packingSub:      { en: 'Packing your order',                   hi: 'आपका ऑर्डर पैक हो रहा है' },
+    // ── Milestone A4-impl-1 — finished-order state ────────────────────
+    paymentOnline:   { en: 'Online',                               hi: 'ऑनलाइन' },
+    deliveredAt:     { en: 'Delivered at',                         hi: 'डिलीवर हुआ' },
+    cancelReasonLabel: { en: 'Cancellation reason',                hi: 'रद्द करने का कारण' },
   },
   orders: {
     confirmed:    { en: 'Order Confirmed',       hi: 'ऑर्डर कन्फर्म हुआ' },
@@ -393,6 +413,9 @@ export const translations = {
     call:       { en: 'Call',                     hi: 'कॉल करें' },
     noInternet: { en: 'No internet connection',   hi: 'इंटरनेट नहीं है' },
     comingSoon: { en: 'Coming soon',              hi: 'जल्द आएगा' },
+    // ── Milestone A4-impl-1 — localized offline/error strings ────────
+    ok:              { en: 'OK',                              hi: 'ठीक है' },
+    checkConnection: { en: 'Check your connection and try again', hi: 'कनेक्शन चेक करें और दोबारा कोशिश करें' },
   },
   profile: {
     member:        { en: 'Member',                        hi: 'सदस्य' },

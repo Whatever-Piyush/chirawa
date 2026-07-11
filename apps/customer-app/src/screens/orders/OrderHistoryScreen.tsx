@@ -39,11 +39,11 @@ const PAGE_SIZE = 20;
 // /orders raw Prisma response, so we narrow to just the fields the list view
 // actually reads.
 interface OrderListItem {
-  id:        string;
-  shopId:    string;
-  status:    string; // OrderStatus enum value as string
-  total:     number; // paise
-  createdAt: string;
+  id:          string;
+  shopId:      string;
+  status:      string; // OrderStatus enum value as string
+  totalAmount: number; // paise — the raw row's money field (A4: `total` never existed → ₹NaN)
+  createdAt:   string;
   items: { productId: string; productName: string; quantity: number; unitPrice: number }[];
   rating?:        number | null;
   ratingComment?: string | null;
@@ -163,8 +163,14 @@ export default function OrderHistoryScreen({ navigation }: Props) {
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
   const [error,       setError]       = useState(false);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [reorderingId, setReorderingId] = useState<string | null>(null);
+
+  // Real pagination (A4): server honors page/limit, we append page after page.
+  // A full page means there may be more; a short page is the end of history.
+  const [page,        setPage]        = useState(1);
+  const [hasMore,     setHasMore]     = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadingMoreRef = useRef(false);
 
   // Delivery address shown in the header + edited via the location sheet.
   const { current: activeAddress } = useAddresses();
@@ -196,6 +202,8 @@ export default function OrderHistoryScreen({ navigation }: Props) {
         fetchProducts({ limit: 10 }).catch(() => []),
       ]);
       setOrders(ordersRaw);
+      setPage(1);
+      setHasMore(ordersRaw.length === PAGE_SIZE);
       setShopMap(new Map(shopsRaw.map((s) => [s.id, s.name])));
       setBestsellers(productsRaw.map(toProductCard));
     } catch {
@@ -238,15 +246,37 @@ export default function OrderHistoryScreen({ navigation }: Props) {
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
-    setVisibleCount(PAGE_SIZE);
-    void loadData();
+    void loadData();   // resets to page 1 + recomputes hasMore
   }, [loadData]);
 
-  // ─── Infinite scroll ───────────────────────────────────────────────────────
+  // ─── Infinite scroll — fetch the NEXT page from the server (A4) ────────────
+  // The ref (not state) guards re-entrancy: onEndReached can fire again before
+  // React commits the loadingMore state. A failed fetch keeps hasMore so the
+  // next scroll retries. Appends dedup by id — a new order placed between page
+  // fetches shifts the offset and would otherwise repeat the previous tail.
 
   const handleLoadMore = useCallback(() => {
-    setVisibleCount((c) => (c < orders.length ? Math.min(c + PAGE_SIZE, orders.length) : c));
-  }, [orders.length]);
+    if (loading || refreshing || !hasMore || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    void (async () => {
+      try {
+        const next = page + 1;
+        const more = await api.getMyOrders({ page: next, limit: PAGE_SIZE }) as unknown as OrderListItem[];
+        setOrders((prev) => {
+          const seen = new Set(prev.map((o) => o.id));
+          return [...prev, ...more.filter((o) => !seen.has(o.id))];
+        });
+        setPage(next);
+        setHasMore(more.length === PAGE_SIZE);
+      } catch {
+        // keep hasMore — scrolling again retries this page
+      } finally {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
+    })();
+  }, [loading, refreshing, hasMore, page]);
 
   // ─── Reorder ───────────────────────────────────────────────────────────────
 
@@ -287,7 +317,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
     const label         = statusLabel(item.status, t);
     const shopName      = shopMap.get(item.shopId) ?? t('history.shop');
     const itemCount     = item.items.reduce((sum, i) => sum + i.quantity, 0);
-    const totalRupees   = Math.round(item.total / 100);
+    const totalRupees   = Math.round(item.totalAmount / 100);
     const orderRef      = `#${item.id.slice(-6).toUpperCase()}`;
     const trackable     = !FINAL_STATUSES.has(item.status);
     const isReordering  = reorderingId === item.id;
@@ -361,9 +391,6 @@ export default function OrderHistoryScreen({ navigation }: Props) {
   // the (possibly empty) virtualised list; the faded tagline is the footer. We
   // never early-return on empty so the hero + bestsellers always greet the user.
 
-  const visibleOrders = orders.slice(0, visibleCount);
-  const hasMore       = visibleCount < orders.length;
-
   const renderBody = () => {
     if (loading) {
       return (
@@ -377,10 +404,10 @@ export default function OrderHistoryScreen({ navigation }: Props) {
       return (
         <View style={styles.errorContainer}>
           <Text style={styles.errorEmoji}>😕</Text>
-          <Text style={styles.errorTitle}>इंटरनेट नहीं है</Text>
-          <Text style={styles.errorSubtext}>कनेक्शन चेक करें और दोबारा कोशिश करें</Text>
+          <Text style={styles.errorTitle}>{t('common.noInternet')}</Text>
+          <Text style={styles.errorSubtext}>{t('common.checkConnection')}</Text>
           <TouchableOpacity style={styles.retryButton} onPress={handleRetry} activeOpacity={0.8}>
-            <Text style={styles.retryText}>🔄 दोबारा कोशिश करें</Text>
+            <Text style={styles.retryText}>🔄 {t('common.retry')}</Text>
           </TouchableOpacity>
         </View>
       );
@@ -388,7 +415,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
 
     return (
       <FlatList
-        data={visibleOrders}
+        data={orders}
         keyExtractor={(item) => item.id}
         renderItem={renderOrder}
         ListHeaderComponent={
@@ -425,7 +452,7 @@ export default function OrderHistoryScreen({ navigation }: Props) {
         }
         ListFooterComponent={
           <View>
-            {hasMore && (
+            {loadingMore && (
               <View style={styles.footerLoader}>
                 <ActivityIndicator color={Colors.primary} />
               </View>

@@ -31,14 +31,19 @@ import loyaltyRoutes       from './modules/loyalty/loyalty.routes';
 import notificationsRoutes from './modules/notifications/notifications.routes';
 import sellersRoutes       from './modules/sellers/sellers.routes';
 import geoRoutes           from './modules/geo/geo.routes';
+import recoveryRoutes      from './modules/recovery/recovery.routes';
 import { initSentry, captureError } from './shared/observability/sentry';
 
 export async function buildApp(): Promise<FastifyInstance> {
   initSentry('api'); // no-op without SENTRY_DSN (4.1)
   const app = Fastify({
     logger: {
-      level: env.NODE_ENV === 'production' ? 'info' : 'debug',
-      ...(env.NODE_ENV !== 'production' && {
+      // LOG_LEVEL overrides the default in any environment (ops + load tests);
+      // LOG_PRETTY=false drops the dev pretty-transport so a dev-mode process
+      // can log production-shaped JSON (pino-pretty is real per-line overhead —
+      // pretty debug logs would skew any measurement taken in dev mode).
+      level: process.env.LOG_LEVEL ?? (env.NODE_ENV === 'production' ? 'info' : 'debug'),
+      ...(env.NODE_ENV !== 'production' && process.env.LOG_PRETTY !== 'false' && {
         transport: {
           target: 'pino-pretty',
           options: { translateTime: 'HH:MM:ss Z', ignore: 'pid,hostname', colorize: true },
@@ -68,20 +73,29 @@ export async function buildApp(): Promise<FastifyInstance> {
     methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
-  await app.register(rateLimit, {
-    global:     true,
-    // Dev gets a generous limit so HMR/poll loops don't trip the limiter;
-    // production stays tight at 100/min per IP.
-    max:        env.NODE_ENV === 'development' ? 1000 : 100,
-    timeWindow: '1 minute',
-    errorResponseBuilder: (_req, context) => ({
-      success: false,
-      error: {
-        code:    'RATE_LIMIT_EXCEEDED',
-        message: `Bahut zyada requests. ${context.after} baad try karein.`,
-      },
-    }),
-  });
+  // RATE_LIMIT_DISABLED=true skips the limiter entirely — load-test harness
+  // only (scripts/loadtest), IMPOSSIBLE in production. Route-level
+  // `config.rateLimit` entries are inert without the plugin, so no route breaks.
+  const rateLimitDisabled =
+    env.NODE_ENV !== 'production' && process.env.RATE_LIMIT_DISABLED === 'true';
+  if (rateLimitDisabled) {
+    app.log.warn('⚠️  rate limiting DISABLED (RATE_LIMIT_DISABLED=true, non-production)');
+  } else {
+    await app.register(rateLimit, {
+      global:     true,
+      // Dev gets a generous limit so HMR/poll loops don't trip the limiter;
+      // production stays tight at 100/min per IP.
+      max:        env.NODE_ENV === 'development' ? 1000 : 100,
+      timeWindow: '1 minute',
+      errorResponseBuilder: (_req, context) => ({
+        success: false,
+        error: {
+          code:    'RATE_LIMIT_EXCEEDED',
+          message: `Bahut zyada requests. ${context.after} baad try karein.`,
+        },
+      }),
+    });
+  }
 
   // Multipart — image uploads (admin only). 5 MB cap, single file per request.
   await app.register(multipart, {
@@ -182,6 +196,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(notificationsRoutes, { prefix: '/api/v1/notifications' });
   await app.register(sellersRoutes,       { prefix: '/api/v1/sellers' });
   await app.register(geoRoutes,           { prefix: '/api/v1/geo' });
+  await app.register(recoveryRoutes,      { prefix: '/api/v1/recovery' }); // Seller Sprint 5 Phase A (internal)
 
   return app;
 }

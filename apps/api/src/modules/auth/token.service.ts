@@ -40,9 +40,11 @@ function getPublicKey(): string {
 // ── Access Token ──────────────────────────────────────────────────────────────
 
 export function signAccessToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
+  // @types/jsonwebtoken ≥9.0.7 narrows expiresIn to ms.StringValue; our env var
+  // is a free-form string ("15m") validated by convention, so cast at this edge.
   return jwt.sign(payload, getPrivateKey(), {
     algorithm: 'RS256',
-    expiresIn: env.JWT_ACCESS_EXPIRES_IN,
+    expiresIn: env.JWT_ACCESS_EXPIRES_IN as NonNullable<jwt.SignOptions['expiresIn']>,
     issuer: 'chirawa-api',
   });
 }
@@ -98,11 +100,21 @@ export interface RotationResult {
   profileId: string;
 }
 
+/** Theft response: kill every live session for the user, forcing re-login. */
+async function revokeAllUserSessions(prisma: PrismaClient, userId: string): Promise<void> {
+  await prisma.refreshToken.updateMany({
+    where: { userId, revokedAt: null },
+    data:  { revokedAt: new Date() },
+  });
+}
+
 /**
  * Refresh token rotation:
  * 1. Find token by hash
  * 2. If already used → theft detected → revoke ALL user sessions
- * 3. Mark as used, issue new pair
+ * 3. Atomically CLAIM it (conditional updateMany on usedAt IS NULL) — the
+ *    loser of a concurrent double-refresh is treated exactly like reuse (P1-7)
+ * 4. Issue new pair
  */
 export async function rotateRefreshToken(
   prisma: PrismaClient,
@@ -128,12 +140,11 @@ export async function rotateRefreshToken(
     throw new AuthenticationError('Invalid session. Please login again.');
   }
 
-  // ⚠ Token reuse detected — possible token theft
+  // ⚠ Token reuse detected — possible token theft. Fast path: keeps its
+  // precedence over the expiry check (a replayed-but-expired token must still
+  // trip the alarm, not report a bland "session expired").
   if (stored.usedAt !== null) {
-    await prisma.refreshToken.updateMany({
-      where: { userId: stored.userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await revokeAllUserSessions(prisma, stored.userId);
     throw new AuthenticationError(
       'Security alert: session compromised. Please login again.',
     );
@@ -143,11 +154,27 @@ export async function rotateRefreshToken(
     throw new AuthenticationError('Session expired. Please login again.');
   }
 
-  // Mark old token consumed
-  await prisma.refreshToken.update({
-    where: { id: stored.id },
-    data: { usedAt: new Date() },
+  // Atomically CLAIM the token (P1-7). The old code checked `usedAt === null`
+  // and then updated in a second statement — two concurrent refreshes with the
+  // same token both passed the check and both minted sessions, racing past the
+  // very reuse-detection this exists for. A conditional updateMany is a
+  // compare-and-set: under Postgres READ COMMITTED the loser re-evaluates the
+  // predicate after the winner commits, matches 0 rows, and lands in the
+  // reuse branch. Exactly one caller can ever consume a refresh token.
+  const claimed = await prisma.refreshToken.updateMany({
+    where: { id: stored.id, usedAt: null },
+    data:  { usedAt: new Date() },
   });
+
+  // ⚠ Claim lost → a concurrent rotation consumed this token between our read
+  // and the CAS (the exact race the fast path above cannot see). Same
+  // treatment as overt reuse: revoke the whole session family and fail.
+  if (claimed.count === 0) {
+    await revokeAllUserSessions(prisma, stored.userId);
+    throw new AuthenticationError(
+      'Security alert: session compromised. Please login again.',
+    );
+  }
 
   // Resolve profileId
   const { user } = stored;

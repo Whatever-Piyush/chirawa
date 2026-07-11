@@ -1,20 +1,26 @@
 import type { FastifyRequest } from 'fastify';
+import { verifyAccessToken } from '../../modules/auth/token.service';
 
-// Per-user key for @fastify/rate-limit. The limiter runs at onRequest (before our
-// auth preHandler), so request.auth isn't populated yet — we read the JWT `sub`
-// straight from the bearer token for KEYING ONLY (no verification needed here;
-// the route's authenticate middleware still does the real verification). Falls
-// back to IP for unauthenticated requests.
-function userOrIpKey(req: FastifyRequest): string {
+// Per-user key for @fastify/rate-limit. The limiter runs at onRequest (before
+// the auth preHandler), so request.auth isn't populated yet — we read the JWT
+// ourselves.
+//
+// P1-1: the `sub` is only trusted after FULL signature verification. The old
+// version base64-decoded the payload without verifying, so an attacker could
+// mint unlimited fabricated `sub` values (or slap a fake Bearer on any request)
+// and give every request its own fresh bucket — per-user limits on checkout/
+// payment routes were advisory. Now a bucket key can only come from a token WE
+// signed; everything else (absent, malformed, forged, expired) shares the
+// caller's per-IP bucket. An expired-token fallback to IP is fine: the route's
+// authenticate preHandler 401s it anyway. RS256 verify costs ~microseconds and
+// only runs on routes that opted into perUserRateLimit.
+export function userOrIpKey(req: FastifyRequest): string {
   const header = req.headers.authorization;
   if (header?.startsWith('Bearer ')) {
-    const part = header.slice(7).split('.')[1];
-    if (part) {
-      try {
-        const payload = JSON.parse(Buffer.from(part, 'base64').toString('utf8')) as { sub?: string };
-        if (payload.sub) return `u:${payload.sub}`;
-      } catch { /* malformed token → fall through to IP */ }
-    }
+    try {
+      const payload = verifyAccessToken(header.slice(7));
+      if (payload.sub) return `u:${payload.sub}`;
+    } catch { /* unverifiable token → fall through to IP */ }
   }
   return `ip:${req.ip}`;
 }

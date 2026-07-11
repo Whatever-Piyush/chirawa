@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { createHash } from 'node:crypto';
+import { assertSeedableEnvironment } from '../seed-guard';
 
 // ─── Dev-only image seed (NOT production) ────────────────────────────────────
 // The catalog seed is intentionally imageless (commit ae68a45) — production
@@ -61,6 +62,7 @@ function devImageUrl(categoryName: string | null, productId: string): string {
 }
 
 async function main(): Promise<void> {
+  assertSeedableEnvironment('db:seed:images'); // Phase 5 — placeholder images must never reach production
   console.log('🌱 Seeding DEV product images (placeholders)…');
 
   const products = await prisma.product.findMany({

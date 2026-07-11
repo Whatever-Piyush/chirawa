@@ -1,5 +1,8 @@
 import { createReadStream, existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { serviceLogger } from '../shared/observability/logger';
+
+const log = serviceLogger('off-source');
 
 // ─── Open Food Facts source for catalog enrichment (Phase 2, ₹0) ──────────────
 // We resolve a barcode → front-image URL + basic fields from the OFF **bulk
@@ -82,7 +85,7 @@ export function createOffDumpSource(dumpPath?: string | null): OffLookup {
     return async () => {
       if (!warned) {
         warned = true;
-        console.warn(`⚠️  OFF dump not found (OFF_DUMP_PATH="${dumpPath ?? ''}"); enrichment will mark items needs_manual.`);
+        log.warn({ dumpPath: dumpPath ?? '' }, 'OFF dump not found; enrichment will mark items needs_manual');
       }
       return null;
     };
@@ -97,7 +100,7 @@ export function createOffDumpSource(dumpPath?: string | null): OffLookup {
       const p = parseOffDumpLine(line);
       if (p) map.set(p.barcode, p);
     }
-    console.log(`📚 OFF dump indexed: ${map.size} imaged products from ${dumpPath}`);
+    log.info({ products: map.size, dumpPath }, 'OFF dump indexed');
     return map;
   }
 

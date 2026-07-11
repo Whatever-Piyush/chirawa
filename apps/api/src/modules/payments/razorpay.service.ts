@@ -1,6 +1,9 @@
 import crypto from 'crypto';
 import Razorpay from 'razorpay';
 import { env } from '../../config/env';
+import { serviceLogger } from '../../shared/observability/logger';
+
+const log = serviceLogger('razorpay');
 
 let _client: Razorpay | null = null;
 
@@ -60,10 +63,27 @@ export function verifyPaymentSignature(
   } catch { return false; }
 }
 
+// Pure decision (exported for unit tests): a placeholder webhook secret means
+// "skip verification" ONLY outside production. In production it means the
+// webhook cannot be trusted at all, so verification FAILS CLOSED — this became
+// reachable in Phase 5, where a COD-only launch (PAYMENTS_ONLINE_ENABLED=false)
+// downgrades placeholder RAZORPAY_* creds from boot hard-fail to boot warning.
+export function webhookSecretDecision(
+  secret: string,
+  nodeEnv: string,
+): 'verify' | 'skip-dev' | 'reject' {
+  if (!secret.includes('placeholder')) return 'verify';
+  return nodeEnv === 'production' ? 'reject' : 'skip-dev';
+}
+
 export function verifyWebhookSignature(rawBody: string, signature: string): boolean {
-  // Skip verification in dev if secret contains 'placeholder'
-  if (env.RAZORPAY_WEBHOOK_SECRET.includes('placeholder')) {
-    console.warn('⚠️  Webhook signature skipped (dev mode)');
+  const decision = webhookSecretDecision(env.RAZORPAY_WEBHOOK_SECRET, env.NODE_ENV);
+  if (decision === 'reject') {
+    log.error('Webhook rejected: RAZORPAY_WEBHOOK_SECRET is a placeholder in production (fail closed)');
+    return false;
+  }
+  if (decision === 'skip-dev') {
+    log.warn('Webhook signature skipped (dev mode)');
     return true;
   }
   const expected = crypto
@@ -94,10 +114,15 @@ export async function fetchPaymentsByOrderId(
 ): Promise<Array<{ id: string; status: string; method: string; amount: number }>> {
   const result = await getClient().orders.fetchPayments(razorpayOrderId);
   const items = result.items ?? [];
-  return items.map((p: Record<string, unknown>) => ({
-    id: String(p['id']), status: String(p['status']),
-    method: String(p['method'] ?? 'unknown'), amount: Number(p['amount']),
-  }));
+  // The SDK's item type varies across @types revisions — normalize through a
+  // Record view instead of annotating the callback parameter.
+  return items.map((item) => {
+    const p = item as unknown as Record<string, unknown>;
+    return {
+      id: String(p['id']), status: String(p['status']),
+      method: String(p['method'] ?? 'unknown'), amount: Number(p['amount']),
+    };
+  });
 }
 
 // ── RazorpayX Payouts (seller settlements — 0.3) ──────────────────────────────

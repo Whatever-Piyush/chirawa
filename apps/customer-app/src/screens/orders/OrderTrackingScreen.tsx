@@ -30,6 +30,7 @@ import { useT } from '@chirawa/i18n';
 import { useToast, FauxGradient } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { DEV_HOST } from '../../config/devHost';
+import { SUPPORT_WHATSAPP_NUMBER } from '../../config/support';
 import TrackingMap from '../../components/tracking/TrackingMap';
 import BrandedLoader from '../../components/BrandedLoader';
 
@@ -40,7 +41,6 @@ type Props = {
   route:      RouteProp<RootStackParamList, 'OrderTracking'>;
 };
 const SOCKET_URL      = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chirawa.in';
-const WHATSAPP_NUMBER = '916350076685';
 const POLL_MS         = 15_000;
 
 // 9 DB states → 5 display phases (V2 timeline): Confirmed · Packing · Picked up · On the way · Delivered.
@@ -116,6 +116,14 @@ function fmtClock(ms: number): string {
   return `${h}:${String(m).padStart(2, '0')} ${ap}`;
 }
 
+// Date + time for finished orders ("4 Jul, 2:34 PM") — an old delivered order
+// needs the day, not just the clock (A4 finished-order state).
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}, ${fmtClock(d.getTime())}`;
+}
+
 // ETA hero (V2 P1.1) — range before pickup, a live local countdown once on the way.
 // Clock-skew safe: anchor on the client receive-time of each `eta` + secondsRemaining.
 function EtaHero({ eta, active, t }: {
@@ -172,15 +180,20 @@ function EtaHero({ eta, active, t }: {
 }
 
 // Vertical order timeline (V2 P1.4) — 5 phases with timestamps, collapsible, cancelled branch.
-function OrderTimeline({ status, ts, t }: {
+// A4: finished orders (delivered/cancelled) pass initialOpen so the receipt view
+// starts expanded; a delivered order renders every reached phase as done (✓)
+// instead of leaving the last one pulsing as if still in progress.
+function OrderTimeline({ status, ts, t, initialOpen = false }: {
   status: OrderStatus;
   ts: { confirmed?: string | null; packing?: string | null; pickedUp?: string | null; onTheWay?: string | null; delivered?: string | null; cancelled?: string | null };
   t: (key: string) => string;
+  initialOpen?: boolean;
 }) {
   const { colors: Colors } = useTheme();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen);
   const isCancelled = status === OrderStatus.CANCELLED;
+  const isDelivered = status === OrderStatus.DELIVERED;
   const idx = STATUS_STEP5[status] ?? 0;
   const phases = [
     { label: t('tracking.confirmed'), at: ts.confirmed },
@@ -202,7 +215,7 @@ function OrderTimeline({ status, ts, t }: {
       {open && (
         <View style={styles.tlBody}>
           {phases.map((p, i) => {
-            const active = !isCancelled && i === idx;
+            const active = !isCancelled && !isDelivered && i === idx;
             // A phase is "done" once its timestamp exists — robust for the cancelled branch
             // (reached phases stay ticked) and for any skipped-phase data gap (pre-commit review §1).
             const done   = !active && !!p.at;
@@ -641,6 +654,11 @@ function SingleOrderTracking({ navigation, orderId }: { navigation: Props['navig
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const { state: authState } = useAuth();
 
+  // THE order reference — last 6, uppercased. Header, summary, and the WhatsApp
+  // support message all use this one value so support can correlate what the
+  // customer reads on screen (A4: three formats coexisted on this screen).
+  const orderRef = orderId.slice(-6).toUpperCase();
+
   const [order,      setOrder]      = useState<OrderDetailResponse | null>(null);
   const [loading,    setLoading]    = useState(true);
   const [riderPos,   setRiderPos]   = useState<{ lat: number; lng: number } | null>(null);
@@ -799,8 +817,8 @@ function SingleOrderTracking({ navigation, orderId }: { navigation: Props['navig
   }
 
   function handleNeedHelp() {
-    const msg = encodeURIComponent(`Hi, I need help with my order #${orderId.slice(0, 8).toUpperCase()}`);
-    void Linking.openURL(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`);
+    const msg = encodeURIComponent(`Hi, I need help with my order #${orderRef}`);
+    void Linking.openURL(`https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${msg}`);
   }
 
   async function handleCancelOrder() {
@@ -814,7 +832,7 @@ function SingleOrderTracking({ navigation, orderId }: { navigation: Props['navig
       // Order status updates via the existing polling / socket subscription
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : t('cancellation.cancelFailed');
-      Alert.alert(t('cancellation.failTitle'), msg, [{ text: 'ठीक है' }]);
+      Alert.alert(t('cancellation.failTitle'), msg, [{ text: t('common.ok') }]);
     } finally {
       setCancelling(false);
     }
@@ -891,6 +909,10 @@ function SingleOrderTracking({ navigation, orderId }: { navigation: Props['navig
   // (not `total` as in the OrderDetailResponse DTO), so we cast narrowly.
   const orderPrisma  = order as unknown as {
     totalAmount?: number;
+    // Bill lines (A3): mirror the checkout bill so a discounted order reconciles.
+    cartSubtotalAtPricing?: number;
+    deliveryFee?: number;
+    discount?: number;
     deliveryStreet?: string;
     deliveryLocality?: string;
     deliveryCity?: string;
@@ -909,6 +931,8 @@ function SingleOrderTracking({ navigation, orderId }: { navigation: Props['navig
     outForDeliveryAt?: string | null;
     deliveredAt?: string | null;
     cancelledAt?: string | null;
+    // A4 finished-order state: the chosen cancel reason (stored on the order row).
+    cancelReason?: string | null;
   };
   const custLat = orderPrisma.deliveryLat != null ? Number(orderPrisma.deliveryLat) : null;
   const custLng = orderPrisma.deliveryLng != null ? Number(orderPrisma.deliveryLng) : null;
@@ -962,10 +986,20 @@ function SingleOrderTracking({ navigation, orderId }: { navigation: Props['navig
   const recvName_  = orderPrisma.receiverName ?? authState.name ?? '';
   const recvPhone_ = orderPrisma.receiverPhone ?? authState.phone ?? '';
 
+  // ── Finished-order state (A4) — display-only, all from the existing response ──
+  const isFinished = isDelivered || isCancelled;
+  const timelineTs = {
+    confirmed: orderPrisma.confirmedAt ?? orderPrisma.createdAt,
+    packing:   orderPrisma.preparingAt,
+    pickedUp:  orderPrisma.pickedUpAt,
+    onTheWay:  orderPrisma.outForDeliveryAt,
+    delivered: orderPrisma.deliveredAt,
+    cancelled: orderPrisma.cancelledAt,
+  };
+
   const handleBack = () =>
     navigation.canGoBack() ? navigation.goBack() : navigation.navigate('MainTabs', { screen: 'Home' });
   const handleCall = () => { if (riderPhone) void Linking.openURL(`tel:${riderPhone}`); else handleNeedHelp(); };
-  const handlePayOnline = () => toast.show(t('tracking.payOnlineSoon'), 'info');
 
   return (
     <>
@@ -981,7 +1015,7 @@ function SingleOrderTracking({ navigation, orderId }: { navigation: Props['navig
           <TouchableOpacity onPress={handleBack} style={styles.headerBack} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Ionicons name="arrow-back" size={22} color={Colors.white} />
           </TouchableOpacity>
-          <Text style={styles.headerSmall} numberOfLines={1}>#{orderId.slice(-6).toUpperCase()}</Text>
+          <Text style={styles.headerSmall} numberOfLines={1}>#{orderRef}</Text>
         </View>
         <Text style={styles.headerBig} numberOfLines={1}>{headerBig}</Text>
       </FauxGradient>
@@ -1056,20 +1090,10 @@ function SingleOrderTracking({ navigation, orderId }: { navigation: Props['navig
           </View>
         )}
 
-        {/* Order timeline — V2 P1.4 (5 phases · timestamps · collapsible · cancelled branch) */}
+        {/* Order timeline — V2 P1.4 (5 phases · timestamps · collapsible · cancelled branch).
+            A4: a cancelled order is a finished order → starts expanded (receipt view). */}
         {!isDelivered && (
-          <OrderTimeline
-            status={order.status}
-            ts={{
-              confirmed: orderPrisma.confirmedAt ?? orderPrisma.createdAt,
-              packing:   orderPrisma.preparingAt,
-              pickedUp:  orderPrisma.pickedUpAt,
-              onTheWay:  orderPrisma.outForDeliveryAt,
-              delivered: orderPrisma.deliveredAt,
-              cancelled: orderPrisma.cancelledAt,
-            }}
-            t={t}
-          />
+          <OrderTimeline status={order.status} ts={timelineTs} t={t} initialOpen={isCancelled} />
         )}
 
         {/* Delivered celebration + rating */}
@@ -1084,6 +1108,13 @@ function SingleOrderTracking({ navigation, orderId }: { navigation: Props['navig
           />
         )}
 
+        {/* A4: delivered orders get the full timeline too (expanded, below the
+            celebration so the delivery moment stays first) — it was hidden on the
+            one state where a customer wants the receipt of what happened. */}
+        {isDelivered && (
+          <OrderTimeline status={order.status} ts={timelineTs} t={t} initialOpen />
+        )}
+
         {/* Pay on delivery (COD) */}
         {isCod && !isDelivered && !isCancelled && (
           <View style={styles.card}>
@@ -1096,10 +1127,8 @@ function SingleOrderTracking({ navigation, orderId }: { navigation: Props['navig
                 <Text style={styles.codSub}>{t('tracking.codPaySub')}</Text>
               </View>
             </View>
-            <TouchableOpacity style={styles.payOnlineBtn} onPress={handlePayOnline} activeOpacity={0.85}>
-              <Ionicons name="flash" size={16} color={Colors.primary} />
-              <Text style={styles.payOnlineText}>{t('tracking.payOnline')}</Text>
-            </TouchableOpacity>
+            {/* A3: the "Pay online" button was removed — it existed only to
+                refuse (toast "coming soon"). It returns with online payments. */}
           </View>
         )}
 
@@ -1181,16 +1210,73 @@ function SingleOrderTracking({ navigation, orderId }: { navigation: Props['navig
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.sectionTitle}>{t('tracking.orderSummary')}</Text>
-              <Text style={styles.orderIdText}>#{orderId.slice(-10).toUpperCase()}</Text>
+              <Text style={styles.orderIdText}>#{orderRef}</Text>
             </View>
           </View>
           {order.items.map((item, i) => (
             <ItemRow key={`${item.productId}-${i}`} item={item} />
           ))}
+          {/* Full bill (A3) — same lines as checkout so the totals reconcile */}
+          {orderPrisma.deliveryFee != null && (
+            <>
+              <View style={styles.billLineRow}>
+                <Text style={styles.billLineLabel}>{t('checkout.itemsTotal')}</Text>
+                <Text style={styles.billLineValue}>
+                  ₹{Math.round((orderPrisma.cartSubtotalAtPricing ?? 0) / 100)}
+                </Text>
+              </View>
+              <View style={styles.billLineRow}>
+                <Text style={styles.billLineLabel}>{t('cart.deliveryFee')}</Text>
+                <Text style={styles.billLineValue}>₹{Math.round(orderPrisma.deliveryFee / 100)}</Text>
+              </View>
+              {(orderPrisma.discount ?? 0) > 0 && (
+                <View style={styles.billLineRow}>
+                  <Text style={styles.billLineDiscount}>{t('checkout.discount')}</Text>
+                  <Text style={styles.billLineDiscountVal}>
+                    −₹{Math.round((orderPrisma.discount ?? 0) / 100)}
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>{t('tracking.orderTotal')}</Text>
             <Text style={styles.totalValue}>₹{totalRupees}</Text>
           </View>
+
+          {/* A4 finished-order facts — payment method, delivered time, rider (when
+              the API supplies it), cancel reason. Display-only, existing data. */}
+          {isFinished && (
+            <>
+              <View style={styles.detailDivider} />
+              <View style={styles.billLineRow}>
+                <Text style={styles.billLineLabel}>{t('checkout.paymentMethod')}</Text>
+                <Text style={styles.billLineValue}>
+                  {isCod ? t('checkout.cod') : t('tracking.paymentOnline')}
+                </Text>
+              </View>
+              {isDelivered && orderPrisma.deliveredAt && (
+                <View style={styles.billLineRow}>
+                  <Text style={styles.billLineLabel}>{t('tracking.deliveredAt')}</Text>
+                  <Text style={styles.billLineValue}>{fmtDateTime(orderPrisma.deliveredAt)}</Text>
+                </View>
+              )}
+              {order.rider?.name && (
+                <View style={styles.billLineRow}>
+                  <Text style={styles.billLineLabel}>{t('tracking.deliveryPartner')}</Text>
+                  <Text style={styles.billLineValue}>{order.rider.name}</Text>
+                </View>
+              )}
+              {isCancelled && orderPrisma.cancelReason && (
+                <View style={styles.billLineRow}>
+                  <Text style={styles.billLineLabel}>{t('tracking.cancelReasonLabel')}</Text>
+                  <Text style={[styles.billLineValue, styles.metaWrapValue]}>
+                    {orderPrisma.cancelReason}
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
         </View>
 
         {/* Need help */}
@@ -1441,11 +1527,6 @@ const makeStyles = (Colors: ColorPalette) =>
   codIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
   codTitle: { fontSize: FontSize.md, fontWeight: '800', color: Colors.text },
   codSub: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 1, lineHeight: 18 },
-  payOnlineBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    marginTop: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.divider, paddingTop: Spacing.md,
-  },
-  payOnlineText: { fontSize: FontSize.md, fontWeight: '800', color: Colors.primary },
 
   // Delivery partner
   partnerRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
@@ -1694,6 +1775,15 @@ const makeStyles = (Colors: ColorPalette) =>
   addressArea:   { fontSize: FontSize.sm, color: Colors.textLight },
 
   // Total
+  // Full-bill lines (A3) — subtotal / fee / discount above the total
+  billLineRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 2 },
+  billLineLabel: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  billLineValue: { fontSize: FontSize.sm, fontWeight: '700', color: Colors.text },
+  billLineDiscount: { fontSize: FontSize.sm, color: Colors.success ?? Colors.primary, fontWeight: '700' },
+  billLineDiscountVal: { fontSize: FontSize.sm, color: Colors.success ?? Colors.primary, fontWeight: '800' },
+  // A4 finished-order facts — lets a long value (cancel reason) wrap right-aligned.
+  metaWrapValue: { flex: 1, textAlign: 'right', marginLeft: Spacing.md },
+
   totalRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: MIN_TAP },
   totalLabel:{ fontSize: FontSize.lg, fontWeight: '800', color: Colors.text },
   totalValue:{ fontSize: FontSize.xl, fontWeight: '900', color: Colors.primary },

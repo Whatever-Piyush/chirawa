@@ -32,3 +32,13 @@ export const codCollectedSchema = z.object({
 });
 
 export type CodCollectedInput = z.infer<typeof codCollectedSchema>;
+
+// A4-impl-1: GET /orders pagination. Both params optional — a param-less request
+// keeps the legacy contract (newest 50), so older clients and the seller/rider
+// apps are unaffected. limit is capped at the legacy 50 so no request can widen it.
+export const listOrdersQuerySchema = z.object({
+  page:  z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+});
+
+export type ListOrdersQuery = z.infer<typeof listOrdersQuerySchema>;

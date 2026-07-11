@@ -22,6 +22,9 @@
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "blockedPermissions": [
+        "android.permission.ACCESS_BACKGROUND_LOCATION"
       ]
     },
     "plugins": [
@@ -29,7 +32,8 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Rider location delivery ke liye zaruri hai"
+          "locationAlwaysAndWhenInUsePermission": "Rider location delivery ke liye zaruri hai",
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [

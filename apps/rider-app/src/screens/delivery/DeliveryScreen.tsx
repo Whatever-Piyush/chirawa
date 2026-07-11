@@ -3,11 +3,11 @@ import {
   View, Text, TouchableOpacity, StyleSheet,
   Alert, ActivityIndicator, Linking, ScrollView, RefreshControl,
 } from 'react-native';
-import * as Location from 'expo-location';
 import { io, type Socket } from 'socket.io-client';
 import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
 import { RiderApi } from '../../services/api.service';
 import { useAuth } from '../../context/AuthContext';
+import { useRiderLocationPublisher } from '../../hooks/useRiderLocationPublisher';
 import { DEV_HOST } from '../../config/devHost';
 
 const SOCKET_URL = __DEV__ ? `http://${DEV_HOST}:3000` : 'https://api.chirawa.in';
@@ -37,6 +37,12 @@ export default function DeliveryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [acting,  setActing]      = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
+
+  // Publish rider:location for every live order in the batch (Milestone R1).
+  // Non-blocking: a denied permission only shows the banner below.
+  const { locationBlocked } = useRiderLocationPublisher(socketRef, batch?.orders ?? []);
+  const [locBannerDismissed, setLocBannerDismissed] = useState(false);
+  useEffect(() => { if (!locationBlocked) setLocBannerDismissed(false); }, [locationBlocked]);
 
   const load = useCallback(async () => {
     if (!state.token) return;
@@ -120,6 +126,16 @@ export default function DeliveryScreen() {
         {batch.orderCount > 1 && <Text style={styles.batchTag}>📦 {batch.orderCount} orders</Text>}
       </View>
 
+      {/* Location-permission banner — informational only, never blocks actions */}
+      {locationBlocked && !locBannerDismissed && (
+        <TouchableOpacity style={styles.locBanner} onPress={() => void Linking.openSettings()} activeOpacity={0.85}>
+          <Text style={styles.locBannerText}>📍 Location on karo — customer ko map pe dikhega</Text>
+          <TouchableOpacity onPress={() => setLocBannerDismissed(true)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+            <Text style={styles.locBannerClose}>✕</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      )}
+
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={Colors.primary} />}
@@ -193,6 +209,12 @@ const styles = StyleSheet.create({
   emptyEmoji: { fontSize: 64 },
   emptyText:  { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text },
   emptySub:   { fontSize: FontSize.md, color: Colors.textMuted, textAlign: 'center' },
+  locBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.warning, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
+  },
+  locBannerText:  { flex: 1, color: Colors.white, fontSize: FontSize.sm, fontWeight: '700' },
+  locBannerClose: { color: Colors.white, fontSize: FontSize.md, fontWeight: '900' },
   scroll: { padding: Spacing.lg, gap: Spacing.md },
   groupTitle: { fontSize: FontSize.md, fontWeight: '800', color: Colors.text, marginTop: Spacing.sm },
   card:   { backgroundColor: Colors.card, borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.xs, ...Shadow.card },

@@ -17,6 +17,11 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
   // Service created once — prisma + redis injected from app decorators
   const authService = createAuthService(app.prisma, app.redis);
 
+  // Pre-declared guard const — a typed FastifyRequest<{Body}> handler with an
+  // INLINE { preHandler } object trips the repo's exactOptionalPropertyTypes
+  // baseline; a const sidesteps it (same pattern as catalog.routes writeGuard).
+  const authGuard = { preHandler: [authenticate] };
+
   // ── POST /api/v1/auth/send-otp ────────────────────────────────────────────
   app.post(
     '/send-otp',
@@ -98,13 +103,13 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // ── POST /api/v1/auth/logout ──────────────────────────────────────────────
-  app.post(
+  // Route generics (<{ Body }>) instead of annotated request/reply params — a
+  // fully-annotated handler pins the route generic to RouteGenericInterface and
+  // fails the exactOptionalPropertyTypes baseline (Fastify v4 TS docs).
+  app.post<{ Body: RefreshTokenInput }>(
     '/logout',
-    { preHandler: [authenticate] },
-    async (
-      request: FastifyRequest<{ Body: RefreshTokenInput }>,
-      reply: FastifyReply,
-    ) => {
+    authGuard,
+    async (request, reply) => {
       const parsed = refreshTokenSchema.safeParse(request.body);
       if (!parsed.success) {
         throw new ValidationError('Invalid refresh token');
@@ -116,13 +121,10 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // ── POST /api/v1/auth/set-pin ─────────────────────────────────────────────
-  app.post(
+  app.post<{ Body: SetPinInput }>(
     '/set-pin',
-    { preHandler: [authenticate] },
-    async (
-      request: FastifyRequest<{ Body: SetPinInput }>,
-      reply: FastifyReply,
-    ) => {
+    authGuard,
+    async (request, reply) => {
       const parsed = setPinSchema.safeParse(request.body);
       if (!parsed.success) {
         throw new ValidationError(
