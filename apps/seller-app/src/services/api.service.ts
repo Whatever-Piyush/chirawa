@@ -137,6 +137,42 @@ export const SellerApi = {
   markReady: (orderId: string, token: string) =>
     request('POST', `/orders/${orderId}/ready`, {}, token),
 
+  // ── Food Delivery Module — Restaurant Mode (Food.md §11.2) ─────────────────
+  // A seller account linked to a Restaurant (Restaurant.sellerUserId) manages
+  // its FOOD orders here. Marketplace shop/order methods above are untouched.
+
+  getMyRestaurant: (token: string) =>
+    request<{ restaurant: MyRestaurant | null }>('GET', '/food/restaurant/me', undefined, token),
+
+  getRestaurantOrders: (scope: 'today' | 'history', token: string) =>
+    request<{ restaurant: MyRestaurant; orders: RestaurantFoodOrder[] }>(
+      'GET', `/food/restaurant/orders?scope=${scope}`, undefined, token),
+
+  acceptFoodOrder: (foodOrderId: string, token: string) =>
+    request('POST', `/food/restaurant/orders/${foodOrderId}/accept`, {}, token),
+
+  rejectFoodOrder: (foodOrderId: string, reason: string, token: string) =>
+    request<{ refunded?: boolean; message?: string }>(
+      'POST', `/food/restaurant/orders/${foodOrderId}/reject`, { reason }, token),
+
+  markFoodPreparing: (foodOrderId: string, token: string) =>
+    request('POST', `/food/restaurant/orders/${foodOrderId}/preparing`, {}, token),
+
+  markFoodReady: (foodOrderId: string, token: string) =>
+    request('POST', `/food/restaurant/orders/${foodOrderId}/ready`, {}, token),
+
+  // Restaurant self-serve: open/close + menu sold-out toggles (launch hardening).
+  setRestaurantOpen: (isOpen: boolean, token: string) =>
+    request<MyRestaurant>('PATCH', '/food/restaurant/open', { isOpen }, token),
+
+  getRestaurantMenu: (token: string) =>
+    request<{ restaurant: MyRestaurant; items: RestaurantMenuItem[] }>(
+      'GET', '/food/restaurant/menu', undefined, token),
+
+  setMenuItemAvailability: (menuItemId: string, isAvailable: boolean, token: string) =>
+    request<{ menuItemId: string; isAvailable: boolean }>(
+      'PATCH', `/food/restaurant/menu/${menuItemId}`, { isAvailable }, token),
+
   getShopProducts: (shopId: string, token: string) =>
     request<unknown>('GET', `/catalog/shops/${shopId}`, undefined, token),
 
@@ -245,6 +281,37 @@ export class UploadError extends Error {
 
 export interface MyShop {
   id: string; name: string; isOpen: boolean; openTime: string; closeTime: string;
+}
+
+// ── Food Delivery Module — Restaurant Mode shapes (Food.md §11.2) ─────────────
+export interface MyRestaurant {
+  id: string; name: string; cuisine: string | null; isOpen: boolean;
+  openTime: string; closeTime: string; prepTimeMinutes: number;
+}
+
+export interface RestaurantFoodOrderItem {
+  id: string; name: string; unitPrice: number; quantity: number; subtotal: number;
+}
+
+export interface RestaurantFoodOrder {
+  id: string;
+  status: string; // paid | confirmed | preparing | ready_for_pickup | picked_up | out_for_delivery | delivered | cancelled
+  itemsSubtotalPaise: number;
+  deliveryFeePaise: number;
+  totalPaise: number;
+  deliveryLocality: string;
+  receiverName: string | null;
+  createdAt: string;
+  items: RestaurantFoodOrderItem[];
+}
+
+export interface RestaurantMenuItem {
+  id: string;
+  name: string;
+  pricePaise: number;
+  isVeg: boolean | null;
+  isAvailable: boolean;
+  category: string;
 }
 
 export interface ProductInput {
