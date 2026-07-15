@@ -17,6 +17,7 @@ export * from './dto/geo.dto';
 export * from './dto/search.dto';
 export * from './dto/loyalty.dto';
 export * from './dto/user.dto';
+export * from './dto/food.dto';
 
 // Domain types
 export * from './domain/money';

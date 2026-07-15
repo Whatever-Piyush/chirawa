@@ -25,6 +25,17 @@ import type {
   LoyaltyResponse,
   MeResponse,
   UpdateMyProfileRequest,
+  FoodRestaurantsResponse,
+  FoodRestaurantDetail,
+  FoodCartView,
+  AddFoodCartItemRequest,
+  FoodCheckoutPreview,
+  PlaceFoodOrderRequest,
+  PlaceFoodOrderResponse,
+  VerifyFoodPaymentRequest,
+  VerifyFoodPaymentResponse,
+  FoodOrderSummary,
+  FoodOrderDetail,
 } from '@chirawa/types';
 
 export class ApiError extends Error {
@@ -495,6 +506,75 @@ export class ChirawaApiClient {
     return this.request<{ message: string; receiverName: string; receiverPhone: string }>(
       'PATCH', `/orders/${orderId}/receiver`, { name, phone },
     );
+  }
+
+  // ─── Food Delivery Module (Food.md §7) — isolated /food/* namespace ──────
+  // Completely separate from the marketplace cart/orders methods above: the
+  // food cart is its own server-side cart, food orders their own pipeline.
+
+  async getFoodRestaurants(): Promise<FoodRestaurantsResponse> {
+    return this.request<FoodRestaurantsResponse>('GET', '/food/restaurants', undefined, false);
+  }
+
+  async getFoodRestaurant(restaurantId: string): Promise<FoodRestaurantDetail> {
+    return this.request<FoodRestaurantDetail>('GET', `/food/restaurants/${restaurantId}`, undefined, false);
+  }
+
+  async getFoodCart(): Promise<FoodCartView> {
+    return this.request<FoodCartView>('GET', '/food/cart');
+  }
+
+  // Throws ApiError with code FOOD_CART_DIFFERENT_RESTAURANT (409) when the
+  // cart is bound to another restaurant — the conflict bottom-sheet keys on it.
+  async addFoodCartItem(data: AddFoodCartItemRequest): Promise<FoodCartView> {
+    return this.request<FoodCartView>('POST', '/food/cart/items', data);
+  }
+
+  async updateFoodCartItem(menuItemId: string, quantity: number): Promise<FoodCartView> {
+    return this.request<FoodCartView>('PUT', `/food/cart/items/${menuItemId}`, { quantity });
+  }
+
+  // [Start New Order] — explicit, user-confirmed clear (never automatic).
+  async clearFoodCart(): Promise<void> {
+    await this.request<void>('DELETE', '/food/cart');
+  }
+
+  async getFoodCheckoutPreview(): Promise<FoodCheckoutPreview> {
+    return this.request<FoodCheckoutPreview>('GET', '/food/checkout/preview');
+  }
+
+  async placeFoodOrder(data: PlaceFoodOrderRequest): Promise<PlaceFoodOrderResponse> {
+    return this.request<PlaceFoodOrderResponse>('POST', '/food/orders', data);
+  }
+
+  async verifyFoodPayment(
+    foodOrderId: string,
+    data: VerifyFoodPaymentRequest,
+  ): Promise<VerifyFoodPaymentResponse> {
+    return this.request<VerifyFoodPaymentResponse>('POST', `/food/orders/${foodOrderId}/verify-payment`, data);
+  }
+
+  async getFoodOrders(params?: { page?: number; limit?: number }): Promise<FoodOrderSummary[]> {
+    let path = '/food/orders';
+    if (params) {
+      const q = new URLSearchParams();
+      if (params.page  !== undefined) q.set('page',  String(params.page));
+      if (params.limit !== undefined) q.set('limit', String(params.limit));
+      const qs = q.toString();
+      if (qs) path += `?${qs}`;
+    }
+    return this.request<FoodOrderSummary[]>('GET', path);
+  }
+
+  async getFoodOrder(foodOrderId: string): Promise<FoodOrderDetail> {
+    return this.request<FoodOrderDetail>('GET', `/food/orders/${foodOrderId}`);
+  }
+
+  async cancelFoodOrder(
+    foodOrderId: string,
+    reason?: string,
+  ): Promise<{ foodOrderId: string; status: string; message: string }> {
+    return this.request('DELETE', `/food/orders/${foodOrderId}`, reason ? { reason } : undefined);
   }
 
   // ─── Search ──────────────────────────────────────────────────────────────
