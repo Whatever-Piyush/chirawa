@@ -146,6 +146,51 @@ function SpecialTab({ focused, onPress }: { focused: boolean; onPress: () => voi
   );
 }
 
+// ── Raised "Food" button — Food Delivery Module (Food.md §11.7) ───────────────
+// Exactly one added button in the Special design language; no existing tab is
+// moved, replaced, or removed.
+function FoodTab({ focused, onPress }: { focused: boolean; onPress: () => void }) {
+  const t = useT();
+  const { colors: Colors } = useTheme();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const handlePress = () => {
+    Animated.sequence([
+      Animated.timing(scale, { toValue: 0.85, duration: 80, useNativeDriver: true }),
+      Animated.timing(scale, { toValue: 1, duration: 120, useNativeDriver: true }),
+    ]).start();
+    onPress();
+  };
+
+  return (
+    <View style={styles.tab}>
+      <Animated.View style={{ transform: [{ scale }] }}>
+        <TouchableOpacity
+          onPress={handlePress}
+          activeOpacity={0.9}
+          accessibilityRole="button"
+          accessibilityState={focused ? { selected: true } : {}}
+          accessibilityLabel={t('food.tabFood')}
+          style={[
+            styles.food,
+            focused && styles.foodActive,
+          ]}
+        >
+          <Ionicons
+            name={focused ? 'fast-food' : 'fast-food-outline'}
+            size={19}
+            color={Colors.white}
+          />
+          <Text weight="bold" color={Colors.white} style={styles.specialLabel}>
+            {t('food.tabFood')}
+          </Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const { colors: Colors } = useTheme();
@@ -159,6 +204,7 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   // Index lookup so focus state survives the route-name → presentation mapping.
   const indexOf = (name: string) => state.routes.findIndex((r) => r.name === name);
   const specialRoute = state.routes.find((r) => r.name === 'Special');
+  const foodRoute    = state.routes.find((r) => r.name === 'Food');
 
   return (
     <View style={[styles.bar, { height: 64 + insets.bottom, paddingBottom: insets.bottom }]}>
@@ -181,6 +227,13 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
         <SpecialTab
           focused={state.index === indexOf('Special')}
           onPress={navigateTo('Special', specialRoute.key, state.index === indexOf('Special'))}
+        />
+      )}
+
+      {foodRoute && (
+        <FoodTab
+          focused={state.index === indexOf('Food')}
+          onPress={navigateTo('Food', foodRoute.key, state.index === indexOf('Food'))}
         />
       )}
     </View>
@@ -246,5 +299,28 @@ const makeStyles = (Colors: ColorPalette) =>
   specialLabel: {
     fontSize:   10,
     lineHeight: 12,
+  },
+  // Raised Food button (Food.md §11.7) — same raised geometry/language as
+  // Special, in the food module's warm orange. Slightly narrower so five
+  // entries + two raised buttons still breathe on small screens.
+  food: {
+    width:           78,
+    height:          46,
+    borderRadius:    14,
+    backgroundColor: '#E8590C',
+    alignItems:      'center',
+    justifyContent:  'center',
+    marginTop:       -10,
+    gap:             1,
+    shadowColor:   '#C2410C',
+    shadowOpacity: 0.4,
+    shadowRadius:  8,
+    shadowOffset:  { width: 0, height: -2 },
+    elevation:     8,
+  },
+  foodActive: {
+    backgroundColor: '#C2410C',
+    borderWidth:     2,
+    borderColor:     'rgba(255,255,255,0.4)',
   },
 });

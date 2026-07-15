@@ -45,6 +45,15 @@ import ShareAddressScreen from '../screens/profile/ShareAddressScreen';
 import ReceiveAddressScreen from '../screens/profile/ReceiveAddressScreen';
 import OrderPlacedScreen from '../screens/orders/OrderPlacedScreen';
 
+// Food Delivery Module (Food.md §8) — additive surfaces only; every marketplace
+// screen above is untouched. Food has its own cart provider + screens.
+import { FoodCartProvider } from '../context/FoodCartContext';
+import FoodConflictSheet from '../components/food/FoodConflictSheet';
+import FoodScreen from '../screens/food/FoodScreen';
+import FoodCheckoutScreen from '../screens/food/FoodCheckoutScreen';
+import FoodOrderTrackingScreen from '../screens/food/FoodOrderTrackingScreen';
+import FoodOrdersScreen from '../screens/food/FoodOrdersScreen';
+
 export type RootStackParamList = {
   // Auth
   OtpLogin: undefined;
@@ -99,6 +108,15 @@ export type RootStackParamList = {
   // Address-sharing deep links (bringly://share-address, bringly://receive-address)
   ShareAddress: { from?: string; phone?: string } | undefined;
   ReceiveAddress: { payload?: string } | undefined;
+  // ── Food Delivery Module (Food.md §8) — isolated food flow ─────────────────
+  FoodCheckout: undefined;
+  // `payment` lets tracking re-open the UPI sheet for a pending_payment order
+  // (set when arriving from checkout; absent when opened from history).
+  FoodOrderTracking: {
+    foodOrderId: string;
+    payment?: { razorpayOrderId: string; razorpayKeyId: string; amountPaise: number };
+  };
+  FoodOrders: undefined;
 };
 
 // Maps incoming deep links to screens. A bringly:// custom scheme works in the
@@ -125,6 +143,7 @@ export type TabParamList = {
   OrderHistory: undefined;
   Categories: undefined;
   Special: undefined;
+  Food: undefined; // Food Delivery Module — exactly one added button, no redesign (Food.md §11.7)
   Profile: undefined;
 };
 
@@ -145,6 +164,7 @@ function MainTabs() {
         <Tab.Screen name="OrderHistory" component={OrderHistoryScreen} />
         <Tab.Screen name="Categories" component={CategoriesScreen} />
         <Tab.Screen name="Special" component={ChirawaSpecialScreen} />
+        <Tab.Screen name="Food" component={FoodScreen} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
       </Tab.Navigator>
     </View>
@@ -169,6 +189,8 @@ export default function AppNavigator() {
   // Active leaf route name — drives the global cart capsule's visibility + offset.
   const [activeRoute, setActiveRoute] = useState<string | undefined>(undefined);
   const syncRoute = () => setActiveRoute(navigationRef.getCurrentRoute()?.name);
+  // Gate for the shared active-orders feed + floating overlays (cart pill, bubble).
+  const isAuthed = state.isAuthenticated && !!state.name;
 
   if (hasChosen === null) {
     return <View style={{ flex: 1, backgroundColor: Colors.primary }} />;
@@ -199,6 +221,9 @@ export default function AppNavigator() {
     <NavigationContainer ref={navigationRef} theme={navTheme} linking={linking} onReady={syncRoute} onStateChange={syncRoute}>
       <AddressProvider>
        <CartProvider>
+        {/* FoodCartProvider is a SIBLING layer inside CartProvider: it reads the
+            marketplace cart (for the Grocery→Food info sheet) but never writes it. */}
+        <FoodCartProvider>
         <Stack.Navigator
           screenOptions={{
             headerShown: false,
@@ -289,6 +314,34 @@ export default function AppNavigator() {
                   component={OrderPlacedScreen}
                   options={{ gestureEnabled: false, animation: 'fade' }}
                 />
+                {/* ── Food Delivery Module (Food.md §8) ────────────────────── */}
+                <Stack.Screen
+                  name="FoodCheckout"
+                  component={FoodCheckoutScreen}
+                  options={{
+                    headerShown: true,
+                    headerTitle: 'Food Checkout',
+                    headerTintColor: Colors.primary,
+                  }}
+                />
+                <Stack.Screen
+                  name="FoodOrderTracking"
+                  component={FoodOrderTrackingScreen}
+                  options={{
+                    headerShown: true,
+                    headerTitle: 'Track Food Order',
+                    headerTintColor: Colors.primary,
+                  }}
+                />
+                <Stack.Screen
+                  name="FoodOrders"
+                  component={FoodOrdersScreen}
+                  options={{
+                    headerShown: true,
+                    headerTitle: 'My Food Orders',
+                    headerTintColor: Colors.primary,
+                  }}
+                />
               </>
             )
           ) : (
@@ -300,7 +353,11 @@ export default function AppNavigator() {
         </Stack.Navigator>
 
         {/* Global cart capsule — floats over every screen (visibility/offset by route). */}
-        {state.isAuthenticated && !!state.name && <CartDockPill activeRoute={activeRoute} />}
+        {isAuthed && <CartDockPill activeRoute={activeRoute} />}
+        {/* Food conflict bottom-sheet (Food.md §4.5) — renders only when a
+            food-cart conflict is pending; inert otherwise. */}
+        {isAuthed && <FoodConflictSheet />}
+        </FoodCartProvider>
        </CartProvider>
       </AddressProvider>
     </NavigationContainer>
