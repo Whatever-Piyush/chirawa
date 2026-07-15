@@ -21,6 +21,7 @@ import Shimmer from '../../components/ui/Shimmer';
 import { Text } from '../../components/ui';
 import { Ionicons } from '@expo/vector-icons';
 import VoiceSearchSheet from '../../components/search/VoiceSearchSheet';
+import { voiceSearchAvailable } from '../../hooks/useVoiceSearch';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -657,7 +658,11 @@ export default function SearchScreen({ navigation }: Props) {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              onPress={() => setVoiceOpen(true)}
+              onPress={() =>
+                voiceSearchAvailable
+                  ? setVoiceOpen(true)
+                  : toast.show(t('home.voiceSoon'), 'info')
+              }
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityLabel={t('voice.listening')}
             >
@@ -879,13 +884,16 @@ export default function SearchScreen({ navigation }: Props) {
         </Pressable>
       </Modal>
 
-      {/* Voice search — listening sheet (auto-runs the search on a final transcript) */}
-      <VoiceSearchSheet
-        visible={voiceOpen}
-        contextualStrings={voiceContext}
-        onClose={() => setVoiceOpen(false)}
-        onResult={fireQuery}
-      />
+      {/* Voice search — listening sheet (auto-runs the search on a final transcript).
+          Only mounted in a dev/prod build where the native module exists. */}
+      {voiceSearchAvailable ? (
+        <VoiceSearchSheet
+          visible={voiceOpen}
+          contextualStrings={voiceContext}
+          onClose={() => setVoiceOpen(false)}
+          onResult={fireQuery}
+        />
+      ) : null}
     </View>
   );
 }

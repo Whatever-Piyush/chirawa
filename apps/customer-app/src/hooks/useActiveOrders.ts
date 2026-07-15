@@ -84,15 +84,29 @@ function toEntries(rows: OrderRow[]): ActiveOrderEntry[] {
 // authenticated socket auto-joins user:{id} server-side, and order:status for
 // ALL the customer's orders is emitted there (realtime.plugin emitToOrderAndUser),
 // so no per-order subscribe bookkeeping is needed.
-export function useActiveOrders(): {
-  entries: ActiveOrderEntry[];
-  refresh: () => Promise<void>;
-} {
+export interface ActiveOrdersState {
+  entries:       ActiveOrderEntry[];
+  // Socket health — drives the bubble's offline affordance.
+  connected:     boolean;
+  // Set the instant a `delivered` socket event is seen (before the order drops
+  // out of the refetched list) so the bubble can play its delivered celebration.
+  justDelivered: { orderId: string; at: number } | null;
+  refresh:       () => Promise<void>;
+}
+
+// `enabled` lets a single app-root provider mount this unconditionally while
+// staying inert (no fetch, no socket) until the customer is authenticated.
+export function useActiveOrders(enabled: boolean = true): ActiveOrdersState {
   const [entries, setEntries] = useState<ActiveOrderEntry[]>([]);
+  // Optimistic on mount so a healthy launch never flashes "reconnecting" before
+  // the first connect lands; flipped false only on a real disconnect/error.
+  const [connected, setConnected] = useState(true);
+  const [justDelivered, setJustDelivered] = useState<{ orderId: string; at: number } | null>(null);
   const inFlightRef = useRef<Promise<void> | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = useCallback((): Promise<void> => {
+    if (!enabled) return Promise.resolve();
     // Burst coalescing: mount, the tab's initial focus event and the socket's
     // first connect all fire within ~a second of each other — join the request
     // already in flight instead of stacking identical GETs.
@@ -110,9 +124,17 @@ export function useActiveOrders(): {
     })();
     inFlightRef.current = p;
     return p;
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      // Signed out / gated: drop any prior state and stay inert (no socket).
+      setEntries([]);
+      setConnected(true);
+      setJustDelivered(null);
+      return;
+    }
+
     void refresh();
 
     // Coalesce socket bursts (a group's children transition together, and
@@ -128,19 +150,29 @@ export function useActiveOrders(): {
       const token = await StorageService.getAccessToken();
       if (!token || cancelled) return;
       socket = io(SOCKET_URL, { auth: { token }, transports: ['websocket'] });
-      socket.on('order:status', scheduleRefresh);
+      // A `delivered` event arrives just before the order leaves the list — flag
+      // it for the bubble's celebration, then refetch like any other transition.
+      socket.on('order:status', (evt: { orderId?: string; status?: string }) => {
+        if (evt?.status === OrderStatus.DELIVERED && evt.orderId) {
+          setJustDelivered({ orderId: evt.orderId, at: Date.now() });
+        }
+        scheduleRefresh();
+      });
       // REconnect ⇒ reconcile whatever was missed while offline/backgrounded.
       // The first connect races the mount fetch and is deliberately skipped.
       let everConnected = false;
       socket.on('connect', () => {
+        setConnected(true);
         if (everConnected) scheduleRefresh();
         everConnected = true;
       });
+      socket.on('disconnect', () => setConnected(false));
       // This socket lives for the whole session (Home stays mounted in the tab
       // navigator), so its handshake token can expire between reconnects. On a
       // failed attempt, re-read the current token for the next retry; the HTTP
       // fallbacks (focus/foreground refresh) keep the strip usable meanwhile.
       socket.on('connect_error', () => {
+        setConnected(false);
         void StorageService.getAccessToken().then((fresh) => {
           if (socket && fresh) socket.auth = { token: fresh };
         });
@@ -158,7 +190,7 @@ export function useActiveOrders(): {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       socket?.disconnect();
     };
-  }, [refresh]);
+  }, [enabled, refresh]);
 
-  return { entries, refresh };
+  return { entries, connected, justDelivered, refresh };
 }

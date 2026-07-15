@@ -728,6 +728,21 @@ export const translations = {
     paymentPending:       { en: 'Complete your payment to send this order to the restaurant', hi: 'रेस्टोरेंट को ऑर्डर भेजने के लिए पेमेंट पूरा करें' },
     payNow:               { en: 'Pay now',                                                   hi: 'अभी पेमेंट करें' },
   },
+  // Live Order Bubble (Track_Order.md) — floating tracker captions + a11y.
+  liveOrder: {
+    paymentDue:   { en: 'Payment due', hi: 'पेमेंट बाकी'      },
+    placed:       { en: 'Placed',      hi: 'ऑर्डर हुआ'        },
+    accepted:     { en: 'Accepted',    hi: 'स्वीकृत'          },
+    preparing:    { en: 'Preparing',   hi: 'तैयार हो रहा'      },
+    packed:       { en: 'Packed',      hi: 'पैक हो गया'        },
+    pickedUp:     { en: 'Picked up',   hi: 'पिक हो गया'        },
+    onTheWay:     { en: 'On the way',  hi: 'रास्ते में'        },
+    delivered:    { en: 'Delivered',   hi: 'डिलीवर हुआ'        },
+    cancelled:    { en: 'Cancelled',   hi: 'रद्द'              },
+    reconnecting: { en: 'Reconnecting…', hi: 'फिर जुड़ रहे…'   },
+    a11ySingle:   { en: 'Live order: {status}. Double tap to track.',    hi: 'लाइव ऑर्डर: {status}. ट्रैक करने के लिए डबल टैप करें।' },
+    a11yMulti:    { en: '{count} live orders. Double tap to view all.',  hi: '{count} लाइव ऑर्डर। सभी देखने के लिए डबल टैप करें।' },
+  },
 } as const;
 
 export type Language = 'en' | 'hi';

@@ -240,7 +240,8 @@ export function createRecoveryService(prisma: PrismaClient) {
     return need;
   }
 
-  async function listNeeds(filter: { parentOrderId?: string; state?: RecoveryNeedState }) {
+  // exactOptionalPropertyTypes: zod-parsed optionals arrive as `T | undefined`.
+  async function listNeeds(filter: { parentOrderId?: string | undefined; state?: RecoveryNeedState | undefined }) {
     // Build the where clause conditionally — exactOptionalPropertyTypes forbids
     // passing an explicit `undefined` to Prisma's optional filter fields.
     const where: Prisma.RecoveryNeedWhereInput = {};

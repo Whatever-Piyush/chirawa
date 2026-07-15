@@ -12,24 +12,10 @@ import { NIGHT_FROM, NIGHT_TO } from '../screens/home/nightTheme';
 import Starfield from '../screens/home/Starfield';
 import CartThumbs from './CartThumbs';
 import type { TextStyle } from 'react-native';
-
-const TAB_BAR_BASE = 64;   // matches CustomTabBar height (excl. safe-area)
-const GAP_ABOVE_BAR = 10;
-const STACK_GAP = 16;      // pushed screens (no tab bar)
-const PRODUCT_BAR = 96;    // clear Product Detail's add-to-cart footer
-
-// Bottom-tab routes — on these the capsule floats above the tab bar.
-const TAB_ROUTES = new Set(['Home', 'OrderHistory', 'Categories', 'Special', 'Profile']);
-
-// The "View cart" capsule is a *continue-shopping → go-to-cart* affordance, so it
-// belongs only on browse/shop surfaces (where you add items). An ALLOWLIST (not a
-// denylist) keeps it OFF every transactional/utility flow by default — checkout,
-// address entry/selection, order tracking, profile editing, auth — so new screens
-// like AddAddress never accidentally show it.
-const CART_PILL_ROUTES = new Set([
-  ...TAB_ROUTES,                                          // Home/Categories/Special/OrderHistory/Profile
-  'ProductDetail', 'ShopDetail', 'CategoryProducts', 'Search', // pushed shopping surfaces
-]);
+// Floating-dock geometry is shared with the LiveOrderBubble so the two never
+// overlap (Track_Order.md · Placement). The route allowlist / offsets moved here
+// unchanged — the pill's behaviour is identical.
+import { CART_TAB_ROUTES, TAB_BAR_BASE, GAP_ABOVE_BAR, STACK_GAP, PRODUCT_BAR, cartPillVisible } from './dockGeometry';
 
 // A few tiny stars for the cart pill's night look (matches header/banner).
 const CART_STARS: TextStyle[] = [
@@ -57,7 +43,7 @@ export default function CartDockPill({ activeRoute }: { activeRoute?: string }) 
 
   // Show only when the cart has items AND we're on a browse/shop surface (a tab or
   // a pushed shopping screen). Undefined route = first paint on Home → allow.
-  const shouldShow = count > 0 && CART_PILL_ROUTES.has(activeRoute ?? 'Home');
+  const shouldShow = cartPillVisible(activeRoute, count);
 
   const anim  = useRef(new Animated.Value(shouldShow ? 1 : 0)).current;
   const scale = useRef(new Animated.Value(1)).current;
@@ -89,7 +75,7 @@ export default function CartDockPill({ activeRoute }: { activeRoute?: string }) 
 
   if (!rendered) return null;
 
-  const onTab     = !activeRoute || TAB_ROUTES.has(activeRoute);
+  const onTab     = !activeRoute || CART_TAB_ROUTES.has(activeRoute);
   const bottom    = onTab
     ? insets.bottom + TAB_BAR_BASE + GAP_ABOVE_BAR
     : activeRoute === 'ProductDetail'

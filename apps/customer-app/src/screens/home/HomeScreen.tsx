@@ -14,7 +14,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useAddresses } from '../../context/AddressContext';
 import LocationSheet from '../../components/location/LocationSheet';
 import LocationPermissionModal from '../../components/location/LocationPermissionModal';
-import { useActiveOrders } from '../../hooks/useActiveOrders';
+import { useActiveOrdersContext } from '../../context/ActiveOrdersContext';
 import ActiveOrdersStrip from './ActiveOrdersStrip';
 import Header from './Header';
 import SearchBar from './SearchBar';
@@ -61,7 +61,8 @@ export default function HomeScreen({ navigation }: Props) {
 
   // Milestone A1: orders in flight — pinned to the top of the feed so tracking
   // is always one tap away after any restart/return (live via the user socket).
-  const { entries: activeOrders, refresh: refreshActiveOrders } = useActiveOrders();
+  // Shared feed (one socket app-wide) — same data the LiveOrderBubble reads.
+  const { entries: activeOrders, refresh: refreshActiveOrders } = useActiveOrdersContext();
 
   const loadEssentials = useCallback(async () => {
     try {

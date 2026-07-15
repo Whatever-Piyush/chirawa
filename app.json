@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "3c4033eb-64b4-4d37-81b6-d78f209453b3"
+      }
+    },
+    "android": {
+      "package": "in.bringly.customer"
+    }
+  }
+}

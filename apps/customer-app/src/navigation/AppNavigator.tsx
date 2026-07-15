@@ -18,7 +18,9 @@ import LanguagePickerScreen from '../screens/LanguagePickerScreen';
 import CustomTabBar from './CustomTabBar';
 import { CartProvider } from '../context/CartContext';
 import { AddressProvider } from '../context/AddressContext';
+import { ActiveOrdersProvider } from '../context/ActiveOrdersContext';
 import CartDockPill from '../components/CartDockPill';
+import LiveOrderBubble from '../components/LiveOrderBubble';
 
 // Auth Screens
 import OtpLoginScreen from '../screens/auth/OtpLoginScreen';
@@ -224,6 +226,9 @@ export default function AppNavigator() {
         {/* FoodCartProvider is a SIBLING layer inside CartProvider: it reads the
             marketplace cart (for the Grocery→Food info sheet) but never writes it. */}
         <FoodCartProvider>
+        {/* Shared active-orders feed (one socket app-wide) — powers the Home
+            strip and the floating LiveOrderBubble. Inert until authenticated. */}
+        <ActiveOrdersProvider enabled={isAuthed}>
         <Stack.Navigator
           screenOptions={{
             headerShown: false,
@@ -354,9 +359,13 @@ export default function AppNavigator() {
 
         {/* Global cart capsule — floats over every screen (visibility/offset by route). */}
         {isAuthed && <CartDockPill activeRoute={activeRoute} />}
+        {/* Live Order Bubble (Track_Order.md) — always-on floating tracker;
+            self-hides when there is no active order. Stacks above the cart pill. */}
+        {isAuthed && <LiveOrderBubble activeRoute={activeRoute} />}
         {/* Food conflict bottom-sheet (Food.md §4.5) — renders only when a
             food-cart conflict is pending; inert otherwise. */}
         {isAuthed && <FoodConflictSheet />}
+        </ActiveOrdersProvider>
         </FoodCartProvider>
        </CartProvider>
       </AddressProvider>
