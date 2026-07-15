@@ -21,7 +21,7 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#FF3E6C"
       },
-      "package": "com.chirawa.customer",
+      "package": "in.bringly.customer",
       "versionCode": 1,
       "googleServicesFile": "./google-services.json",
       "permissions": [
@@ -29,6 +29,9 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.READ_CONTACTS"
       ]
+    },
+    "ios": {
+      "bundleIdentifier": "in.bringly.customer"
     },
     "plugins": [
       "expo-secure-store",

@@ -94,7 +94,7 @@ multi-day process — start early:
       → generate private key; paste the JSON **single-line** into
       `FCM_SERVICE_ACCOUNT_JSON` (while `{}`, pushes are log-only and boot warns).
 - [ ] Confirm each app's `google-services.json` belongs to the production Firebase
-      project and matches its package name (`com.chirawa.customer` / seller / rider).
+      project and matches its package name (`in.bringly.customer` / seller / rider).
 - [ ] The API keys inside `google-services.json` ship in every APK by design —
       restrict each in Google Cloud console: **Android apps** restriction
       (package + SHA-1), API restriction to Firebase services.
@@ -111,7 +111,7 @@ multi-day process — start early:
 - [ ] **ROTATE the exposed Google Maps key** (`AIzaSyBN1U…` — it lived in
       `app.json`, so it is in git history forever): delete it in Google Cloud
       console.
-- [ ] Create its replacement restricted to package `com.chirawa.customer` +
+- [ ] Create its replacement restricted to package `in.bringly.customer` +
       release-keystore SHA-1 + **Maps SDK for Android only**; provide it as the
       `GOOGLE_MAPS_ANDROID_API_KEY` EAS environment variable (never in git —
       `app.config.js` injects it at build time).
