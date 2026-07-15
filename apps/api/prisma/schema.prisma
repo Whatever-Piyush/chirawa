@@ -1190,3 +1190,221 @@ model RecoveryEvent {
   @@index([needId, createdAt])
   @@map("recovery_events")
 }
+
+// ─── Food Delivery Module (Food.md) ──────────────────────────────────────────
+// COMPLETELY ISOLATED from the marketplace: restaurants are NOT rows in `shops`,
+// the food cart is NOT the marketplace cart, and food orders are NOT rows in
+// `orders`. No existing table/enum is altered by this module (Food.md §3, §9).
+// References to shared entities (users, rider profiles) are plain UUID columns
+// with no FK — the same precedent as Order.riderId — so the shared models stay
+// byte-for-byte untouched. Statuses reuse the marketplace VOCABULARY as strings
+// (pending_payment → paid → confirmed → preparing → ready_for_pickup →
+// picked_up → out_for_delivery → delivered | cancelled) without touching the
+// shared OrderStatus enum.
+
+model Restaurant {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String   @db.VarChar(120)
+  description     String?  @db.Text
+  cuisine         String?  @db.VarChar(80)
+  logoUrl         String?  @map("logo_url")
+  coverImageUrl   String?  @map("cover_image_url")
+  lat             Decimal  @db.Decimal(10, 8)
+  lng             Decimal  @db.Decimal(11, 8)
+  address         String   @db.VarChar(255)
+  isActive        Boolean  @default(true) @map("is_active")
+  isOpen          Boolean  @default(true) @map("is_open")
+  openTime        String   @default("11:00") @map("open_time") @db.VarChar(5)
+  closeTime       String   @default("22:00") @map("close_time") @db.VarChar(5)
+  prepTimeMinutes Int      @default(20) @map("prep_time_minutes")
+  // Manual, promotable rail order (Food.md §11.5) — NOT alphabetical.
+  displayOrder    Int      @default(0) @map("display_order")
+  // Restaurant Mode login (Food.md §11.2): the seller-app User that operates
+  // this restaurant's orders. Plain UUID — no FK into the shared users table.
+  sellerUserId    String?  @map("seller_user_id") @db.Uuid
+  ratingAverage   Decimal? @map("rating_average") @db.Decimal(3, 2)
+  ratingCount     Int      @default(0) @map("rating_count")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  menuCategories MenuCategory[]
+  menuItems      MenuItem[]
+  foodCarts      FoodCart[]
+  foodOrders     FoodOrder[]
+
+  @@index([isActive, isOpen])
+  @@index([displayOrder])
+  @@index([sellerUserId])
+  @@map("restaurants")
+}
+
+model MenuCategory {
+  id           String   @id @default(uuid()) @db.Uuid
+  restaurantId String   @map("restaurant_id") @db.Uuid
+  name         String   @db.VarChar(100)
+  sortOrder    Int      @default(0) @map("sort_order")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  items      MenuItem[]
+
+  @@index([restaurantId, sortOrder])
+  @@map("menu_categories")
+}
+
+// Simple items only at launch (Food.md §11.4): name, price, image, optional
+// description + veg flag. Variants/add-ons would be new tables later — additive.
+model MenuItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  restaurantId   String   @map("restaurant_id") @db.Uuid
+  menuCategoryId String?  @map("menu_category_id") @db.Uuid
+  name           String   @db.VarChar(200)
+  description    String?  @db.Text
+  pricePaise     Int      @map("price_paise") // integer paise — NEVER float
+  imageUrl       String?  @map("image_url")
+  isVeg          Boolean? @map("is_veg")
+  isAvailable    Boolean  @default(true) @map("is_available")
+  sortOrder      Int      @default(0) @map("sort_order")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  restaurant   Restaurant    @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  menuCategory MenuCategory? @relation(fields: [menuCategoryId], references: [id])
+  cartItems    FoodCartItem[]
+
+  @@index([restaurantId, isAvailable])
+  @@index([menuCategoryId, sortOrder])
+  @@map("menu_items")
+}
+
+// One food cart per user, bound to ONE restaurant (Food.md §4). DB-backed only —
+// no Redis mirror (deliberately simpler than the marketplace cart; the DB row is
+// the single source of truth the policy enforces against).
+model FoodCart {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @unique @map("user_id") @db.Uuid
+  restaurantId String?  @map("restaurant_id") @db.Uuid // null = empty cart, no restaurant bound
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  restaurant Restaurant?    @relation(fields: [restaurantId], references: [id])
+  items      FoodCartItem[]
+
+  @@map("food_carts")
+}
+
+model FoodCartItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  foodCartId     String   @map("food_cart_id") @db.Uuid
+  menuItemId     String   @map("menu_item_id") @db.Uuid
+  quantity       Int
+  unitPriceAtAdd Int      @map("unit_price_at_add")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  foodCart FoodCart @relation(fields: [foodCartId], references: [id], onDelete: Cascade)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id])
+
+  @@unique([foodCartId, menuItemId])
+  @@map("food_cart_items")
+}
+
+// Food orders — own pipeline (Food.md §6). UPI-only: paymentMethod is always
+// 'upi'; the service refuses anything else. Address snapshot mirrors the
+// marketplace convention (immutable even if the address is later edited).
+model FoodOrder {
+  id           String @id @default(uuid()) @db.Uuid
+  customerId   String @map("customer_id") @db.Uuid // plain UUID — no FK to users
+  restaurantId String @map("restaurant_id") @db.Uuid
+
+  deliveryStreet   String  @map("delivery_street") @db.VarChar(255)
+  deliveryLandmark String  @default("") @map("delivery_landmark") @db.VarChar(255)
+  deliveryLocality String  @default("") @map("delivery_locality") @db.VarChar(100)
+  deliveryCity     String  @default("") @map("delivery_city") @db.VarChar(100)
+  deliveryPincode  String  @default("") @map("delivery_pincode") @db.VarChar(10)
+  deliveryLat      Decimal @map("delivery_lat") @db.Decimal(10, 8)
+  deliveryLng      Decimal @map("delivery_lng") @db.Decimal(11, 8)
+  receiverName     String? @map("receiver_name") @db.VarChar(100)
+  receiverPhone    String? @map("receiver_phone") @db.VarChar(20)
+
+  itemsSubtotalPaise Int @map("items_subtotal_paise")
+  deliveryFeePaise   Int @map("delivery_fee_paise") // flat — from Food config, stamped at order time
+  totalPaise         Int @map("total_paise")
+
+  status        String @default("pending_payment") @db.VarChar(20)
+  paymentMethod String @default("upi") @map("payment_method") @db.VarChar(10)
+
+  razorpayOrderId   String?   @map("razorpay_order_id") @db.VarChar(64)
+  razorpayPaymentId String?   @map("razorpay_payment_id") @db.VarChar(64)
+  paidAt            DateTime? @map("paid_at")
+  refundedPaise     Int       @default(0) @map("refunded_paise")
+  // Refund durability (launch hardening): none → pending → processed | failed;
+  // 'skipped' = terminal "checked, nothing captured, nothing owed" (stamped by
+  // the reconcile sweep's late-capture stage on cancelled orders). 'failed'
+  // rows are retried by the sweep and surfaced to admin — a Razorpay hiccup
+  // can never silently strand a customer's money.
+  refundStatus      String    @default("none") @map("refund_status") @db.VarChar(12)
+  razorpayRefundId  String?   @map("razorpay_refund_id") @db.VarChar(64)
+
+  // Rider claiming a food pickup stores their RiderProfile.id (same convention
+  // as Order.riderId) — plain UUID, no FK.
+  riderId String? @map("rider_id") @db.Uuid
+
+  cancelReason     String?   @map("cancel_reason") @db.VarChar(255)
+  confirmedAt      DateTime? @map("confirmed_at")
+  preparingAt      DateTime? @map("preparing_at")
+  readyAt          DateTime? @map("ready_at")
+  pickedUpAt       DateTime? @map("picked_up_at")
+  outForDeliveryAt DateTime? @map("out_for_delivery_at")
+  deliveredAt      DateTime? @map("delivered_at")
+  cancelledAt      DateTime? @map("cancelled_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  restaurant    Restaurant               @relation(fields: [restaurantId], references: [id])
+  items         FoodOrderItem[]
+  statusHistory FoodOrderStatusHistory[]
+
+  @@index([customerId, createdAt(sort: Desc)])
+  @@index([restaurantId, status, createdAt(sort: Desc)])
+  @@index([riderId, status])
+  @@index([status, createdAt])
+  @@index([razorpayOrderId])
+  @@index([refundStatus])
+  @@map("food_orders")
+}
+
+// Line snapshot — menuItemId is a plain UUID (no FK) so a later menu edit or
+// removal can never corrupt or block a historical order.
+model FoodOrderItem {
+  id          String   @id @default(uuid()) @db.Uuid
+  foodOrderId String   @map("food_order_id") @db.Uuid
+  menuItemId  String   @map("menu_item_id") @db.Uuid
+  name        String   @db.VarChar(200)
+  unitPrice   Int      @map("unit_price")
+  quantity    Int
+  subtotal    Int
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  foodOrder FoodOrder @relation(fields: [foodOrderId], references: [id], onDelete: Cascade)
+
+  @@index([foodOrderId])
+  @@map("food_order_items")
+}
+
+model FoodOrderStatusHistory {
+  id            String   @id @default(uuid()) @db.Uuid
+  foodOrderId   String   @map("food_order_id") @db.Uuid
+  status        String   @db.VarChar(20)
+  changedByRole String   @map("changed_by_role") @db.VarChar(20)
+  changedById   String   @map("changed_by_id") @db.Uuid
+  reason        String?  @db.VarChar(255)
+  changedAt     DateTime @default(now()) @map("changed_at")
+
+  foodOrder FoodOrder @relation(fields: [foodOrderId], references: [id], onDelete: Cascade)
+
+  @@index([foodOrderId, changedAt])
+  @@map("food_order_status_history")
+}
