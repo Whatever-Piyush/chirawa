@@ -124,4 +124,42 @@ export const RiderApi = {
 
   registerDeviceToken: (fcmToken: string, token: string) =>
     request('POST', '/notifications/register-token', { token: fcmToken, platform: 'android' }, token),
+
+  // ── Food Delivery Module — restaurant pickups (Food.md §12 Phase 6) ────────
+  // Reads/writes ONLY the food pipeline (/food/rider/*); every marketplace
+  // delivery method above is untouched.
+
+  getFoodPickups: (token: string) =>
+    request<{ available: FoodPickup[]; active: FoodPickup[] }>(
+      'GET', '/food/rider/pickups', undefined, token),
+
+  claimFoodPickup: (foodOrderId: string, token: string) =>
+    request('POST', `/food/rider/orders/${foodOrderId}/claim`, {}, token),
+
+  foodPickedUp: (foodOrderId: string, token: string) =>
+    request('POST', `/food/rider/orders/${foodOrderId}/picked-up`, {}, token),
+
+  foodOutForDelivery: (foodOrderId: string, token: string) =>
+    request('POST', `/food/rider/orders/${foodOrderId}/out-for-delivery`, {}, token),
+
+  foodDelivered: (foodOrderId: string, token: string) =>
+    request('POST', `/food/rider/orders/${foodOrderId}/delivered`, {}, token),
 };
+
+// ── Food pickup shapes (Food.md §12 Phase 6) ──────────────────────────────────
+// PII window (RC1): the UNCLAIMED list carries only the drop locality; the full
+// street + receiver contact arrive only on the rider's own claimed orders.
+export interface FoodPickup {
+  id: string;
+  status: string; // ready_for_pickup | picked_up | out_for_delivery
+  totalPaise: number;
+  deliveryLocality: string;
+  readyAt: string | null;
+  restaurant: { id: string; name: string; address: string; lat: string; lng: string };
+  items: Array<{ name: string; quantity: number }>;
+  // Present ONLY on claimed (active) orders:
+  deliveryStreet?: string;
+  deliveryLandmark?: string;
+  receiverName?: string | null;
+  receiverPhone?: string | null;
+}

@@ -16,6 +16,7 @@ import HomeScreen        from '../screens/home/HomeScreen';
 import DeliveryScreen    from '../screens/delivery/DeliveryScreen';
 import EarningsScreen    from '../screens/earnings/EarningsScreen';
 import ProfileScreen     from '../screens/profile/ProfileScreen';
+import FoodPickupsScreen from '../screens/food/FoodPickupsScreen';
 
 export type RootStackParamList = {
   OtpLogin:  undefined;
@@ -27,6 +28,7 @@ export type RootStackParamList = {
 export type MainTabParamList = {
   Home:     undefined;
   Delivery: undefined;
+  Food:     undefined; // Food Delivery Module — restaurant pickups (Food.md §12 Phase 6)
   Earnings: undefined;
   Profile:  undefined;
 };
@@ -39,7 +41,7 @@ function MainTabs() {
     <Tab.Navigator screenOptions={({ route }) => ({
       headerShown: false,
       tabBarIcon: ({ focused }) => {
-        const icons: Record<string, string> = { Home: '🏠', Delivery: '🚴', Earnings: '💰', Profile: '👤' };
+        const icons: Record<string, string> = { Home: '🏠', Delivery: '🚴', Food: '🍔', Earnings: '💰', Profile: '👤' };
         return <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>{icons[route.name] ?? '•'}</Text>;
       },
       tabBarActiveTintColor:   Colors.primary,
@@ -48,6 +50,7 @@ function MainTabs() {
     })}>
       <Tab.Screen name="Home"     component={HomeScreen}     options={{ title: 'होम' }} />
       <Tab.Screen name="Delivery" component={DeliveryScreen} options={{ title: 'डिलीवरी' }} />
+      <Tab.Screen name="Food"     component={FoodPickupsScreen} options={{ title: 'फूड' }} />
       <Tab.Screen name="Earnings" component={EarningsScreen} options={{ title: 'कमाई' }} />
       <Tab.Screen name="Profile"  component={ProfileScreen}  options={{ title: 'प्रोफाइल' }} />
     </Tab.Navigator>
