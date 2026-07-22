@@ -20,6 +20,7 @@
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:food": "tsx prisma/seed-food.ts",
     "db:seed:images": "tsx prisma/seeds/dev-images.ts",
     "admin:create": "tsx scripts/create-admin.ts",
     "db:backfill:barcode": "tsx prisma/backfill-barcode.ts",

@@ -1,8 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-} from 'expo-speech-recognition';
+import type * as SpeechModule from 'expo-speech-recognition';
+
+// ─── Optional native module guard ────────────────────────────────────────────
+// expo-speech-recognition ships native code, so it only exists in a custom dev/
+// production build — never in Expo Go, where importing it throws at load
+// ("Cannot find native module 'ExpoSpeechRecognition'") and takes the whole app
+// down. Load it defensively and expose `voiceSearchAvailable` so the UI can gate
+// on it (mic → live sheet when present, "coming soon" toast when absent).
+let speech: typeof SpeechModule | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  speech = require('expo-speech-recognition') as typeof SpeechModule;
+} catch {
+  speech = null;
+}
+
+export const voiceSearchAvailable = !!speech?.ExpoSpeechRecognitionModule;
+
+// Cast away the optionality: every call site below sits in a try/catch, and the
+// hook is only ever mounted when voiceSearchAvailable is true.
+const ExpoSpeechRecognitionModule =
+  speech?.ExpoSpeechRecognitionModule as typeof SpeechModule.ExpoSpeechRecognitionModule;
+const useSpeechRecognitionEvent =
+  speech?.useSpeechRecognitionEvent ??
+  ((() => undefined) as unknown as typeof SpeechModule.useSpeechRecognitionEvent);
 
 // ─── Voice search state machine ──────────────────────────────────────────────
 // Wraps expo-speech-recognition into a small, search-focused hook: permission

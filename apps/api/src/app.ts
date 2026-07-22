@@ -16,6 +16,7 @@ import realtimePlugin      from './shared/plugins/realtime.plugin';
 import notificationsPlugin from './modules/notifications/notifications.plugin';
 import dispatchPlugin       from './modules/delivery/dispatch.plugin';
 import sellerTimeoutPlugin  from './modules/orders/seller-timeout.plugin';
+import foodReconcilePlugin  from './modules/food/food-reconcile.plugin';
 
 import authRoutes          from './modules/auth/auth.routes';
 import usersRoutes         from './modules/users/users.routes';
@@ -32,6 +33,7 @@ import notificationsRoutes from './modules/notifications/notifications.routes';
 import sellersRoutes       from './modules/sellers/sellers.routes';
 import geoRoutes           from './modules/geo/geo.routes';
 import recoveryRoutes      from './modules/recovery/recovery.routes';
+import foodRoutes          from './modules/food/food.routes';
 import { initSentry, captureError } from './shared/observability/sentry';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -63,6 +65,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(notificationsPlugin); // After prisma + redis
   await app.register(dispatchPlugin);       // Auto-assign confirmed orders to riders (after queues)
   await app.register(sellerTimeoutPlugin);  // Auto-accept orders on seller timeout (after queues)
+  await app.register(foodReconcilePlugin);  // Food money-safety sweep: payment rescue / expiry / accept timeout / refund retry
 
   // ── HTTP Plugins ──────────────────────────────────────────────────────────
   await app.register(sensible);
@@ -197,6 +200,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(sellersRoutes,       { prefix: '/api/v1/sellers' });
   await app.register(geoRoutes,           { prefix: '/api/v1/geo' });
   await app.register(recoveryRoutes,      { prefix: '/api/v1/recovery' }); // Seller Sprint 5 Phase A (internal)
+  await app.register(foodRoutes,          { prefix: '/api/v1/food' });     // Food Delivery Module (Food.md) — isolated plug-in
 
   return app;
 }

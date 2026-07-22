@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavigationContainer, type NavigatorScreenParams } from '@react-navigation/native';
 import { navigationRef } from './ref';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '@chirawa/i18n';
 import { Colors } from '../theme';
 import LanguagePickerScreen from '../screens/LanguagePickerScreen';
+import { SellerApi } from '../services/api.service';
 
 import OtpLoginScreen    from '../screens/auth/OtpLoginScreen';
 import VerifyOtpScreen   from '../screens/auth/VerifyOtpScreen';
@@ -17,6 +18,7 @@ import StockScreen       from '../screens/stock/StockScreen';
 import MorningCardScreen from '../screens/stock/MorningCardScreen';
 import SettlementScreen  from '../screens/settlement/SettlementScreen';
 import ProfileScreen     from '../screens/profile/ProfileScreen';
+import RestaurantOrdersScreen from '../screens/restaurant/RestaurantOrdersScreen';
 
 export type RootStackParamList = {
   OtpLogin:    undefined;
@@ -31,17 +33,35 @@ export type TabParamList = {
   Stock:      undefined;
   Settlement: undefined;
   Profile:    undefined;
+  // Restaurant Mode (Food.md §11.2) — rendered ONLY when this seller account is
+  // linked to a Restaurant. Existing tabs are untouched.
+  Restaurant: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab   = createBottomTabNavigator<TabParamList>();
 
 function MainTabs() {
+  const { state } = useAuth();
+  // Restaurant Mode detection (Food.md §11.2): one lightweight lookup on mount.
+  // null = unknown (checking) — the tab appears only after a positive answer,
+  // so grocery-only sellers see EXACTLY the same four tabs as today.
+  const [hasRestaurant, setHasRestaurant] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (!state.token) { setHasRestaurant(false); return; }
+    SellerApi.getMyRestaurant(state.token)
+      .then((res) => { if (active) setHasRestaurant(res.restaurant != null); })
+      .catch(() => { /* stay hidden — a transient failure must not flash the tab */ });
+    return () => { active = false; };
+  }, [state.token]);
+
   return (
     <Tab.Navigator screenOptions={({ route }) => ({
       headerShown: false,
       tabBarIcon: ({ focused }) => {
-        const icons: Record<string, string> = { Orders: '📋', Stock: '📦', Settlement: '💰', Profile: '👤' };
+        const icons: Record<string, string> = { Orders: '📋', Stock: '📦', Settlement: '💰', Profile: '👤', Restaurant: '🍽️' };
         return <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>{icons[route.name] ?? '•'}</Text>;
       },
       tabBarActiveTintColor:   Colors.accent,
@@ -49,6 +69,9 @@ function MainTabs() {
       tabBarStyle:             { height: 60, paddingBottom: 8 },
     })}>
       <Tab.Screen name="Orders"     component={OrderQueueScreen}  options={{ title: 'ऑर्डर' }} />
+      {hasRestaurant && (
+        <Tab.Screen name="Restaurant" component={RestaurantOrdersScreen} options={{ title: 'रेस्टोरेंट' }} />
+      )}
       <Tab.Screen name="Stock"      component={StockScreen}        options={{ title: 'स्टॉक' }} />
       <Tab.Screen name="Settlement" component={SettlementScreen}   options={{ title: 'पेमेंट' }} />
       <Tab.Screen name="Profile"    component={ProfileScreen}      options={{ title: 'प्रोफाइल' }} />

@@ -21,7 +21,7 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#FF3E6C"
       },
-      "package": "com.chirawa.customer",
+      "package": "in.bringly.customer",
       "versionCode": 1,
       "googleServicesFile": "./google-services.json",
       "permissions": [
@@ -31,6 +31,9 @@
         "android.permission.WRITE_CONTACTS",
         "android.permission.RECORD_AUDIO"
       ]
+    },
+    "ios": {
+      "bundleIdentifier": "in.bringly.customer"
     },
     "plugins": [
       "expo-secure-store",
@@ -65,10 +68,10 @@
         }
       ]
     ],
-    "owner": "aaaaaadiii",
+    "owner": "piyushlatta",
     "extra": {
       "eas": {
-        "projectId": "04300f7e-e771-46c0-9ef2-f0ec9160dbd6"
+        "projectId": "db00e0a8-c8c7-4d48-9e59-b032891ce81b"
       }
     }
   }

@@ -5,6 +5,9 @@ The one document to open when production needs attention. Deep dives live in
 [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) — this runbook tells you which of
 those to reach for, and handles everything they don't.
 
+**Food Delivery incidents** (stuck food payments, restaurant no-shows, food
+refunds, rider pickups) have their own playbook: [FOOD_RUNBOOK.md](FOOD_RUNBOOK.md).
+
 ## 1. Topology — what is running where
 
 One Hetzner VPS. Everything below lives on it; the only external services are

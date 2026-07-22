@@ -13,7 +13,7 @@
       "backgroundColor": "#1A1A1A"
     },
     "android": {
-      "package": "com.chirawa.seller",
+      "package": "in.bringly.seller",
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#1A1A1A"
@@ -24,6 +24,9 @@
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.CAMERA"
       ]
+    },
+    "ios": {
+      "bundleIdentifier": "in.bringly.seller"
     },
     "plugins": [
       "expo-secure-store",
