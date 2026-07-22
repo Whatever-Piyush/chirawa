@@ -1,54 +1,33 @@
-import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Language } from './translations';
+import { LanguageCoreProvider, useLanguage, type LanguageStorage } from './core';
 
-interface LanguageContextValue {
-  language: Language;
-  setLanguage: (lang: Language) => void;
-  hasChosen: boolean | null;
-}
+// This file is the ONLY place the RN-only AsyncStorage import lives. Web hosts
+// import from '@chirawa/i18n/core' and never pull this module (or AsyncStorage).
 
 const STORAGE_KEY = 'bringly_language';
 
-const LanguageContext = createContext<LanguageContextValue>({
-  language: 'hi',
-  setLanguage: () => undefined,
-  hasChosen: null,
-});
+// AsyncStorage-backed persistence seam for the React Native apps.
+const asyncStorage: LanguageStorage = {
+  get: async (): Promise<Language | null> => {
+    const stored = await AsyncStorage.getItem(STORAGE_KEY);
+    return stored === 'en' || stored === 'hi' ? stored : null;
+  },
+  set: async (language: Language): Promise<void> => {
+    await AsyncStorage.setItem(STORAGE_KEY, language);
+  },
+};
 
+// Drop-in RN provider — unchanged public API (default Hindi, AsyncStorage
+// persistence, hasChosen semantics), now built on the headless core.
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState<Language>('hi');
-  const [hasChosen, setHasChosen] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((stored) => {
-        if (stored === 'en' || stored === 'hi') {
-          setLanguageState(stored);
-          setHasChosen(true);
-        } else {
-          setHasChosen(false);
-        }
-      })
-      .catch(() => {
-        setHasChosen(false);
-      });
-  }, []);
-
-  function setLanguage(lang: Language) {
-    setLanguageState(lang);
-    setHasChosen(true);
-    AsyncStorage.setItem(STORAGE_KEY, lang).catch(() => undefined);
-  }
-
   return (
-    <LanguageContext.Provider value={{ language, setLanguage, hasChosen }}>
+    <LanguageCoreProvider storage={asyncStorage} defaultLanguage="hi">
       {children}
-    </LanguageContext.Provider>
+    </LanguageCoreProvider>
   );
 }
 
-export function useLanguage(): LanguageContextValue {
-  return useContext(LanguageContext);
-}
+// Preserve the original export surface of this module.
+export { useLanguage };

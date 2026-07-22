@@ -5,6 +5,7 @@ import { uploadImage, ALLOWED_IMAGE_MIME } from '../../services/r2.service';
 import { processImage } from '../../services/image-pipeline';
 import { createRequestsService } from '../catalog/requests.service';
 import { createModerationService } from '../catalog/moderation.service';
+import { getInventoryHealth } from '../inventory/health.service';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -248,6 +249,13 @@ export default async function routes(app: FastifyInstance): Promise<void> {
   // GET /api/v1/admin/metrics — DB-derived rates + threshold alert flags.
   app.get('/metrics', adminGuard, async (_req, reply) => {
     return reply.send(await moderation.getMetrics());
+  });
+
+  // GET /api/v1/admin/inventory/health — Inventory Engine weekly-review numbers:
+  // rider-miss rate, auto-accept canary, belief bands, reservation counts, and
+  // the live reserved-counter invariant (should be 0 outside reconciler runs).
+  app.get('/inventory/health', adminGuard, async (_req, reply) => {
+    return reply.send(await getInventoryHealth(app.prisma));
   });
 
   // ── Image management (shop onboarding) ─────────────────────────────────────

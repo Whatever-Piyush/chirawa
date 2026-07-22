@@ -29,13 +29,22 @@ function makePrisma(opts: { existingProduct?: boolean } = {}) {
       findFirst: vi.fn().mockResolvedValue(null),
       create:    vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'cat_' + data.name })),
     },
-    product: { findFirst: productFindFirst, create: productCreate, update: productUpdate },
+    product: {
+      findFirst: productFindFirst, create: productCreate, update: productUpdate,
+      findUnique: vi.fn().mockResolvedValue({ stockStatus: 'available' }),
+    },
     productVariant: {
       findFirst: vi.fn().mockResolvedValue(null),
       create:    vi.fn().mockResolvedValue({ id: 'var_new' }),
       update:    vi.fn().mockResolvedValue({}),
     },
+    // Inventory Engine (belief writes for stock_qty + binary state rows)
+    inventoryState: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) },
+    inventoryEvent: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    appConfig: { findMany: vi.fn().mockResolvedValue([]) },
+    $transaction: vi.fn(),
   };
+  prisma.$transaction.mockImplementation((fn: (tx: unknown) => Promise<unknown>) => fn(prisma));
   const redis = { del: vi.fn().mockResolvedValue(1) };
   return { prisma, redis, productCreate, productUpdate, categoryCreate: prisma.category.create, variantCreate: prisma.productVariant.create };
 }
@@ -58,8 +67,12 @@ describe('importProductsCsv (Phase 1.4)', () => {
     // 1 product-only row (Atta) + 2 variant rows that both upsert the Amul product.
     expect(report.created).toBeGreaterThanOrEqual(1);
     expect(report.errors).toHaveLength(0);
-    // rupees→paise: Atta price 285 → 28500
-    expect(p.productCreate.mock.calls[0]![0].data).toMatchObject({ price: 28500, mrpPaise: 32000, stockQty: 40 });
+    // rupees→paise: Atta price 285 → 28500. stock_qty flows through the belief
+    // event (Inventory Engine), not the create payload.
+    expect(p.productCreate.mock.calls[0]![0].data).toMatchObject({ price: 28500, mrpPaise: 32000 });
+    expect(p.prisma.inventoryEvent.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({ eventType: 'seller_count', qtyAfter: 40 })],
+    }));
     // Two variants created for Amul Milk (32→3200, 62→6200)
     expect(p.variantCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ name: '500 ml', price: 3200 }) }));
     expect(p.variantCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ name: '1 L', price: 6200 }) }));
@@ -110,9 +123,15 @@ function makeBarcodePrisma(seed: Array<{ id: string; name?: string; barcode?: st
   const prisma = {
     shop: { findUnique: vi.fn().mockResolvedValue({ id: SHOP, seller: { userId: 'someone' } }) },
     category: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'cat_x' }) },
-    product: { findFirst, create, update },
+    product: { findFirst, create, update, findUnique: vi.fn().mockResolvedValue({ stockStatus: 'available' }) },
     productVariant: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'v' }), update: vi.fn() },
+    // Inventory Engine (belief writes for stock_qty + binary state rows)
+    inventoryState: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) },
+    inventoryEvent: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    appConfig: { findMany: vi.fn().mockResolvedValue([]) },
+    $transaction: vi.fn(),
   };
+  prisma.$transaction.mockImplementation((fn: (tx: unknown) => Promise<unknown>) => fn(prisma));
   const redis = { del: vi.fn().mockResolvedValue(1) };
   return { prisma, redis, create, update, findFirst };
 }

@@ -52,7 +52,7 @@ export async function buildApp(): Promise<FastifyInstance> {
         },
       }),
     },
-    trustProxy: true,
+    trustProxy: env.TRUST_PROXY,
     genReqId: () => crypto.randomUUID(),
   });
 

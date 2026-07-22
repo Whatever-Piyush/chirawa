@@ -28,7 +28,15 @@ const REJECT_REASONS = [
   'Bahut zyada order',
 ];
 
-interface OrderItem  { productName: string; quantity: number; unitPrice: number }
+interface OrderItem  {
+  // id + verificationFlag come from GET /orders (Inventory Engine chips); the
+  // live socket payload doesn't carry them, so they're optional and the modal
+  // enriches itself from the refreshed queue.
+  id?: string;
+  productName: string; quantity: number; unitPrice: number;
+  verificationFlag?: string | null;
+  fulfillmentStatus?: string;
+}
 interface IncomingOrder {
   orderId: string; items: OrderItem[];
   totalAmount: number; paymentMethod: string; deliveryLocality: string;
@@ -40,6 +48,13 @@ interface ActiveOrder {
   sellerAcceptedAt: string | null;
 }
 
+// Chip answer per flagged line: 'ok' (है) | 'out' (नहीं) | number ("सिर्फ n").
+type ChipAnswer = 'ok' | 'out' | number;
+
+const isFlaggedLine = (it: OrderItem): boolean =>
+  !!it.id && it.verificationFlag === 'accept_verify_requested' &&
+  (it.fulfillmentStatus ?? 'fulfilled') === 'fulfilled';
+
 export default function OrderQueueScreen() {
   const { state }                   = useAuth();
   const route                       = useRoute<RouteProp<TabParamList, 'Orders'>>();
@@ -49,6 +64,9 @@ export default function OrderQueueScreen() {
   const [error,      setError]      = useState(false);
   const [actionLoad, setActionLoad] = useState(false);
   const [rejectingOrderId, setRejectingOrderId] = useState<string | null>(null);
+  // Chip answers keyed by orderItemId (Inventory Engine S2). Untouched flagged
+  // lines are an implicit "है" — the backend confirms them on accept.
+  const [chipAnswers, setChipAnswers] = useState<Record<string, ChipAnswer>>({});
   const socketRef   = useRef<Socket | null>(null);
   const soundRef    = useRef<Audio.Sound | null>(null);
   const vibInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -114,6 +132,9 @@ export default function OrderQueueScreen() {
 
     socket.on('order:new', (data: IncomingOrder) => {
       setNewOrder(data);
+      // The socket payload has no line ids/flags — refresh the queue so the
+      // modal can enrich itself with the chip data.
+      void loadOrders();
       void startAlarm();
     });
 
@@ -185,22 +206,39 @@ export default function OrderQueueScreen() {
   }
 
   // ── Accept order ──────────────────────────────────────────────────────────
+  // Chip answers become lineOverrides: 'out' → 0, "सिर्फ n" → n; 'ok' and
+  // untouched flagged lines are implicit confirmations (no override sent).
   async function handleAccept(orderId: string) {
     if (!state.token) return;
     // Silence the alarm the instant the seller engages — BEFORE the network
     // call, so a failed Accept can never leave vibration/sound looping forever
     // (Seller Sprint 0 P0-4). The modal stays open on failure so they can retry.
     await stopAlarm();
+    const lineOverrides = Object.entries(chipAnswers)
+      .filter(([, a]) => a !== 'ok')
+      .map(([orderItemId, a]) => ({ orderItemId, availableQty: a === 'out' ? 0 : (a as number) }));
     setActionLoad(true);
     try {
-      await SellerApi.acceptOrder(orderId, state.token);
+      await SellerApi.acceptOrder(orderId, state.token, lineOverrides);
       setNewOrder((cur) => (cur?.orderId === orderId ? null : cur));
+      setChipAnswers({});
       await loadOrders();
     } catch (e: unknown) {
       Alert.alert('Accept fail hua ❌', e instanceof Error ? e.message : 'Accept nahi hua. Dobara koshish karein.');
     } finally {
       setActionLoad(false);
     }
+  }
+
+  // Open the full-screen modal for a queue order (used when the inline Accept
+  // is tapped on an order that has flagged lines — chips live in the modal).
+  function openAcceptModal(item: ActiveOrder) {
+    setChipAnswers({});
+    setNewOrder({
+      orderId: item.id, items: item.items,
+      totalAmount: item.totalAmount, paymentMethod: item.paymentMethod,
+      deliveryLocality: item.deliveryLocality,
+    });
   }
 
   // ── Reject order ──────────────────────────────────────────────────────────
@@ -241,6 +279,17 @@ export default function OrderQueueScreen() {
     picked_up:        '🚴 Rider Le Gaya',
     paid:             '💳 Payment Hua',
   };
+
+  // Chips render from the refreshed queue copy of the modal's order (the live
+  // socket payload has no line ids). Not loaded yet → no chips, 1-tap accept —
+  // the backend then treats the accept as implicit confirmation.
+  const modalQueueOrder = newOrder ? (orders.find((o) => o.id === newOrder.orderId) ?? null) : null;
+  const flaggedLines = (modalQueueOrder?.items ?? []).filter(isFlaggedLine);
+  const setChip = (id: string, a: ChipAnswer) =>
+    setChipAnswers((prev) => ({ ...prev, [id]: a }));
+
+  // A different order in the modal = fresh chip state.
+  useEffect(() => { setChipAnswers({}); }, [newOrder?.orderId]);
 
   if (loading) {
     return <View style={styles.center}><ActivityIndicator color={Colors.accent} size="large" /></View>;
@@ -294,7 +343,9 @@ export default function OrderQueueScreen() {
                   {!item.sellerAcceptedAt && (item.status === 'paid' || item.status === 'confirmed') && <>
                     <TouchableOpacity
                       style={styles.acceptInlineBtn}
-                      onPress={() => void handleAccept(item.id)}
+                      onPress={() => item.items.some(isFlaggedLine)
+                        ? openAcceptModal(item)          // chips need answering in the modal
+                        : void handleAccept(item.id)}
                       disabled={actionLoad}
                     >
                       <Text style={styles.acceptInlineText}>✅ Accept</Text>
@@ -340,6 +391,57 @@ export default function OrderQueueScreen() {
               </Text>
             ))}
           </View>
+
+          {/* Inventory Engine chips — only on lines the system doubts. Answer
+              with a thumb: है / सिर्फ n / नहीं. Untouched = है. */}
+          {flaggedLines.length > 0 && (
+            <View style={styles.chipBox}>
+              <Text style={styles.chipBoxTitle}>⚠️ Shelf pe check karein:</Text>
+              {flaggedLines.map((it) => {
+                const ans = chipAnswers[it.id!] ?? 'ok';
+                return (
+                  <View key={it.id} style={styles.chipRow}>
+                    <Text style={styles.chipName} numberOfLines={1}>
+                      {it.productName} ×{it.quantity}
+                    </Text>
+                    <View style={styles.chipBtns}>
+                      <TouchableOpacity
+                        style={[styles.chipBtn, ans === 'ok' && styles.chipBtnOk]}
+                        onPress={() => setChip(it.id!, 'ok')}
+                      >
+                        <Text style={[styles.chipBtnText, ans === 'ok' && styles.chipBtnTextOn]}>है</Text>
+                      </TouchableOpacity>
+                      {it.quantity > 1 && (
+                        <TouchableOpacity
+                          style={[styles.chipBtn, typeof ans === 'number' && styles.chipBtnWarn]}
+                          onPress={() => setChip(it.id!, it.quantity - 1)}
+                        >
+                          <Text style={[styles.chipBtnText, typeof ans === 'number' && styles.chipBtnTextOn]}>सिर्फ</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        style={[styles.chipBtn, ans === 'out' && styles.chipBtnOut]}
+                        onPress={() => setChip(it.id!, 'out')}
+                      >
+                        <Text style={[styles.chipBtnText, ans === 'out' && styles.chipBtnTextOn]}>नहीं</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {typeof ans === 'number' && (
+                      <View style={styles.stepper}>
+                        <TouchableOpacity style={styles.stepBtn} onPress={() => setChip(it.id!, Math.max(1, ans - 1))}>
+                          <Text style={styles.stepBtnText}>−</Text>
+                        </TouchableOpacity>
+                        <Text style={styles.stepQty}>{ans}</Text>
+                        <TouchableOpacity style={styles.stepBtn} onPress={() => setChip(it.id!, Math.min(it.quantity - 1, ans + 1))}>
+                          <Text style={styles.stepBtnText}>+</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          )}
 
           <TouchableOpacity
             style={styles.acceptBtn}
@@ -436,6 +538,23 @@ const styles = StyleSheet.create({
   acceptBtnText: { fontSize: FontSize.xl, fontWeight: '900', color: Colors.newOrder },
   rejectBtn:   { borderWidth: 2, borderColor: Colors.white, borderRadius: Radius.lg, padding: Spacing.lg, width: '100%', alignItems: 'center' },
   rejectBtnText: { color: Colors.white, fontSize: FontSize.lg, fontWeight: '700' },
+
+  // Inventory Engine chips (flagged lines on the accept modal)
+  chipBox:      { backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: Radius.lg, padding: Spacing.lg, width: '100%', gap: Spacing.md },
+  chipBoxTitle: { color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
+  chipRow:      { gap: Spacing.sm },
+  chipName:     { color: Colors.white, fontSize: FontSize.md, fontWeight: '600' },
+  chipBtns:     { flexDirection: 'row', gap: Spacing.sm },
+  chipBtn:      { flex: 1, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.6)', borderRadius: Radius.md, paddingVertical: Spacing.sm, alignItems: 'center' },
+  chipBtnOk:    { backgroundColor: Colors.success, borderColor: Colors.success },
+  chipBtnWarn:  { backgroundColor: Colors.warning, borderColor: Colors.warning },
+  chipBtnOut:   { backgroundColor: Colors.error, borderColor: Colors.error },
+  chipBtnText:  { color: 'rgba(255,255,255,0.85)', fontWeight: '800', fontSize: FontSize.md },
+  chipBtnTextOn:{ color: Colors.white },
+  stepper:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.lg },
+  stepBtn:      { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center' },
+  stepBtnText:  { color: Colors.white, fontSize: FontSize.xl, fontWeight: '900' },
+  stepQty:      { color: Colors.white, fontSize: FontSize.xl, fontWeight: '900', minWidth: 32, textAlign: 'center' },
 
   // Reject reason sheet
   reasonOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },

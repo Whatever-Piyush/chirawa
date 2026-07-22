@@ -1,5 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
+import { beliefBand, effectiveQty as beliefEffectiveQty } from '../inventory/belief';
+import { getInventoryConfig } from '../inventory/inventory.config';
 
 // ─── Aggregated "one store" feed (Catalog Engine Phase 4) ─────────────────────
 // Groups active, in-stock Product rows by masterId across active shops → ONE tile
@@ -26,6 +28,10 @@ export interface AggTile {
   unit: string | null;
   brand: string | null;
   shopCount: number;        // how many shops carry it (identity hidden, count surfaced)
+  // Inventory Engine: max promisable units across carrying shops. null = at
+  // least one carrying shop is untracked (no numeric cap). The customer app
+  // shows "सिर्फ N बचे" from this and clamps the qty stepper.
+  capQty: number | null;
 }
 
 // Minimal product shape the grouping needs (matches the Prisma select below).
@@ -37,6 +43,9 @@ export interface AggInputProduct {
   unit: string | null;
   images: { url: string }[];
   master: { id: string; status: string; name: string; imageUrl: string | null; mrpPaise: number | null; unit: string | null; brand: string | null } | null;
+  // Read-time promisable qty for TRACKED products (computed in build());
+  // null/undefined = untracked (unlimited as far as the tile cap goes).
+  effectiveQty?: number | null;
 }
 
 /**
@@ -54,10 +63,14 @@ export function aggregateTiles(products: AggInputProduct[]): AggTile[] {
 
   for (const p of ordered) {
     const m = p.master && p.master.status === 'approved' ? p.master : null;
+    const cap = p.effectiveQty === undefined ? null : p.effectiveQty;
     if (m) {
       const existing = byMaster.get(m.id);
       if (existing) {
         existing.shopCount += 1; // price stays the min (we're iterating cheapest-first)
+        // Any untracked carrier lifts the cap; otherwise the max wins (the
+        // resolver can route to whichever shop can cover the qty).
+        existing.capQty = existing.capQty == null || cap == null ? null : Math.max(existing.capQty, cap);
       } else {
         byMaster.set(m.id, {
           masterId: m.id,
@@ -69,6 +82,7 @@ export function aggregateTiles(products: AggInputProduct[]): AggTile[] {
           unit: m.unit ?? p.unit,
           brand: m.brand,
           shopCount: 1,
+          capQty: cap,
         });
       }
     } else {
@@ -82,6 +96,7 @@ export function aggregateTiles(products: AggInputProduct[]): AggTile[] {
         unit: p.unit,
         brand: null,
         shopCount: 1,
+        capQty: cap,
       });
     }
   }
@@ -171,9 +186,41 @@ export function createAggregationService(prisma: PrismaClient, redis: Redis, dep
         id: true, name: true, price: true, mrpPaise: true, unit: true,
         images: { orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true } },
         master: { select: { id: true, status: true, name: true, imageUrl: true, mrpPaise: true, unit: true, brand: true } },
+        inventoryState: {
+          select: {
+            expectedQty: true, reservedQty: true, velocityClass: true,
+            confidenceBase: true, lastVerifiedAt: true,
+          },
+        },
       },
     });
-    return aggregateTiles(products as AggInputProduct[]);
+
+    // Inventory Engine read-time gate: `stockStatus` is projected only at event
+    // time, so decay between events is applied HERE. A tracked product whose
+    // belief has slid into the hidden band (or is fully reserved) leaves the
+    // feed; the survivors carry their promisable qty for the tile cap. Binary
+    // products pass through untouched — stockStatus already filtered them.
+    const cfg = await getInventoryConfig(prisma);
+    const now = new Date();
+    const input: AggInputProduct[] = [];
+    for (const p of products) {
+      const s = (p as { inventoryState?: {
+        expectedQty: number | null; reservedQty: number; velocityClass: number | null;
+        confidenceBase: unknown; lastVerifiedAt: Date | null;
+      } | null }).inventoryState;
+      if (s && s.expectedQty != null) {
+        const belief = {
+          expectedQty: s.expectedQty, reservedQty: s.reservedQty,
+          velocityClass: s.velocityClass, confidenceBase: Number(s.confidenceBase),
+          lastVerifiedAt: s.lastVerifiedAt,
+        };
+        if (beliefBand(belief, cfg, now) === 'hidden') continue;
+        input.push({ ...(p as unknown as AggInputProduct), effectiveQty: beliefEffectiveQty(belief, cfg, now) });
+      } else {
+        input.push(p as unknown as AggInputProduct);
+      }
+    }
+    return aggregateTiles(input);
   }
 
   async function getFeed(): Promise<AggTile[]> {

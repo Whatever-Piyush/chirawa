@@ -38,6 +38,11 @@ function makePrisma(order: Record<string, unknown>, lineClaimCount = 1) {
     batch:              { update: vi.fn(async () => ({})) },
     promoRedemption:    { create: vi.fn(async () => ({})) },
     promoCode:          { update: vi.fn(async () => ({})) },
+    // Inventory Engine (rider-miss belief update + reservation release)
+    $queryRaw:          vi.fn(async () => []),
+    inventoryState:     { findUnique: vi.fn(async () => null), upsert: vi.fn(async () => ({})) },
+    inventoryEvent:     { createMany: vi.fn(async () => ({ count: 1 })) },
+    product:            { findUnique: vi.fn(async () => ({ stockStatus: 'available' })), update: vi.fn(async () => ({})) },
   };
   const prisma = {
     riderProfile:       { findUnique: vi.fn(async () => ({ id: 'rp1' })) },
@@ -64,7 +69,7 @@ describe('riderReportItemUnavailable (Phase 5 stale-stock safety net)', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('multi-line PREPAID: refunds only the line, keeps the order, suggests a sub', async () => {
-    const { prisma } = makePrisma({
+    const { prisma, tx } = makePrisma({
       id: 'o1', status: 'preparing', shopId: 's1', customerId: 'c1', riderId: null,
       batchId: null, paymentMethod: 'upi', items: [mkLine(), mkLine({ id: 'item2', productId: 'prod2' })],
     });
@@ -74,9 +79,14 @@ describe('riderReportItemUnavailable (Phase 5 stale-stock safety net)', () => {
     expect(res.cancelled).toBe(false);
     expect(res.refundedPaise).toBe(2000);
     expect(res.suggestion).toMatchObject({ productId: 'altProd', pricePaise: 1900 });
-    // Flipped the shop product out of stock + refunded exactly the line amount.
-    expect(prisma.product.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'prod1' }, data: { stockStatus: 'out_of_stock' },
+    // Rider miss is a truth-grade belief event: the product is projected out of
+    // stock (via applyInventoryEvent, inside the belief transaction) and the
+    // event row is appended.
+    expect(tx.product.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'prod1' }, data: expect.objectContaining({ stockStatus: 'out_of_stock' }),
+    }));
+    expect(tx.inventoryEvent.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({ eventType: 'rider_reported_missing', orderItemId: 'item1' })],
     }));
     expect(refundOrderLine).toHaveBeenCalledWith(prisma, 'o1', 2000, expect.any(String));
     expect(refundCapturedOrderPayment).not.toHaveBeenCalled();

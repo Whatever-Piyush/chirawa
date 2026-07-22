@@ -240,7 +240,8 @@ export function createRecoveryService(prisma: PrismaClient) {
     return need;
   }
 
-  // exactOptionalPropertyTypes: zod-parsed optionals arrive as `T | undefined`.
+  // `| undefined` on the optional filters keeps zod's .optional() output
+  // assignable under exactOptionalPropertyTypes (the body already guards).
   async function listNeeds(filter: { parentOrderId?: string | undefined; state?: RecoveryNeedState | undefined }) {
     // Build the where clause conditionally — exactOptionalPropertyTypes forbids
     // passing an explicit `undefined` to Prisma's optional filter fields.

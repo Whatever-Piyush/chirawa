@@ -12,6 +12,7 @@ import { emitOrderStatusChanged, emitNewOrderForSeller } from '../../shared/even
 import { serviceLogger } from '../../shared/observability/logger';
 import { onlinePaymentsEnabled } from '../../config/features';
 import { assertTransition, transitionOrderStatus } from '../orders/order-status';
+import { reclaimExpiredReservations } from '../inventory/reservations.service';
 
 const log = serviceLogger('payments');
 
@@ -431,6 +432,19 @@ export async function markOrderPaid(
     return true;
   });
   if (!paid) return;
+
+  // Inventory Engine: a payment that landed AFTER the prepaid hold's TTL finds
+  // its reservations expired — try to take the stock back. Lines whose stock is
+  // gone are NOT blocked; they get verificationFlag='accept_verify_requested'
+  // so the seller confirms them on the accept screen (the normal doubt path).
+  try {
+    const flagged = await reclaimExpiredReservations(prisma as never, orderId);
+    if (flagged.length > 0) {
+      console.warn(`[inventory] order ${orderId}: ${flagged.length} line(s) lost their hold while unpaid — flagged for accept-screen verification`);
+    }
+  } catch (err) {
+    console.error(`[inventory] re-reserve after late payment failed for ${orderId}:`, err);
+  }
 
   // Notify customer
   emitOrderStatusChanged({

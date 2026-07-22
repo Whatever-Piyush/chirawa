@@ -32,6 +32,8 @@ function makePrisma(order: Record<string, unknown>) {
   const tx = {
     order:              { updateMany: vi.fn(async () => ({ count: 1 })) },
     orderStatusHistory: { create: vi.fn(async () => ({})) },
+    // Inventory hook on → cancelled releases held reservations — none held here.
+    $queryRaw:          vi.fn(async () => []),
   };
   const prisma = {
     order: {

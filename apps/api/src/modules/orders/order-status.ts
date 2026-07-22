@@ -1,5 +1,10 @@
 import type { Prisma } from '@prisma/client';
 import { BusinessRuleError } from '../../shared/errors/app-errors';
+import { getInventoryConfig } from '../inventory/inventory.config';
+import {
+  commitReservationsForOrder, releaseReservationsForOrder,
+  type ReservationTx,
+} from '../inventory/reservations.service';
 
 // ── Order state machine (Phase 1.7) ──────────────────────────────────────────
 // Single source of truth for legal status transitions. Keeps illegal jumps
@@ -54,6 +59,15 @@ export interface TransitionActor { role: string; id: string; reason?: string }
  * `true` when the row was flipped, `false` on a lost race. Throws on illegal moves.
  *
  * `extraData` is merged into the order update (e.g. `{ codCollectedPaise }`).
+ *
+ * INVENTORY HOOKS (Inventory Engine): the stock lifecycle rides the status flip,
+ * in the SAME transaction, so no call site can ever forget it —
+ *   → picked_up  : COMMIT the order's held reservations (rider-witnessed shelf
+ *                  departure; expected −= qty). Idempotent claim.
+ *   → cancelled  : RELEASE the order's held reservations (goods never left).
+ *                  Post-pickup cancels no-op — those holds are already committed.
+ * Every cancel path (customer, seller reject, rider line-miss, admin) already
+ * goes through this function, which is exactly why the hooks live here.
  */
 export async function transitionOrderStatus(
   tx: Prisma.TransactionClient,
@@ -76,5 +90,16 @@ export async function transitionOrderStatus(
   await tx.orderStatusHistory.create({
     data: { orderId, status: to, changedByRole: actor.role, changedById: actor.id, reason: actor.reason },
   } as never);
+
+  if (to === 'picked_up' || to === 'cancelled') {
+    const invTx = tx as unknown as ReservationTx;
+    const cfg = await getInventoryConfig(tx as never);
+    const invActor = { role: actor.role, id: actor.id };
+    if (to === 'picked_up') {
+      await commitReservationsForOrder(invTx, orderId, invActor, cfg);
+    } else {
+      await releaseReservationsForOrder(invTx, orderId, invActor, cfg, new Date(), actor.reason ?? null);
+    }
+  }
   return true;
 }

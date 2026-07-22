@@ -320,6 +320,7 @@ model Product {
   cartItems      CartItem[]
   orderItems     OrderItem[]
   stockUpdateLog StockUpdateLog[]
+  inventoryState InventoryState?
 
   @@index([shopId, stockStatus, isActive])
   @@index([categoryId])
@@ -573,6 +574,11 @@ model Order {
   etaComputedAt       DateTime? @map("eta_computed_at")
   etaSource           String?   @map("eta_source") @db.VarChar(20)
 
+  // Checkout-resolver decision snapshot (Inventory Engine) — why each line went
+  // to which shop (candidates, gates, drops). Written on the fee-carrier child
+  // order only; answers "why did we pick Seller A?" from data, not vibes.
+  resolverTrace Json? @map("resolver_trace")
+
   // Customer rating (post-delivery)
   rating        Int?      @map("rating")
   ratingComment String?   @map("rating_comment") @db.VarChar(500)
@@ -635,6 +641,13 @@ model OrderItem {
   // its `refundedPaise` recorded. The rest of the order still proceeds.
   fulfillmentStatus String @default("fulfilled") @map("fulfillment_status") @db.VarChar(20)
   refundedPaise     Int    @default(0) @map("refunded_paise")
+  // Inventory verification lifecycle (Inventory Engine).
+  //   accept_verify_requested — flagged at placement (low confidence / hold lost):
+  //                             the seller accept screen shows a chip for this line
+  //   accept_confirmed        — seller confirmed (explicit chip tap or implicit accept)
+  //   rider_verify_requested  — auto-accepted while flagged: rider should confirm on shelf
+  // NULL = normal line, nothing to verify.
+  verificationFlag String? @map("verification_flag") @db.VarChar(30)
   createdAt   DateTime @default(now()) @map("created_at")
 
   order   Order   @relation(fields: [orderId], references: [id])
@@ -1035,6 +1048,87 @@ model Notification {
 
   @@index([userId, sentAt(sort: Desc)])
   @@map("notifications")
+}
+
+// ─── Inventory Engine (belief layer) ─────────────────────────────────────────
+// One row per Product (1:1, created on product create + backfill). Carries the
+// BELIEF about shelf stock — never displayed raw to customers. expectedQty NULL
+// = binary/untracked item: no counts, no confidence decay, availability is
+// products.stockStatus alone (the pre-engine semantics, preserved on purpose).
+// products.stockStatus stays where it is as the read-side visibility projection;
+// applyInventoryEvent() is the only writer of belief fields (inventory module).
+model InventoryState {
+  productId          String    @id @map("product_id") @db.Uuid
+  // Point estimate of shelf stock as of the last event. NULL = untracked/binary.
+  expectedQty        Int?      @map("expected_qty")
+  // Units held by in-flight online orders. Invariant (nightly reconciler):
+  // == Σ reservations WHERE status='held'. Maintained by the reservation CAS.
+  reservedQty        Int       @default(0) @map("reserved_qty")
+  // NULL = binary item (no decay). 0=dead 1=slow 2=medium 3=fast 4=ultra.
+  // Only count-tracked items get a class; τ/velocity defaults come from AppConfig.
+  velocityClass      Int?      @map("velocity_class")
+  // Set at the last event (per the event-effect table); DECAYED AT READ TIME —
+  // never by a cron. confidence(t) = base × exp(−hours_since_verify / τ[class]).
+  confidenceBase     Decimal   @default(0.800) @map("confidence_base") @db.Decimal(4, 3)
+  lastVerifiedAt     DateTime? @map("last_verified_at")
+  // seller_count | seller_bucket | seller_toggle | rider_pickup | rider_miss | backfill | admin
+  lastVerifiedSource String?   @map("last_verified_source") @db.VarChar(30)
+  lastVerifiedQty    Int?      @map("last_verified_qty")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("inventory_state")
+}
+
+// APPEND-ONLY event spine — never UPDATE/DELETE. Every belief mutation writes one
+// row here in the same transaction (applyInventoryEvent), snapshotting the state
+// after the event so any product's history replays without delta reconstruction.
+model InventoryEvent {
+  id              String   @id @default(uuid()) @db.Uuid
+  productId       String   @map("product_id") @db.Uuid
+  shopId          String   @map("shop_id") @db.Uuid // denormalized for per-seller queries
+  // seller_count | seller_bucket | seller_toggle_out | seller_toggle_in
+  // | order_reserved | reservation_released | reservation_expired
+  // | pickup_committed | rider_reported_missing | anomaly_negative_floor
+  // | admin_adjust | backfill
+  eventType       String   @map("event_type") @db.VarChar(30)
+  qtyDelta        Int?     @map("qty_delta") // signed; null for pure-status events
+  qtyAfter        Int?     @map("qty_after") // expected_qty after applying (belief snapshot)
+  reservedAfter   Int?     @map("reserved_after")
+  confidenceAfter Decimal? @map("confidence_after") @db.Decimal(4, 3)
+  actorType       String   @map("actor_type") @db.VarChar(20) // seller | rider | customer | system | admin
+  actorId         String?  @map("actor_id") @db.Uuid // User.id — NOT a profile id
+  orderId         String?  @map("order_id") @db.Uuid
+  orderItemId     String?  @map("order_item_id") @db.Uuid
+  reason          String?  @db.VarChar(255)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([orderItemId, eventType]) // idempotency: retry-safe per line per type
+  @@index([productId, createdAt(sort: Desc)])
+  @@index([shopId, createdAt(sort: Desc)])
+  @@index([eventType, createdAt])
+  @@map("inventory_events")
+}
+
+// A hold on stock for one order line. held → committed (rider pickup) |
+// released (cancel/reject/line-unavailable) | expired (prepaid TTL sweeper).
+// orderItemId is UNIQUE: a retried placement/worker job cannot double-reserve.
+model Reservation {
+  id          String    @id @default(uuid()) @db.Uuid
+  orderId     String    @map("order_id") @db.Uuid
+  orderItemId String    @unique @map("order_item_id") @db.Uuid
+  productId   String    @map("product_id") @db.Uuid
+  qty         Int
+  status      String    @default("held") @db.VarChar(12) // held | committed | released | expired
+  expiresAt   DateTime? @map("expires_at") // set for pending_payment orders only
+  createdAt   DateTime  @default(now()) @map("created_at")
+  resolvedAt  DateTime? @map("resolved_at")
+
+  @@index([orderId])
+  @@index([productId, status]) // fast Σ held per product (reconciler)
+  @@index([status, expiresAt]) // expiry sweeper
+  @@map("reservations")
 }
 
 model StockUpdateLog {

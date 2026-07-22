@@ -27,6 +27,8 @@ function makeService(order: unknown, flipCount = 1) {
   const prisma = {
     order: { findUniqueOrThrow: vi.fn().mockResolvedValue(order), updateMany: orderUpdateMany },
     orderStatusHistory: { create: historyCreate },
+    // Inventory hooks (picked_up/cancelled) claim reservations — none held here.
+    $queryRaw: vi.fn(async () => []),
     $transaction: vi.fn(),
   };
   prisma.$transaction.mockImplementation((fn: (tx: typeof prisma) => unknown) => fn(prisma));

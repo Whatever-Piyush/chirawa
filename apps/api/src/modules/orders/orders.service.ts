@@ -21,6 +21,14 @@ import {
   emitOrderCancelledForSeller,
   emitOrderItemUnavailable,
 } from '../../shared/events/event-bus';
+import { getInventoryConfig } from '../inventory/inventory.config';
+import { confidence, type BeliefState } from '../inventory/belief';
+import { applyInventoryEvent } from '../inventory/apply-event';
+import {
+  reserveOrderLines, releaseReservationForOrderItem, shrinkReservationForOrderItem,
+  ReservationConflictError,
+  type ReserveLineInput, type ReservationTx,
+} from '../inventory/reservations.service';
 
 const log = serviceLogger('orders');
 
@@ -34,53 +42,10 @@ interface CartData {
   }>;
 }
 
-// Minimal slice of the Prisma (transaction) client this helper needs — lets it
-// be unit-tested with a fake tx.
-interface StockTx {
-  product: {
-    updateMany: (args: unknown) => Promise<{ count: number }>;
-    findUnique: (args: unknown) => Promise<{ stockQty: number | null; name: string } | null>;
-  };
-}
-
-/**
- * Oversell protection (Phase 1.5). For each line, atomically decrement the
- * product's numeric stock IF it opted in (stockQty != null). The conditional
- * `gte` never matches a null (untracked) row, so `count === 0` means either the
- * product is untracked (allowed — skip) or there isn't enough stock (reject the
- * whole order via BusinessRuleError). On hitting zero, flip to out_of_stock.
- * Must be called inside the checkout $transaction so a reject rolls everything back.
- */
-export async function decrementStockOrThrow(
-  // Accepts the real transaction client OR the minimal test fake. The union +
-  // internal cast is needed because Prisma's concrete method signatures aren't
-  // structurally assignable to the `(args: unknown)` slices under strict
-  // variance — behaviour is identical.
-  txClient: StockTx | Prisma.TransactionClient,
-  items: Array<{ productId: string; quantity: number }>,
-): Promise<void> {
-  const tx = txClient as StockTx;
-  for (const item of items) {
-    const dec = await tx.product.updateMany({
-      where: { id: item.productId, stockQty: { gte: item.quantity } },
-      data:  { stockQty: { decrement: item.quantity } },
-    });
-    if (dec.count === 0) {
-      const prod = await tx.product.findUnique({
-        where: { id: item.productId }, select: { stockQty: true, name: true },
-      });
-      if (prod?.stockQty != null) {
-        throw new BusinessRuleError(`${prod.name}: sirf ${prod.stockQty} stock bacha hai`);
-      }
-      // untracked product → nothing to decrement, continue
-    } else {
-      await tx.product.updateMany({
-        where: { id: item.productId, stockQty: 0 },
-        data:  { stockStatus: 'out_of_stock' },
-      });
-    }
-  }
-}
+// Placement attempts: a reservation-CAS loss re-runs the resolver with the
+// losing product excluded (another shop may cover the line); after this many
+// attempts the checkout gives up honestly.
+const MAX_PLACEMENT_ATTEMPTS = 3;
 
 // ── Order state machine (Phase 1.7) ──────────────────────────────────────────
 // The state machine + the single transition enforcement point now live in
@@ -173,167 +138,245 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     if (!address || address.isDeleted) throw new NotFoundError('Address');
     if (address.userId !== userId) throw new ForbiddenError('Not your address');
 
-    // ── Phase 5: resolve aggregated (fungible) lines → concrete shops ──────────
-    // An "aggregated" line (its master is approved — the Phase 4 feed gate) may be
-    // fulfilled by ANY shop carrying that master, so we re-route it now to the
-    // fewest in-stock shops (then nearest), re-validating stock + price. Pinned
-    // lines (Specials / passthrough / legacy carts) keep their shop untouched. A
-    // line nobody has in stock anymore is dropped (surfaced as "just sold out").
     const deliveryPoint = { lat: Number(address.lat), lng: Number(address.lng) };
-    const aggLines: AggLine[] = [];
-    cart.items.forEach((i, idx) => {
-      if (i.aggregated && i.masterId) {
-        aggLines.push({ key: String(idx), masterId: i.masterId, quantity: i.quantity, displayedUnitPrice: i.unitPrice });
-      }
-    });
-    const { assignments, dropped } = aggLines.length
-      ? await resolver.resolveCart(aggLines, deliveryPoint)
-      : { assignments: new Map<string, { shopId: string; productId: string; unitPrice: number }>(), dropped: [] as string[] };
-
-    const droppedLines: Array<{ productId: string; productName: string }> = [];
-    const lineItems: CartData['items'] = [];
-    cart.items.forEach((i, idx) => {
-      if (i.aggregated && i.masterId) {
-        const a = assignments.get(String(idx));
-        if (!a) { droppedLines.push({ productId: i.productId, productName: i.productName }); return; }
-        lineItems.push({ ...i, shopId: a.shopId, productId: a.productId, unitPrice: a.unitPrice, subtotal: a.unitPrice * i.quantity });
-      } else {
-        lineItems.push(i);
-      }
-    });
-    if (lineItems.length === 0) {
-      throw new BusinessRuleError('Aapke cart ke saare items abhi stock mein nahi hain');
-    }
-    const orderSubtotal = lineItems.reduce((s, i) => s + i.subtotal, 0);
-
-    // ── Group resolved items by shop — each shop becomes its own child order ───
-    const shopIds = [...new Set(lineItems.map((i) => i.shopId ?? cart.shopId).filter(Boolean))];
-    if (shopIds.length === 0) throw new BusinessRuleError('Cart mein dukaan nahi mili');
-
     const ruleVersion = await getActiveFeeRuleVersion(prisma);
+    const invCfg = await getInventoryConfig(prisma);
+
+    const isCod      = input.paymentMethod === 'cod';
+    const initStatus = isCod ? 'confirmed' : 'pending_payment';
+    // Prepaid holds expire if the payment never lands (expiry sweeper); COD is
+    // confirmed at placement, so its hold lives until pickup/cancel/reject.
+    const holdExpiresAt = isCod ? null : new Date(Date.now() + invCfg.reservationTtlMin * 60_000);
 
     interface ShopPlan {
       shopId: string; shopName: string; sellerUserId: string | null;
       items: CartData['items']; subtotal: number; isFeatured: boolean;
     }
-    const plans: ShopPlan[] = [];
-    for (const sid of shopIds) {
-      const shop = await prisma.shop.findUnique({
-        where:  { id: sid },
-        select: { isActive: true, isOpen: true, name: true, sellerId: true, isFeatured: true },
-      });
-      // Direct/pinned (Chirawa Special) lines bypass the aggregation resolver —
-      // which is the only place isOpen is enforced for aggregated items — so a
-      // paused shop (isOpen=false) must be rejected HERE too, else a pinned order
-      // to a closed shop slips through.
-      if (!shop || !shop.isActive || !shop.isOpen) throw new BusinessRuleError('Yeh dukaan abhi available nahi hai');
-
-      const shopItems = lineItems.filter((i) => (i.shopId ?? cart.shopId) === sid);
-      const subtotal  = shopItems.reduce((s, i) => s + i.subtotal, 0);
-      const seller = await prisma.sellerProfile.findUnique({ where: { id: shop.sellerId }, select: { userId: true } });
-
-      plans.push({
-        shopId: sid, shopName: shop.name, sellerUserId: seller?.userId ?? null,
-        items: shopItems, subtotal, isFeatured: shop.isFeatured,
-      });
+    interface CreatedOrder { orderId: string; shopId: string; shopName: string; total: number; sellerUserId: string | null }
+    interface Placement {
+      created: CreatedOrder[]; groupId: string | null; plans: ShopPlan[];
+      feeCarrierIdx: number; droppedLines: Array<{ productId: string; productName: string }>;
     }
 
-    // Flat pricing (Chirawa): one combined fee for the whole cart — no distance.
-    // ₹25 if cart < ₹100, else ₹15 if any shop is Chirawa Special, else ₹10.
-    // The single fee is carried by one order (a Special shop if present, else the
-    // first); the other shops' orders pay 0.
-    const hasSpecialShop = plans.some((p) => p.isFeatured);
-    const combinedFee    = calculateDeliveryFee({
-      cartSubtotalPaise: orderSubtotal,
-      hasSpecialShop,
-      ruleVersion,
-    }).feePaise;
-    const specialIdx     = plans.findIndex((p) => p.isFeatured);
-    const feeCarrierIdx  = specialIdx >= 0 ? specialIdx : 0;
+    // ── Placement loop (Inventory Engine) ──────────────────────────────────────
+    // Each attempt re-routes aggregated lines against LIVE stock — an "aggregated"
+    // line (approved master) may be fulfilled by ANY shop carrying that master;
+    // pinned lines (Specials / passthrough / legacy carts) keep their shop — then
+    // prices the cart and creates the orders + RESERVES every line in ONE
+    // transaction. Losing a reservation race (concurrent checkout took the last
+    // units) rolls the whole transaction back and retries with that product
+    // excluded, so totals/fees/promos are always recomputed from scratch, never
+    // patched mid-transaction. A line nobody can cover is dropped ("just sold out").
+    const excludedProductIds = new Set<string>();
+    let placement: Placement | null = null;
 
-    // Promo (Phase 5): applied at the GROUP subtotal so a unified aggregated cart
-    // gets one discount across all its child shops — not per shop. A code typed by
-    // the customer is validated; if none is given, first-time customers get
-    // FIRSTORDER (free delivery) auto-applied. Discount lands on the fee-carrier
-    // order below (same order that carries the single delivery fee), so the group
-    // total nets out correctly.
-    let discountPaise = 0;
-    let promoCodeId: string | null = null;
-    {
-      let applied: ValidatedPromo | null = null;
-      if (input.promoCode) {
-        applied = await validatePromo(prisma, {
-          code:              input.promoCode,
-          userId,
-          cartSubtotalPaise: orderSubtotal,
-          deliveryFeePaise:  combinedFee,
-        });
-      } else {
-        applied = await resolveAutoPromo(prisma, {
-          userId,
-          cartSubtotalPaise: orderSubtotal,
-          deliveryFeePaise:  combinedFee,
-        });
-      }
-      if (applied) {
-        discountPaise = applied.discountPaise;
-        promoCodeId   = applied.promoId;
-      }
-    }
-
-    const isCod      = input.paymentMethod === 'cod';
-    const initStatus = isCod ? 'confirmed' : 'pending_payment';
-
-    const { created, groupId } = await prisma.$transaction(async (tx) => {
-      // Phase 5: a multi-shop cart becomes ONE customer-facing OrderGroup over N
-      // per-shop child orders. Single-shop carts stay ungrouped (legacy behavior).
-      const grp = plans.length > 1
-        ? await tx.orderGroup.create({ data: { customerId: userId } })
+    for (let attempt = 1; attempt <= MAX_PLACEMENT_ATTEMPTS && !placement; attempt++) {
+      const aggLines: AggLine[] = [];
+      cart.items.forEach((i, idx) => {
+        if (i.aggregated && i.masterId) {
+          aggLines.push({ key: String(idx), masterId: i.masterId, quantity: i.quantity, displayedUnitPrice: i.unitPrice });
+        }
+      });
+      const { assignments, trace } = aggLines.length
+        ? await resolver.resolveCart(aggLines, deliveryPoint, { excludeProductIds: [...excludedProductIds] })
+        : { assignments: new Map<string, { shopId: string; productId: string; unitPrice: number }>(), trace: null };
+      const resolverTrace = trace
+        ? { attempt, excludedProductIds: [...excludedProductIds], ...trace }
         : null;
-      const out: Array<{ orderId: string; shopId: string; shopName: string; total: number; sellerUserId: string | null }> = [];
-      for (let idx = 0; idx < plans.length; idx++) {
-        const p        = plans[idx]!;
-        const fee      = idx === feeCarrierIdx ? combinedFee : 0;
-        const discount = idx === feeCarrierIdx ? discountPaise : 0;
-        const total    = p.subtotal + fee - discount;
 
-        const newOrder = await tx.order.create({
-          data: {
-            customerId: userId, shopId: p.shopId,
-            deliveryStreet: address.street, deliveryLandmark: address.landmark,
-            deliveryLocality: address.locality, deliveryCity: address.city,
-            deliveryPincode: address.pincode, deliveryLat: address.lat, deliveryLng: address.lng,
-            cartSubtotalAtPricing: p.subtotal, deliveryFee: fee,
-            discount, totalAmount: total,
-            feeRuleVersion: ruleVersion, distanceKm: 0, distanceSource: 'flat',
-            paymentMethod: input.paymentMethod, status: initStatus,
-            addressId: address.id, promoCodeId: idx === feeCarrierIdx ? promoCodeId : null,
-            ...(grp ? { groupId: grp.id } : {}),
-            ...(isCod ? { confirmedAt: new Date() } : {}),
-          },
-        });
-        await tx.orderItem.createMany({
-          data: p.items.map((item) => ({
-            orderId: newOrder.id, productId: item.productId,
-            productName: item.productName, unitPrice: item.unitPrice,
-            quantity: item.quantity, subtotal: item.subtotal,
-          })),
-        });
-
-        // Oversell protection (Phase 1.5) for products that opted into numeric stock.
-        await decrementStockOrThrow(tx, p.items);
-
-        await tx.orderStatusHistory.create({
-          data: { orderId: newOrder.id, status: initStatus, changedByRole: 'customer', changedById: userId },
-        });
-        out.push({ orderId: newOrder.id, shopId: p.shopId, shopName: p.shopName, total, sellerUserId: p.sellerUserId });
+      const droppedLines: Array<{ productId: string; productName: string }> = [];
+      const lineItems: CartData['items'] = [];
+      cart.items.forEach((i, idx) => {
+        if (i.aggregated && i.masterId) {
+          const a = assignments.get(String(idx));
+          if (!a) { droppedLines.push({ productId: i.productId, productName: i.productName }); return; }
+          lineItems.push({ ...i, shopId: a.shopId, productId: a.productId, unitPrice: a.unitPrice, subtotal: a.unitPrice * i.quantity });
+        } else if (excludedProductIds.has(i.productId)) {
+          // A pinned line cannot re-route — losing its stock race drops it.
+          droppedLines.push({ productId: i.productId, productName: i.productName });
+        } else {
+          lineItems.push(i);
+        }
+      });
+      if (lineItems.length === 0) {
+        throw new BusinessRuleError('Aapke cart ke saare items abhi stock mein nahi hain');
       }
-      if (promoCodeId) {
-        await tx.promoRedemption.create({ data: { promoCodeId, userId, orderId: out[feeCarrierIdx]!.orderId, discount: discountPaise } });
-        await tx.promoCode.update({ where: { id: promoCodeId }, data: { currentUses: { increment: 1 } } });
+      const orderSubtotal = lineItems.reduce((s, i) => s + i.subtotal, 0);
+
+      // ── Group resolved items by shop — each shop becomes its own child order ─
+      const shopIds = [...new Set(lineItems.map((i) => i.shopId ?? cart.shopId).filter(Boolean))];
+      if (shopIds.length === 0) throw new BusinessRuleError('Cart mein dukaan nahi mili');
+
+      const plans: ShopPlan[] = [];
+      for (const sid of shopIds) {
+        const shop = await prisma.shop.findUnique({
+          where:  { id: sid },
+          select: { isActive: true, isOpen: true, name: true, sellerId: true, isFeatured: true },
+        });
+        // Direct/pinned (Chirawa Special) lines bypass the aggregation resolver —
+        // which is the only place isOpen is enforced for aggregated items — so a
+        // paused shop (isOpen=false) must be rejected HERE too, else a pinned order
+        // to a closed shop slips through.
+        if (!shop || !shop.isActive || !shop.isOpen) throw new BusinessRuleError('Yeh dukaan abhi available nahi hai');
+
+        const shopItems = lineItems.filter((i) => (i.shopId ?? cart.shopId) === sid);
+        const subtotal  = shopItems.reduce((s, i) => s + i.subtotal, 0);
+        const seller = await prisma.sellerProfile.findUnique({ where: { id: shop.sellerId }, select: { userId: true } });
+
+        plans.push({
+          shopId: sid, shopName: shop.name, sellerUserId: seller?.userId ?? null,
+          items: shopItems, subtotal, isFeatured: shop.isFeatured,
+        });
       }
-      return { created: out, groupId: grp?.id ?? null };
-    });
+
+      // Flat pricing (Chirawa): one combined fee for the whole cart — no distance.
+      // ₹25 if cart < ₹100, else ₹15 if any shop is Chirawa Special, else ₹10.
+      // The single fee is carried by one order (a Special shop if present, else the
+      // first); the other shops' orders pay 0.
+      const hasSpecialShop = plans.some((p) => p.isFeatured);
+      const combinedFee    = calculateDeliveryFee({
+        cartSubtotalPaise: orderSubtotal,
+        hasSpecialShop,
+        ruleVersion,
+      }).feePaise;
+      const specialIdx     = plans.findIndex((p) => p.isFeatured);
+      const feeCarrierIdx  = specialIdx >= 0 ? specialIdx : 0;
+
+      // Promo (Phase 5): applied at the GROUP subtotal so a unified aggregated cart
+      // gets one discount across all its child shops — not per shop. A code typed by
+      // the customer is validated; if none is given, first-time customers get
+      // FIRSTORDER (free delivery) auto-applied. Discount lands on the fee-carrier
+      // order below (same order that carries the single delivery fee), so the group
+      // total nets out correctly.
+      let discountPaise = 0;
+      let promoCodeId: string | null = null;
+      {
+        let applied: ValidatedPromo | null = null;
+        if (input.promoCode) {
+          applied = await validatePromo(prisma, {
+            code:              input.promoCode,
+            userId,
+            cartSubtotalPaise: orderSubtotal,
+            deliveryFeePaise:  combinedFee,
+          });
+        } else {
+          applied = await resolveAutoPromo(prisma, {
+            userId,
+            cartSubtotalPaise: orderSubtotal,
+            deliveryFeePaise:  combinedFee,
+          });
+        }
+        if (applied) {
+          discountPaise = applied.discountPaise;
+          promoCodeId   = applied.promoId;
+        }
+      }
+
+      try {
+        const { created, groupId } = await prisma.$transaction(async (tx) => {
+          // Phase 5: a multi-shop cart becomes ONE customer-facing OrderGroup over N
+          // per-shop child orders. Single-shop carts stay ungrouped (legacy behavior).
+          const grp = plans.length > 1
+            ? await tx.orderGroup.create({ data: { customerId: userId } })
+            : null;
+          const out: CreatedOrder[] = [];
+          const reserveLines: ReserveLineInput[] = [];
+          for (let idx = 0; idx < plans.length; idx++) {
+            const p        = plans[idx]!;
+            const fee      = idx === feeCarrierIdx ? combinedFee : 0;
+            const discount = idx === feeCarrierIdx ? discountPaise : 0;
+            const total    = p.subtotal + fee - discount;
+
+            const newOrder = await tx.order.create({
+              data: {
+                customerId: userId, shopId: p.shopId,
+                deliveryStreet: address.street, deliveryLandmark: address.landmark,
+                deliveryLocality: address.locality, deliveryCity: address.city,
+                deliveryPincode: address.pincode, deliveryLat: address.lat, deliveryLng: address.lng,
+                cartSubtotalAtPricing: p.subtotal, deliveryFee: fee,
+                discount, totalAmount: total,
+                feeRuleVersion: ruleVersion, distanceKm: 0, distanceSource: 'flat',
+                paymentMethod: input.paymentMethod, status: initStatus,
+                addressId: address.id, promoCodeId: idx === feeCarrierIdx ? promoCodeId : null,
+                ...(grp ? { groupId: grp.id } : {}),
+                ...(isCod ? { confirmedAt: new Date() } : {}),
+                // Resolver decision snapshot on the fee-carrier child only.
+                ...(idx === feeCarrierIdx && resolverTrace ? { resolverTrace } : {}),
+              },
+            });
+            // Items are created one by one (not createMany) because each line's
+            // id becomes its reservation's idempotency key.
+            for (const item of p.items) {
+              const line = await tx.orderItem.create({
+                data: {
+                  orderId: newOrder.id, productId: item.productId,
+                  productName: item.productName, unitPrice: item.unitPrice,
+                  quantity: item.quantity, subtotal: item.subtotal,
+                },
+              });
+              reserveLines.push({
+                productId: item.productId, shopId: p.shopId,
+                orderId: newOrder.id, orderItemId: line.id, qty: item.quantity,
+              });
+            }
+
+            await tx.orderStatusHistory.create({
+              data: { orderId: newOrder.id, status: initStatus, changedByRole: 'customer', changedById: userId },
+            });
+            out.push({ orderId: newOrder.id, shopId: p.shopId, shopName: p.shopName, total, sellerUserId: p.sellerUserId });
+          }
+
+          // RESERVE every line, globally sorted by productId (deadlock rule).
+          // Oversell protection: the CAS inside loses cleanly to a concurrent
+          // checkout and throws ReservationConflictError → the tx rolls back.
+          await reserveOrderLines(
+            tx as unknown as ReservationTx, reserveLines,
+            { role: 'customer', id: userId }, holdExpiresAt,
+          );
+
+          // Chip flags: stamp low-confidence tracked lines so the seller accept
+          // screen can ask "है?" exactly where the belief is doubtful.
+          const states = await tx.inventoryState.findMany({
+            where: { productId: { in: reserveLines.map((l) => l.productId) }, expectedQty: { not: null } },
+          });
+          const now = new Date();
+          const lowConfidence = new Set(
+            states
+              .filter((s) => confidence({
+                expectedQty: s.expectedQty, reservedQty: s.reservedQty,
+                velocityClass: s.velocityClass, confidenceBase: Number(s.confidenceBase),
+                lastVerifiedAt: s.lastVerifiedAt,
+              }, invCfg, now) < invCfg.thetaFlag)
+              .map((s) => s.productId),
+          );
+          const flagItemIds = reserveLines.filter((l) => lowConfidence.has(l.productId)).map((l) => l.orderItemId);
+          if (flagItemIds.length > 0) {
+            await tx.orderItem.updateMany({
+              where: { id: { in: flagItemIds } },
+              data:  { verificationFlag: 'accept_verify_requested' },
+            });
+          }
+
+          if (promoCodeId) {
+            await tx.promoRedemption.create({ data: { promoCodeId, userId, orderId: out[feeCarrierIdx]!.orderId, discount: discountPaise } });
+            await tx.promoCode.update({ where: { id: promoCodeId }, data: { currentUses: { increment: 1 } } });
+          }
+          return { created: out, groupId: grp?.id ?? null };
+        });
+        placement = { created, groupId, plans, feeCarrierIdx, droppedLines };
+      } catch (err) {
+        if (err instanceof ReservationConflictError) {
+          excludedProductIds.add(err.productId);
+          if (attempt === MAX_PLACEMENT_ATTEMPTS) {
+            throw new BusinessRuleError('Stock abhi-abhi badla hai — cart dobara check karein');
+          }
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!placement) throw new BusinessRuleError('Order place nahi ho paya — dobara koshish karein');
+    const { created, groupId, plans, feeCarrierIdx, droppedLines } = placement;
 
     await redis.del(`cart:${userId}`);
     await prisma.cart.deleteMany({ where: { userId } });
@@ -475,7 +518,16 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       orderBy: { createdAt: 'desc' },
       skip:    (page - 1) * limit,
       take:    limit,
-      include: { items: { select: { productId: true, productName: true, quantity: true, unitPrice: true } } },
+      // id + verificationFlag + fulfillmentStatus feed the seller accept-screen
+      // chips (Inventory Engine S2); additive for the other roles.
+      include: {
+        items: {
+          select: {
+            id: true, productId: true, productName: true, quantity: true,
+            unitPrice: true, verificationFlag: true, fulfillmentStatus: true,
+          },
+        },
+      },
     });
   }
 
@@ -548,21 +600,173 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
 
   // ── Seller-specific actions ──────────────────────────────────────────────
 
-  async function sellerAcceptOrder(orderId: string, sellerUserId: string) {
+  // Cheapest OTHER in-stock shop carrying the same master — offered to the
+  // customer as a one-tap substitute when a line shrinks or drops.
+  async function findSubstitute(productId: string) {
+    const prod = await prisma.product.findUnique({ where: { id: productId }, select: { masterId: true } });
+    if (!prod?.masterId) return undefined;
+    const alt = await prisma.product.findFirst({
+      where: {
+        masterId: prod.masterId, isActive: true, stockStatus: 'available',
+        shop: { isActive: true, isOpen: true }, id: { not: productId },
+      },
+      orderBy: { price: 'asc' },
+      select: { id: true, name: true, price: true },
+    });
+    return alt ? { productId: alt.id, name: alt.name, pricePaise: alt.price } : undefined;
+  }
+
+  // Accept-screen chip "नहीं" (Inventory Engine S2): the seller looked at the
+  // shelf and the item isn't there. Claim the line exactly once, release its
+  // hold, record the truth (seller_toggle_out: expected:=0, trust it fully),
+  // refund the line (prepaid) / shrink the cash due (COD), tell the customer.
+  async function sellerMarkLineUnavailable(
+    order: { id: string; shopId: string; customerId: string; paymentMethod: string },
+    line: { id: string; productId: string; productName: string; subtotal: number },
+    sellerUserId: string,
+  ) {
+    const claim = await prisma.orderItem.updateMany({
+      where: { id: line.id, fulfillmentStatus: 'fulfilled' },
+      data:  { fulfillmentStatus: 'unavailable_refunded', refundedPaise: line.subtotal, verificationFlag: 'accept_confirmed' },
+    });
+    if (claim.count === 0) return; // replay / double tap — already handled
+
+    const invCfg = await getInventoryConfig(prisma);
+    await prisma.$transaction(async (tx) => {
+      await releaseReservationForOrderItem(
+        tx as unknown as ReservationTx, line.id,
+        { role: 'seller', id: sellerUserId }, invCfg, new Date(), 'seller chip: नहीं',
+      );
+      await applyInventoryEvent(tx as never, {
+        productId: line.productId, shopId: order.shopId,
+        eventType: 'seller_toggle_out',
+        actorType: 'seller', actorId: sellerUserId,
+        orderId: order.id, orderItemId: line.id,
+        reason: 'accept chip: नहीं है',
+      }, invCfg);
+    });
+    await createCatalogService(prisma, redis).invalidateShopCache(order.shopId);
+
+    const suggestion = await findSubstitute(line.productId);
+    const refundedPaise = order.paymentMethod === 'cod'
+      ? null
+      : await refundOrderLine(prisma, order.id, line.subtotal, `Seller: ${line.productName} unavailable`);
+    await prisma.order.update({
+      where: { id: order.id },
+      data:  { cartSubtotalAtPricing: { decrement: line.subtotal }, totalAmount: { decrement: line.subtotal } },
+    });
+    emitOrderItemUnavailable({
+      customerId: order.customerId, orderId: order.id, productName: line.productName,
+      refundedPaise: refundedPaise ?? line.subtotal, cancelled: false, ...(suggestion ? { suggestion } : {}),
+    });
+  }
+
+  // Accept-screen chip "सिर्फ n" (Inventory Engine S2): partial availability.
+  // The line shrinks to n units — reservation, quantity, money, and belief all
+  // move together; the residual refunds through the existing line-refund rail.
+  async function sellerCapLineQty(
+    order: { id: string; shopId: string; customerId: string; paymentMethod: string },
+    line: { id: string; productId: string; productName: string; unitPrice: number; quantity: number },
+    availableQty: number,
+    sellerUserId: string,
+  ) {
+    const diffPaise = line.unitPrice * (line.quantity - availableQty);
+    const refundedPaise = order.paymentMethod === 'cod'
+      ? null
+      : await refundOrderLine(prisma, order.id, diffPaise, `Seller: sirf ${availableQty} ${line.productName}`);
+
+    const invCfg = await getInventoryConfig(prisma);
+    await prisma.$transaction(async (tx) => {
+      await shrinkReservationForOrderItem(tx as unknown as ReservationTx, line.id, availableQty);
+      // The seller just looked at the shelf: n units exist (all now reserved
+      // for this order) → expected:=n, confidence 0.95, drift clock reset.
+      await applyInventoryEvent(tx as never, {
+        productId: line.productId, shopId: order.shopId,
+        eventType: 'seller_count', qty: availableQty,
+        actorType: 'seller', actorId: sellerUserId,
+        orderId: order.id, orderItemId: line.id,
+        reason: `accept chip: sirf ${availableQty}`,
+      }, invCfg);
+      await tx.orderItem.update({
+        where: { id: line.id },
+        data: {
+          quantity: availableQty,
+          subtotal: line.unitPrice * availableQty,
+          refundedPaise: { increment: diffPaise },
+          verificationFlag: 'accept_confirmed',
+        },
+      });
+      await tx.order.update({
+        where: { id: order.id },
+        data:  { cartSubtotalAtPricing: { decrement: diffPaise }, totalAmount: { decrement: diffPaise } },
+      });
+    });
+    await createCatalogService(prisma, redis).invalidateShopCache(order.shopId);
+
+    emitOrderItemUnavailable({
+      customerId: order.customerId, orderId: order.id,
+      productName: `${line.productName} (sirf ${availableQty})`,
+      refundedPaise: refundedPaise ?? diffPaise, cancelled: false,
+    });
+  }
+
+  async function sellerAcceptOrder(
+    orderId: string,
+    sellerUserId: string,
+    lineOverrides: Array<{ orderItemId: string; availableQty: number }> = [],
+  ) {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: { shop: { include: { seller: { select: { userId: true } } } } },
+      include: {
+        shop: { include: { seller: { select: { userId: true } } } },
+        items: true,
+      },
     });
     if (!order) throw new NotFoundError('Order');
     if (order.shop.seller.userId !== sellerUserId) throw new ForbiddenError('Not your order');
     if (!['paid', 'confirmed'].includes(order.status)) {
       throw new BusinessRuleError('Order accept nahi ho sakta');
     }
+
+    // ── Chip answers (Inventory Engine S2) ────────────────────────────────
+    if (lineOverrides.length > 0) {
+      const byId = new Map(order.items.map((i) => [i.id, i]));
+      const fulfilled = order.items.filter((i) => i.fulfillmentStatus === 'fulfilled');
+      const zeroed = lineOverrides.filter((ov) => {
+        const l = byId.get(ov.orderItemId);
+        return l && l.fulfillmentStatus === 'fulfilled' && Math.floor(ov.availableQty) <= 0;
+      });
+      if (zeroed.length >= fulfilled.length) {
+        // Nothing left to fulfil — that's a rejection, and the reject path owns
+        // the full-refund + rider-release choreography.
+        throw new BusinessRuleError('Saare items available nahi hain — order reject karein');
+      }
+      for (const ov of lineOverrides) {
+        const line = byId.get(ov.orderItemId);
+        if (!line || line.fulfillmentStatus !== 'fulfilled') continue;
+        const n = Math.max(0, Math.floor(ov.availableQty));
+        if (n >= line.quantity) {
+          await prisma.orderItem.update({
+            where: { id: line.id }, data: { verificationFlag: 'accept_confirmed' },
+          }).catch(() => {});
+        } else if (n === 0) {
+          await sellerMarkLineUnavailable(order, line, sellerUserId);
+        } else {
+          await sellerCapLineQty(order, line, n, sellerUserId);
+        }
+      }
+    }
     // Mark explicit seller acceptance so cold-start UI can tell "fresh order" from "seller already advanced past Accept".
     // updateOrderStatus follows so status reaches 'confirmed' for online (paid → confirmed) and stays 'confirmed' for COD.
     await prisma.order.update({
       where: { id: orderId },
       data:  { sellerAcceptedAt: new Date() },
+    });
+    // Inventory Engine: accepting without touching the chips is an IMPLICIT
+    // confirmation of every flagged line — the seller saw the list (design §4.6).
+    await prisma.orderItem.updateMany({
+      where: { orderId, verificationFlag: 'accept_verify_requested' },
+      data:  { verificationFlag: 'accept_confirmed' },
     });
     await updateOrderStatus(orderId, 'confirmed', 'seller', sellerUserId);
     return { message: 'Order accept ho gaya' };
@@ -581,6 +785,20 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     if (order.sellerAcceptedAt) return { autoAccepted: false, reason: 'already_accepted' };
     if (!['paid', 'confirmed'].includes(order.status)) return { autoAccepted: false, reason: 'not_pending' };
 
+    // Inventory Engine gate (design §4.7): blind auto-accept was the one place
+    // the platform MANUFACTURED unverified promises. The order still auto-accepts
+    // (a timer must not strand it), but doubted lines shift their verification
+    // duty to the rider (⚠ confirm on shelf) instead of silently pretending the
+    // seller checked. `auto-accepted with unverified lines` is the canary metric
+    // for both seller disengagement and drift-model miscalibration — watch it.
+    const flagged = await prisma.orderItem.updateMany({
+      where: { orderId, verificationFlag: 'accept_verify_requested' },
+      data:  { verificationFlag: 'rider_verify_requested' },
+    });
+    if (flagged.count > 0) {
+      console.warn(`[inventory] auto-accept with ${flagged.count} unverified line(s) — order ${orderId}`);
+    }
+
     await prisma.order.update({ where: { id: orderId }, data: { sellerAcceptedAt: new Date() } });
     await prisma.sellerProfile.update({
       where: { id: order.shop.sellerId },
@@ -590,7 +808,7 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
     if (order.status === 'paid') {
       await updateOrderStatus(orderId, 'confirmed', 'seller', order.shop.seller.userId, 'Auto-accepted (no seller response)');
     }
-    return { autoAccepted: true, status: 'confirmed' };
+    return { autoAccepted: true, status: 'confirmed', unverifiedLines: flagged.count };
   }
 
   async function sellerRejectOrder(orderId: string, sellerUserId: string, reason: string) {
@@ -796,24 +1014,28 @@ export function createOrdersService(prisma: PrismaClient, redis: Redis) {
       throw new BusinessRuleError('Yeh item pehle hi report ho chuka hai');
     }
 
-    // (a) flip the shop's product out of stock + bust the feed/shop caches.
-    await prisma.product.update({ where: { id: line.productId }, data: { stockStatus: 'out_of_stock' } });
+    // (a) truth-grade belief update (Inventory Engine): the rider looked at the
+    // shelf. Release the line's hold, zero the belief, floor the confidence, and
+    // project the product out of stock — one transaction. The master-catalog
+    // aggregation keeps the customer-facing tile alive if a peer shop covers it.
+    const invCfg = await getInventoryConfig(prisma);
+    await prisma.$transaction(async (tx) => {
+      await releaseReservationForOrderItem(
+        tx as unknown as ReservationTx, orderItemId,
+        { role: 'rider', id: userId }, invCfg, new Date(), 'rider reported missing',
+      );
+      await applyInventoryEvent(tx as never, {
+        productId: line.productId, shopId: order.shopId,
+        eventType: 'rider_reported_missing',
+        actorType: 'rider', actorId: userId,
+        orderId, orderItemId,
+        reason: `rider miss: ${line.productName}`,
+      }, invCfg);
+    });
     await createCatalogService(prisma, redis).invalidateShopCache(order.shopId);
 
     // (c) substitute: cheapest OTHER in-stock shop carrying the same master.
-    let suggestion: { productId: string; name: string; pricePaise: number } | undefined;
-    const prod = await prisma.product.findUnique({ where: { id: line.productId }, select: { masterId: true } });
-    if (prod?.masterId) {
-      const alt = await prisma.product.findFirst({
-        where: {
-          masterId: prod.masterId, isActive: true, stockStatus: 'available',
-          shop: { isActive: true, isOpen: true }, id: { not: line.productId },
-        },
-        orderBy: { price: 'asc' },
-        select: { id: true, name: true, price: true },
-      });
-      if (alt) suggestion = { productId: alt.id, name: alt.name, pricePaise: alt.price };
-    }
+    const suggestion = await findSubstitute(line.productId);
 
     // (b) refund / cancel.
     if (order.items.length === 1) {

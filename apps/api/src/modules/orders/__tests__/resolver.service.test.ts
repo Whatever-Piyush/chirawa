@@ -9,7 +9,37 @@ const line = (key: string, masterId: string, over: Partial<AggLine> = {}): AggLi
   key, masterId, quantity: 1, displayedUnitPrice: 100, ...over,
 });
 const cand = (shopId: string, productId: string, price: number, over: Partial<Candidate> = {}): Candidate => ({
-  shopId, productId, price, stockQty: null, lat: 0, lng: 0, ...over,
+  shopId, productId, price, effectiveQty: null, lat: 0, lng: 0, ...over,
+});
+
+describe('resolveAggregatedLines — shop cap + trace (Inventory Engine)', () => {
+  it('drops lines the maxShops cap cannot cover instead of opening a third shop', () => {
+    // Three lines, each only available at a DIFFERENT shop → needs 3 shops.
+    const lines = [line('x', 'mX'), line('y', 'mY'), line('z', 'mZ')];
+    const candidates = new Map<string, Candidate[]>([
+      ['mX', [cand('A', 'pX', 100)]],
+      ['mY', [cand('B', 'pY', 100)]],
+      ['mZ', [cand('C', 'pZ', 100)]],
+    ]);
+    const { assignments, dropped, trace } = resolveAggregatedLines(lines, candidates, HERE, { maxShops: 2 });
+    expect(assignments.size).toBe(2);
+    expect(dropped).toHaveLength(1);
+    expect(trace.maxShops).toBe(2);
+    expect(trace.chosen).toHaveLength(2);
+  });
+
+  it('records every candidate with its viability in the trace', () => {
+    const lines = [line('x', 'mX', { quantity: 5 })];
+    const candidates = new Map<string, Candidate[]>([
+      ['mX', [cand('SHORT', 'pS', 80, { effectiveQty: 2, confidence: 0.9 }), cand('FULL', 'pF', 90, { effectiveQty: 8, confidence: 0.7 })]],
+    ]);
+    const { assignments, trace } = resolveAggregatedLines(lines, candidates, HERE);
+    expect(assignments.get('x')?.shopId).toBe('FULL');
+    expect(trace.lines[0]!.candidates).toEqual([
+      expect.objectContaining({ shopId: 'SHORT', viable: false }),
+      expect.objectContaining({ shopId: 'FULL', viable: true, confidence: 0.7 }),
+    ]);
+  });
 });
 
 describe('resolveAggregatedLines (Phase 5 checkout resolver)', () => {
@@ -75,7 +105,7 @@ describe('resolveAggregatedLines (Phase 5 checkout resolver)', () => {
     const lines = [line('x', 'mX', { quantity: 5 })];
     const candidates = new Map<string, Candidate[]>([
       // Cheapest shop only has 3 (not enough); the in-stock fallback has unlimited.
-      ['mX', [cand('LOW', 'pLow', 80, { stockQty: 3 }), cand('OK', 'pOk', 100, { stockQty: null })]],
+      ['mX', [cand('LOW', 'pLow', 80, { effectiveQty: 3 }), cand('OK', 'pOk', 100, { effectiveQty: null })]],
     ]);
     const { assignments, dropped } = resolveAggregatedLines(lines, candidates, HERE);
     expect(dropped).toEqual([]);
@@ -84,7 +114,7 @@ describe('resolveAggregatedLines (Phase 5 checkout resolver)', () => {
 
   it('drops a line when no candidate can cover the requested quantity', () => {
     const lines = [line('x', 'mX', { quantity: 9 })];
-    const candidates = new Map<string, Candidate[]>([['mX', [cand('LOW', 'pLow', 80, { stockQty: 3 })]]]);
+    const candidates = new Map<string, Candidate[]>([['mX', [cand('LOW', 'pLow', 80, { effectiveQty: 3 })]]]);
     const { assignments, dropped } = resolveAggregatedLines(lines, candidates, HERE);
     expect(dropped).toEqual(['x']);
     expect(assignments.size).toBe(0);

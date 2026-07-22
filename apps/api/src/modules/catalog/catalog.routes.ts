@@ -6,13 +6,15 @@ import { createMasterService } from './master.service';
 import { createAggregationService } from './aggregation.service';
 import { createRequestsService } from './requests.service';
 import {
-  createProductSchema, updateProductSchema, setStockQtySchema, stockThisSchema,
+  createProductSchema, updateProductSchema, setStockQtySchema, verifyShelfSchema, stockThisSchema,
   bulkStockSchema,
   createCategorySchema, updateCategorySchema,
   createVariantSchema, updateVariantSchema, createRequestSchema,
 } from './catalog.schema';
 import { authenticate, requireRole } from '../../shared/middleware/auth.middleware';
 import { ValidationError, ForbiddenError, NotFoundError } from '../../shared/errors/app-errors';
+import { applyInventoryEvent } from '../inventory/apply-event';
+import { getInventoryConfig } from '../inventory/inventory.config';
 import { processImage } from '../../services/image-pipeline';
 import { createOffLiveSource } from '../../services/off-live';
 import { ALLOWED_IMAGE_MIME } from '../../services/r2.service';
@@ -159,20 +161,36 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
       }
 
       const oldStatus = product.stockStatus;
-      const updated   = await app.prisma.product.update({
-        where: { id: request.params.id },
-        data:  { stockStatus },
-      });
+      let newStatus: 'available' | 'out_of_stock' | 'hidden';
 
-      // Log stock change
-      await app.prisma.stockUpdateLog.create({
-        data: {
-          productId:   product.id,
-          updatedById: request.auth!.userId,
-          fromStatus:  oldStatus,
-          toStatus:    stockStatus,
-        },
-      });
+      if (stockStatus === 'hidden') {
+        // Merchandising visibility — not an inventory fact. Direct write + the
+        // legacy toggle log (the belief layer never touches 'hidden').
+        await app.prisma.product.update({ where: { id: request.params.id }, data: { stockStatus } });
+        await app.prisma.stockUpdateLog.create({
+          data: {
+            productId:   product.id,
+            updatedById: request.auth!.userId,
+            fromStatus:  oldStatus,
+            toStatus:    stockStatus,
+          },
+        });
+        newStatus = 'hidden';
+      } else {
+        // Availability toggles are BELIEF events (Inventory Engine): the seller
+        // just looked at the shelf. seller_toggle_out zeroes a tracked belief;
+        // seller_toggle_in restores the bucket default. Both project stockStatus.
+        const cfg = await getInventoryConfig(app.prisma);
+        const actorType = request.auth!.role === 'admin' ? 'admin' as const : 'seller' as const;
+        const result = await app.prisma.$transaction(async (tx) =>
+          applyInventoryEvent(tx as never, {
+            productId: product.id, shopId: product.shopId,
+            eventType: stockStatus === 'available' ? 'seller_toggle_in' : 'seller_toggle_out',
+            actorType, actorId: request.auth!.userId,
+          }, cfg),
+        );
+        newStatus = result.stockStatusTo;
+      }
 
       // Invalidate catalog cache
       await catalogService.invalidateShopCache(product.shopId);
@@ -180,11 +198,11 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
       // Restock notify (Phase 6): when a master-linked product flips back to
       // available, FCM the customers who requested it. Non-blocking — the toggle
       // must never fail on a notification hiccup.
-      if (oldStatus !== 'available' && stockStatus === 'available' && product.masterId) {
+      if (oldStatus !== 'available' && newStatus === 'available' && product.masterId) {
         void requestsService.notifyRestock(product.masterId).catch(() => {});
       }
 
-      return reply.send({ id: updated.id, stockStatus: updated.stockStatus, message: 'Stock update ho gaya' });
+      return reply.send({ id: product.id, stockStatus: newStatus, message: 'Stock update ho gaya' });
     },
   );
 
@@ -222,6 +240,20 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
   app.patch('/products/:id/stock-qty', writeGuard, async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
     const { stockQty } = parse(setStockQtySchema, request.body);
     return reply.send(await inventoryService.setStockQty(request.params.id, stockQty, authCtx(request)));
+  });
+
+  // PATCH /api/v1/catalog/products/:id/verify — shelf verification (Inventory
+  // Engine S5): the morning card / restock prompt answer. Three thumb-sized
+  // states (have/low/out) + optional exact qty for head-list counts.
+  app.patch('/products/:id/verify', writeGuard, async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    const { state, qty } = parse(verifyShelfSchema, request.body);
+    const result = await inventoryService.verifyShelf(request.params.id, state, qty, authCtx(request));
+    // Restock notify (Phase 6): a verify that brings a master-linked item back
+    // to available triggers the "notify me" fan-out — same as the toggle route.
+    if (result.restocked && result.masterId) {
+      void requestsService.notifyRestock(result.masterId).catch(() => {});
+    }
+    return reply.send({ id: result.id, stockQty: result.stockQty, stockStatus: result.stockStatus, message: 'Verify ho gaya' });
   });
 
   // POST /api/v1/catalog/categories

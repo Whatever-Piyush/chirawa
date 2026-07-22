@@ -125,8 +125,11 @@ export const SellerApi = {
   getOrders: (token: string) =>
     request<unknown[]>('GET', '/orders', undefined, token),
 
-  acceptOrder: (orderId: string, token: string) =>
-    request('POST', `/orders/${orderId}/accept`, {}, token),
+  // lineOverrides (Inventory Engine chips): [{ orderItemId, availableQty }] —
+  // 0 = "नहीं" (line refunds), < ordered = "सिर्फ n" (line shrinks). Omit for
+  // the normal 1-tap accept.
+  acceptOrder: (orderId: string, token: string, lineOverrides?: Array<{ orderItemId: string; availableQty: number }>) =>
+    request('POST', `/orders/${orderId}/accept`, lineOverrides?.length ? { lineOverrides } : {}, token),
 
   rejectOrder: (orderId: string, reason: string, token: string) =>
     request('POST', `/orders/${orderId}/reject`, { reason }, token),
@@ -215,6 +218,16 @@ export const SellerApi = {
 
   setStockQty: (productId: string, stockQty: number, token: string) =>
     request('PATCH', `/catalog/products/${productId}/stock-qty`, { stockQty }, token),
+
+  // ── Inventory Engine: shelf verification + morning card ──────────────────
+  // है/कम/नहीं shelf answer; an exact qty upgrades the bucket to a count.
+  verifyShelf: (productId: string, state: 'have' | 'low' | 'out', qty: number | undefined, token: string) =>
+    request<{ id: string; stockQty: number | null; stockStatus: string }>(
+      'PATCH', `/catalog/products/${productId}/verify`, qty != null ? { state, qty } : { state }, token),
+
+  // Today's ≤N most-doubted tracked items — computed fresh on every read.
+  getMorningCard: (token: string) =>
+    request<{ items: MorningCardItem[] }>('GET', '/sellers/me/morning-card', undefined, token),
 
   createCategory: (shopId: string, name: string, token: string) =>
     request<{ id: string; name: string }>('POST', '/catalog/categories', { shopId, name }, token),
@@ -342,6 +355,16 @@ export interface StockThisInput {
 export interface ImportReport {
   created: number; updated: number; skipped: number;
   errors: Array<{ row: number; reason: string }>;
+}
+
+// Morning verification card (Inventory Engine S5).
+export interface MorningCardItem {
+  productId: string;
+  name: string;
+  imageUrl: string | null;
+  expectedQty: number;
+  confidence: number;
+  priority: number;
 }
 
 export interface SalesWindow { orders: number; valuePaise: number }

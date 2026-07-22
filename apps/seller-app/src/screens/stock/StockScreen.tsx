@@ -5,12 +5,15 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, FontSize, Radius, Shadow } from '../../theme';
 import { SellerApi, UploadError, type ProductInput, type StockThisInput } from '../../services/api.service';
 import { saveStockThis, flushQueue } from '../../services/offline-queue';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { useAuth } from '../../context/AuthContext';
+import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // mirrors the API's 5 MB upload cap
 
@@ -59,6 +62,7 @@ const EMPTY_FORM: FormState = {
 
 export default function StockScreen() {
   const { state }               = useAuth();
+  const navigation              = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [shop, setShop]         = useState<ShopData | null>(null);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState(false);
@@ -558,6 +562,11 @@ export default function StockScreen() {
             </Pressable>
           </View>
         : <View style={styles.body}>
+            {/* Morning verification card entry (Inventory Engine S5) */}
+            <Pressable style={styles.morningBanner} onPress={() => navigation.navigate('MorningCard')}>
+              <Text style={styles.morningBannerText}>☀️ आज का स्टॉक चेक — 1 मिनट</Text>
+              <Text style={styles.morningBannerArrow}>→</Text>
+            </Pressable>
             {/* Persistent inventory search — client-side, matches name + unit (Sprint 2).
                 Shown while there is anything to search, or while a query is active so
                 the seller can always clear it. */}
@@ -860,6 +869,15 @@ const styles = StyleSheet.create({
   importBtnText: { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
   scanBtn:     { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.md, minWidth: 72, alignItems: 'center' },
   scanBtnText: { color: Colors.white, fontWeight: '700', fontSize: FontSize.sm },
+  // Morning card banner (Inventory Engine S5)
+  morningBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginHorizontal: Spacing.lg, marginTop: Spacing.md,
+    backgroundColor: Colors.accent, borderRadius: Radius.md,
+    paddingVertical: Spacing.md, paddingHorizontal: Spacing.lg,
+  },
+  morningBannerText:  { color: Colors.white, fontWeight: '800', fontSize: FontSize.md },
+  morningBannerArrow: { color: Colors.white, fontWeight: '900', fontSize: FontSize.lg },
   empty:       { textAlign: 'center', color: Colors.textMuted, marginTop: Spacing.xl, fontSize: FontSize.md },
   // inventory search (Sprint 2)
   body:        { flex: 1 },
